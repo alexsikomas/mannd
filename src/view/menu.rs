@@ -1,5 +1,9 @@
 use log::warn;
-use std::fs;
+use std::{
+    fs,
+    os::unix::process::CommandExt,
+    process::{Command, Output},
+};
 
 pub struct Menu {
     show_license: bool,
