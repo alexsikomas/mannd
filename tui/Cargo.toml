@@ -1,0 +1,19 @@
+[package]
+name = "tui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+color-eyre = "0.6.5"
+com = { path = "../com" }
+crossterm = "0.29.0"
+ratatui = "0.29.0"
+serde = "1.0.226"
+tokio = { version = "1.47.1", features = ["full"] }
+toml = "0.9.7"
+tracing = "0.1.41"
+tracing-error = "0.2.1"
+tracing-subscriber = "0.3.20"
+
+[target.'cfg(target_os = "linux")']
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]

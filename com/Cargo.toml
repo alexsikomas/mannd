@@ -1,0 +1,22 @@
+[package]
+name = "com"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+async-trait = "0.1.89"
+neli = { version = "0.7.1", features = ["async", "tokio"] }
+neli-proc-macros = "0.2.1"
+quick-xml = { version = "0.38.3", features = ["async-tokio"] }
+thiserror = "2.0.16"
+tokio = { version = "1.47.1", features = ["full"] }
+tracing = "0.1.41"
+zbus = { version = "5.10.0", features = ["tokio"] }
+zbus_systemd = { version = "0.25701.0", features = [
+  "network1",
+  "resolve1",
+  "systemd1",
+] }
+
+[build-dependencies]
+which = { version = "8.0.0" }

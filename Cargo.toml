@@ -1,0 +1,9 @@
+[workspace]
+resolver = "3"
+members = ["com", "tui"]
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = "z"
