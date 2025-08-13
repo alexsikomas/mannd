@@ -5,6 +5,8 @@ use std::{
     process::{Command, Output},
 };
 
+use crate::cli::{commands, folders::Folders};
+
 pub struct Menu {
     show_license: bool,
 }
@@ -26,9 +28,11 @@ impl Menu {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
-                if ui.button("License").clicked() {
-                    self.show_license = !self.show_license;
-                };
+                ui.menu_button("Help", |ui| {
+                    if ui.button("License").clicked() {
+                        self.show_license = !self.show_license;
+                    };
+                });
                 if self.show_license {
                     self.license_viewport(ctx);
                 }
@@ -57,7 +61,7 @@ impl Menu {
                         egui::CentralPanel::default().show(ctx, |ui| ui.label(text));
                     }
                     Err(e) => {
-                        warn!("Could not locate LICENSE file!")
+                        warn!("Could not locate LICENSE file! Error: {e}")
                     }
                 };
             },

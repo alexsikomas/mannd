@@ -1,12 +1,20 @@
 use std::process::Command;
 
-fn get_networkd() {
-    let mut ls = Command::new("ls");
-    ls.arg("/etc/systemd/network/");
-    match str::from_utf8(&ls.output().unwrap().stdout) {
-        Ok(val) => {
-            println!("{:?}", val);
-        }
-        Err(_) => panic!("Could not read from /etc/systemd/network/"),
+use serde_json::Value;
+
+/// Returns the default interface
+pub fn get_default_interface() -> Result<String, Box<dyn std::error::Error>> {
+    let ip = Command::new("ip").args(["-j", "route", "show"]).output()?;
+
+    if !ip.status.success() {
+        return Err(format!(
+            "commands.rs:get_default_inferface() failed.\nError: {}",
+            String::from_utf8_lossy(&ip.stderr)
+        )
+        .into());
     }
+    let json: Value = serde_json::from_str(&String::from_utf8_lossy(&ip.stdout))?;
+
+    // TODO: Handle errors to fix panic, i.e. not arr, empty arr, no dev key
+    Ok(json[0]["dev"].to_string())
 }
