@@ -1,11 +1,11 @@
 <div align="center">
-    <img src="./svgs/banner.svg" alt="Banner" style="border-radius: 15px;">
+    <img src="./svgs/banner.png" alt="Banner" style="border-radius: 15px;">
 </div>
 
 <hr style="visibility: hidden"/>
 
 <p align="center">
-<img src="./svgs/overview.svg" alt="Overview" style="border-radius: 15px;">
+<img src="./svgs/overview.png" alt="Overview" style="border-radius: 15px;">
 </p>
 
 <p align="center">
@@ -15,7 +15,7 @@
 <hr style="visibility: hidden"/>
 
 <p align="center">
-<img src="./svgs/install.svg" alt="Install" style="border-radius: 15px;">
+<img src="./svgs/install.png" alt="Install" style="border-radius: 15px;">
 </p>
 
 ### Acknowledgements
