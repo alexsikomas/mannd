@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use serde_json::Value;
+use serde_json::{from_str, Value};
 
 /// Returns the default interface
 pub fn get_default_interface() -> Result<String, Box<dyn std::error::Error>> {
@@ -13,7 +13,7 @@ pub fn get_default_interface() -> Result<String, Box<dyn std::error::Error>> {
         )
         .into());
     }
-    let json: Value = serde_json::from_str(&String::from_utf8_lossy(&ip.stdout))?;
+    let json: Value = from_str(&String::from_utf8_lossy(&ip.stdout))?;
 
     // TODO: Handle errors to fix panic, i.e. not arr, empty arr, no dev key
     Ok(json[0]["dev"].to_string())

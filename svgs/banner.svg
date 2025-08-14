@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="1280"
+   height="427"
+   viewBox="0 0 338.66663 112.97707"
+   version="1.1"
+   id="svg1"
+   inkscape:version="1.4.2 (ebf0e940d0, 2025-05-08)"
+   sodipodi:docname="banner.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#505050"
+     inkscape:document-units="px"
+     inkscape:zoom="1.7442901"
+     inkscape:cx="652.41441"
+     inkscape:cy="252.82492"
+     inkscape:window-width="3426"
+     inkscape:window-height="1401"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1" />
+  <defs
+     id="defs1" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <rect
+       style="fill:#1c2021;fill-opacity:1;stroke-width:0.264583"
+       id="rect1"
+       width="369.50558"
+       height="123.01685"
+       x="-14.964422"
+       y="-3.3370783" />
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:33.8667px;font-family:Outfit;-inkscape-font-specification:Outfit;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#1c2021;fill-opacity:1;stroke-width:0.264583"
+       x="15.663669"
+       y="39.197697"
+       id="text1"
+       inkscape:label="networkd"><tspan
+         sodipodi:role="line"
+         style="font-size:33.8667px;fill:#eadbb4;fill-opacity:1;stroke-width:0.264583"
+         x="15.663669"
+         y="39.197697"
+         id="tspan2">network<tspan
+   style="fill:#8a9a5b;fill-opacity:1"
+   id="tspan9">d</tspan></tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:33.8667px;font-family:Outfit;-inkscape-font-specification:Outfit;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke-width:0.264583"
+       x="168.54114"
+       y="39.197701"
+       id="text3"
+       inkscape:label="wireguard"><tspan
+         sodipodi:role="line"
+         style="font-size:33.8667px;fill:#eadbb4;fill-opacity:1;stroke-width:0.264583"
+         x="168.54114"
+         y="39.197701"
+         id="tspan4">wireguar<tspan
+   style="fill:#8a9a5b;fill-opacity:1"
+   id="tspan6">d</tspan></tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:38.1px;line-height:0;font-family:Outfit;-inkscape-font-specification:Outfit;text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#ffffff;fill-opacity:1;stroke-width:1.40469"
+       x="54.973331"
+       y="83.323174"
+       id="text5"
+       inkscape:label="manager"><tspan
+         sodipodi:role="line"
+         style="font-size:38.1px;line-height:0;fill:#eadbb4;fill-opacity:1;stroke-width:1.40469"
+         x="54.973331"
+         y="83.323174"
+         id="tspan7"
+         dy="1.5 -1.5 0 0 0 0 0 0 -3.1199999 0 0 0 3.1199999 1.5"><tspan
+   style="fill:#8a9a5b;fill-opacity:0.396071"
+   id="tspan5">/</tspan> <tspan
+   style="fill:#8a9a5b;fill-opacity:1"
+   id="tspan10">man</tspan> <tspan
+   style="font-size:7.76111px;fill:#8a9a5b;fill-opacity:0.59931"
+   id="tspan1"
+   dy="-7.9400001">⬤</tspan><tspan
+   style="font-size:38.1px;line-height:0;fill:#eadbb4;fill-opacity:1"
+   id="tspan8"
+   dx="0.94999999"
+   dy="10.309993"> </tspan><tspan
+   style="fill:#8a9a5b;fill-opacity:1"
+   id="tspan11">ager</tspan> <tspan
+   style="fill:#8a9a5b;fill-opacity:0.401365"
+   id="tspan3">/</tspan></tspan></text>
+  </g>
+</svg>
