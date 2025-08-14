@@ -24,43 +24,27 @@ impl Menu {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
+
                 ui.menu_button("Help", |ui| {
                     if ui.button("License").clicked() {
                         self.show_license = !self.show_license;
                     };
                 });
+
                 if self.show_license {
-                    self.license_viewport(ctx);
+                    let window = egui::Window::new("License");
+                    window.open(&mut self.show_license).show(ctx, |ui| {
+                        match fs::read_to_string("LICENSE") {
+                            Ok(text) => {
+                                ui.label(text);
+                            }
+                            Err(e) => {
+                                warn!("Could not load LICENSE file!, Error: {e}");
+                            }
+                        }
+                    });
                 }
             });
         });
-    }
-
-    fn license_viewport(&mut self, ctx: &egui::Context) {
-        ctx.show_viewport_immediate(
-            egui::ViewportId::from_hash_of("License"),
-            egui::ViewportBuilder::default()
-                .with_title("License")
-                .with_inner_size([200.0, 200.0]),
-            |ctx, class| {
-                assert!(
-                    class == egui::ViewportClass::Immediate,
-                    "This egui backend doesn't support multiple viewports"
-                );
-
-                if ctx.input(|i| i.viewport().close_requested()) {
-                    self.show_license = false;
-                }
-
-                match fs::read_to_string("LICENSE") {
-                    Ok(text) => {
-                        egui::CentralPanel::default().show(ctx, |ui| ui.label(text));
-                    }
-                    Err(e) => {
-                        warn!("Could not locate LICENSE file! Error: {e}")
-                    }
-                };
-            },
-        );
     }
 }
