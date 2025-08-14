@@ -22,6 +22,33 @@ impl Default for Folders {
 }
 
 impl Folders {
+    /// Creates a new `Folders` instance
+    ///
+    /// Ensures that configuration directory and files exist
+    pub fn new() -> io::Result<Self> {
+        let ins = Self::default();
+        let mut config_path: PathBuf;
+
+        if let Some(path) = dirs::config_dir() {
+            config_path = path;
+        } else {
+            println!("Could not find config directory from dirs");
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Could not find config directory",
+            ));
+        }
+
+        config_path.push("networkd-wireguard-manager");
+        fs::create_dir_all(&config_path)?;
+
+        config_path.push("config.toml");
+        fs::File::create_new(&config_path)?;
+
+        // TODO: update wireguard_folders, network_folder based on config
+
+        Ok(ins)
+    }
     /// Reads the network files in `network_folder` and returns a vector of
     /// directory entries
     ///
