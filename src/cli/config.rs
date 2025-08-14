@@ -5,14 +5,14 @@ use std::{
 };
 
 /// A collection paths to various configuration folders
-pub struct Folders {
+pub struct Config {
     /// A vector of paths pointing to Wireguard configuration folders
     wireguard_folders: Vec<PathBuf>,
     /// Defaults to `/etc/systemd/network/`
     network_folder: PathBuf,
 }
 
-impl Default for Folders {
+impl Default for Config {
     fn default() -> Self {
         Self {
             wireguard_folders: Vec::new(),
@@ -21,7 +21,7 @@ impl Default for Folders {
     }
 }
 
-impl Folders {
+impl Config {
     /// Creates a new `Folders` instance
     ///
     /// Ensures that configuration directory and files exist

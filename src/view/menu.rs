@@ -1,8 +1,6 @@
 use log::warn;
 use std::fs;
 
-use crate::cli::{commands, folders::Folders};
-
 pub struct Menu {
     show_license: bool,
 }

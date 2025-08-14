@@ -1,2 +1,2 @@
 pub mod commands;
-pub mod folders;
+pub mod config;

@@ -1,8 +1,12 @@
-use crate::view::{main_view::MainView, menu::Menu};
+use crate::{
+    cli::config::Config,
+    view::{main_view::MainView, menu::Menu},
+};
 
 pub struct App {
     menu: Menu,
     main_view: MainView,
+    config: Config,
 }
 
 impl Default for App {
@@ -10,6 +14,7 @@ impl Default for App {
         Self {
             menu: Menu::default(),
             main_view: MainView::default(),
+            config: Config::new().unwrap(),
         }
     }
 }
