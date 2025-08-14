@@ -1,9 +1,5 @@
 use log::warn;
-use std::{
-    fs,
-    os::unix::process::CommandExt,
-    process::{Command, Output},
-};
+use std::fs;
 
 use crate::cli::{commands, folders::Folders};
 

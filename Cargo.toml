@@ -1,3 +1,5 @@
+cargo-features = ["codegen-backend"]
+
 [package]
 name = "networkd-wireguard-manager"
 version = "0.1.0"
@@ -5,8 +7,10 @@ edition = "2024"
 
 [package.metadata.docs.rs]
 all-features = true
-targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
+targets = ["x86_64-unknown-linux-gnu"]
 
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 
 [dependencies]
 egui = "0.32.0"
@@ -18,18 +22,24 @@ eframe = {version = "0.32.0", default-features=false, features = [
     "x11",
 ]}
 log = "0.4.27"
-env_logger = "0.11.8"
 serde = "1.0.219"
 serde_json = "1.0.142"
+egui-file-dialog = "0.11.0"
+
+
+
+[profile.dev]
+opt-level = 0
+debug = 1
+codegen-backend = "cranelift"
+
 
 [profile.dev.package."*"]
-opt-level = 2
+codegen-backend = "llvm"
+opt-level = 3
 
 [profile.release]
-opt-level = 2
-
-[target.dependencies]
-env_logger = "0.11.8"
+opt-level = 3
 
 [patch.crates-io]
 
