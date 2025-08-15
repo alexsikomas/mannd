@@ -43,7 +43,11 @@ impl Config {
         fs::create_dir_all(&config_path)?;
 
         config_path.push("config.toml");
-        fs::File::create_new(&config_path)?;
+        if let Err(e) = fs::File::create_new(&config_path) {
+            if e.kind() != io::ErrorKind::AlreadyExists {
+                return Err(e);
+            }
+        }
 
         // TODO: update wireguard_folders, network_folder based on config
 
