@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use egui::Ui;
+use egui::{Button, CornerRadius, Margin, Ui};
 use egui_file_dialog::FileDialog;
 
 #[derive(PartialEq)]
 enum ConfigOptions {
     WireGuard,
-    Other,
+    Network,
 }
 
 pub struct MainView {
@@ -48,7 +48,11 @@ impl MainView {
                         ConfigOptions::WireGuard,
                         "WireGuard",
                     );
-                    ui.selectable_value(&mut self.config_options, ConfigOptions::Other, "Other");
+                    ui.selectable_value(
+                        &mut self.config_options,
+                        ConfigOptions::Network,
+                        "Network",
+                    );
                 });
                 ui.separator();
 
@@ -56,8 +60,8 @@ impl MainView {
                     ConfigOptions::WireGuard => {
                         Self::config_wg_view(ui, &mut self.file_dialog);
                     }
-                    ConfigOptions::Other => {
-                        Self::config_other_view(ui);
+                    ConfigOptions::Network => {
+                        Self::config_network_view(ui);
                     }
                 }
             });
@@ -83,5 +87,24 @@ impl MainView {
         });
     }
 
-    fn config_other_view(ui: &mut Ui) {}
+    fn config_network_view(ui: &mut Ui) {
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.label("Systemd Network Folder: ");
+            egui::Frame::none()
+                .fill(egui::Color32::from_rgb(50, 50, 50))
+                .inner_margin(Margin::same(4))
+                .corner_radius(CornerRadius::same(5))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("/etc/systemd/network/");
+                        if ui
+                            .add(egui::Button::new("...").fill(egui::Color32::from_rgb(90, 90, 90)))
+                            .clicked()
+                        {
+                            println!("CLICKED");
+                        }
+                    })
+                })
+        });
+    }
 }

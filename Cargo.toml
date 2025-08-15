@@ -14,13 +14,14 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 
 [dependencies]
 egui = "0.32.0"
-eframe = {version = "0.32.0", default-features=false, features = [
+eframe = { version = "0.32.0", default-features = false, features = [
     "default_fonts",
     "glow",
     "persistence",
     "wayland",
     "x11",
-]}
+    "serde",
+] }
 log = "0.4.27"
 serde = "1.0.219"
 serde_json = "1.0.142"
@@ -28,7 +29,6 @@ egui-file-dialog = "0.11.0"
 dirs = "6.0.0"
 toml = "0.9.5"
 toml_edit = "0.23.3"
-
 
 
 [profile.dev]
@@ -90,7 +90,7 @@ disallowed_methods = "warn"
 disallowed_names = "warn"
 disallowed_script_idents = "warn"
 disallowed_types = "warn"
-doc_include_without_cfg  = "warn"
+doc_include_without_cfg = "warn"
 doc_link_with_quotes = "warn"
 doc_markdown = "warn"
 empty_enum = "warn"
