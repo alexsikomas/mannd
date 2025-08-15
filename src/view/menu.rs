@@ -32,6 +32,7 @@ impl Menu {
                 if self.show_license {
                     let window = egui::Window::new("License");
                     window.open(&mut self.show_license).show(ctx, |ui| {
+                        // TODO: Include at compile time for ease of distribution
                         match fs::read_to_string("LICENSE") {
                             Ok(text) => {
                                 ui.label(text);

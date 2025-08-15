@@ -4,21 +4,16 @@ use std::{
     path::PathBuf,
 };
 
-use toml_edit::{value, DocumentMut};
-
-/// A collection paths to various configuration folders
 pub struct Config {
-    /// A vector of paths pointing to Wireguard configuration folders
-    wireguard_folders: Vec<PathBuf>,
-    /// Defaults to `/etc/systemd/network/`
-    network_folder: PathBuf,
+    wireguard: Wireguard,
+    interface: Interface,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            wireguard_folders: Vec::new(),
-            network_folder: PathBuf::from("/etc/systemd/network/"),
+            wireguard: Wireguard::default(),
+            interface: Interface::default(),
         }
     }
 }
@@ -28,7 +23,8 @@ impl Config {
     ///
     /// Ensures that configuration directory and files exist
     pub fn new() -> io::Result<Self> {
-        let ins = Self::default();
+        // TODO: Check for /etc/systemd/network/, if !exists prompt for location possibly panic
+        let config = Self::default();
         let mut config_path: PathBuf;
 
         if let Some(path) = dirs::config_dir() {
@@ -51,17 +47,18 @@ impl Config {
             }
         }
 
-        Self::create_default_config();
+        // Self::create_default_config(config_path);
         // TODO: update wireguard_folders, network_folder based on config
 
-        Ok(ins)
+        Ok(config)
     }
+
     /// Reads the network files in `network_folder` and returns a vector of
     /// directory entries
     ///
     /// Entries which return `io::Error` are ignored
     pub fn get_network_files(&self) -> io::Result<Vec<DirEntry>> {
-        Ok(fs::read_dir(&self.network_folder)?
+        Ok(fs::read_dir(&self.interface.path)?
             .filter_map(Result::ok)
             .collect())
     }
@@ -69,28 +66,49 @@ impl Config {
     /// Returns a list of files found in the `wireguard_folders` non-recursively
     pub fn get_wg_files(&self) -> io::Result<Vec<DirEntry>> {
         let mut files: Vec<DirEntry> = vec![];
-        for dir in &self.wireguard_folders {
+        for dir in &self.wireguard.folders {
             for file in fs::read_dir(dir)? {
                 files.push(file?);
             }
         }
         Ok(files)
     }
+}
 
-    /// Creates the default TOML config file
-    fn create_default_config() {
-        let toml = r#"
-        [file]
-        wireguard = []
-        network = ""
-        interface = ""
+struct Wireguard {
+    /// Folders containing wireguard configuration files
+    folders: Vec<PathBuf>,
+    /// Path to a wireguard configuration file
+    selected_file: PathBuf,
+    /// Should the wireguard config of `selected_file` be active
+    enabled: bool,
+}
 
-        [wireguard]
-        enable = false
-        selected = ""
-        "#;
+impl Default for Wireguard {
+    fn default() -> Self {
+        Self {
+            folders: Vec::new(),
+            selected_file: PathBuf::new(),
+            enabled: false,
+        }
+    }
+}
 
-        let mut doc = toml.parse::<DocumentMut>().expect("Invalid TOML");
-        println!("{:?}", doc["file"]["network"]);
+struct Interface {
+    /// Name of the active interface
+    active_interface: String,
+    /// Should the `active_interface` start on boot
+    start_on_boot: bool,
+    /// Network config path
+    path: PathBuf,
+}
+
+impl Default for Interface {
+    fn default() -> Self {
+        Self {
+            active_interface: "".to_string(),
+            start_on_boot: false,
+            path: PathBuf::from("/etc/systemd/network/"),
+        }
     }
 }
