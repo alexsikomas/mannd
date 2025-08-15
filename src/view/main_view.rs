@@ -73,9 +73,14 @@ impl MainView {
     }
 
     fn config_wg_view(ui: &mut Ui, fd: &mut FileDialog) {
-        if ui.button("Add Folder").clicked() {
+        let wg_button = ui.button("Add WireGuard Folder");
+        if wg_button.clicked() {
             fd.pick_directory();
         };
+
+        wg_button.on_hover_ui_at_pointer(|ui| {
+            ui.label("Adds a WireGuard Folder to the list of tracked folders");
+        });
     }
 
     fn config_other_view(ui: &mut Ui) {}

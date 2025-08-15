@@ -4,6 +4,8 @@ use std::{
     path::PathBuf,
 };
 
+use toml_edit::{value, DocumentMut};
+
 /// A collection paths to various configuration folders
 pub struct Config {
     /// A vector of paths pointing to Wireguard configuration folders
@@ -49,6 +51,7 @@ impl Config {
             }
         }
 
+        Self::create_default_config();
         // TODO: update wireguard_folders, network_folder based on config
 
         Ok(ins)
@@ -72,5 +75,22 @@ impl Config {
             }
         }
         Ok(files)
+    }
+
+    /// Creates the default TOML config file
+    fn create_default_config() {
+        let toml = r#"
+        [file]
+        wireguard = []
+        network = ""
+        interface = ""
+
+        [wireguard]
+        enable = false
+        selected = ""
+        "#;
+
+        let mut doc = toml.parse::<DocumentMut>().expect("Invalid TOML");
+        println!("{:?}", doc["file"]["network"]);
     }
 }
