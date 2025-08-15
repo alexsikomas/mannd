@@ -1,9 +1,13 @@
 use std::{
+    fmt::write,
     fs::{self, DirEntry},
     io,
     path::PathBuf,
 };
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
     wireguard: Wireguard,
     interface: Interface,
@@ -24,7 +28,7 @@ impl Config {
     /// Ensures that configuration directory and files exist
     pub fn new() -> io::Result<Self> {
         // TODO: Check for /etc/systemd/network/, if !exists prompt for location possibly panic
-        let config = Self::default();
+        let mut config = Self::default();
         let mut config_path: PathBuf;
 
         if let Some(path) = dirs::config_dir() {
@@ -41,15 +45,21 @@ impl Config {
         fs::create_dir_all(&config_path)?;
 
         config_path.push("config.toml");
-        if let Err(e) = fs::File::create_new(&config_path) {
-            if e.kind() != io::ErrorKind::AlreadyExists {
-                return Err(e);
+        let toml_file = fs::read_to_string(&config_path);
+        config = match toml_file {
+            Ok(data) => toml::from_str(&data).unwrap_or_default(),
+            Err(_) => {
+                let default_config = Self::default();
+                // BUG: will make an empty config if serialisation fails
+                fs::write(
+                    &config_path,
+                    toml::to_string(&default_config).unwrap_or_default(),
+                )?;
+                default_config
             }
-        }
+        };
 
-        // Self::create_default_config(config_path);
-        // TODO: update wireguard_folders, network_folder based on config
-
+        println!("{:?}", config);
         Ok(config)
     }
 
@@ -65,16 +75,15 @@ impl Config {
 
     /// Returns a list of files found in the `wireguard_folders` non-recursively
     pub fn get_wg_files(&self) -> io::Result<Vec<DirEntry>> {
-        let mut files: Vec<DirEntry> = vec![];
+        let mut files = Vec::new();
         for dir in &self.wireguard.folders {
-            for file in fs::read_dir(dir)? {
-                files.push(file?);
-            }
+            files.extend(fs::read_dir(dir)?.filter_map(Result::ok));
         }
         Ok(files)
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 struct Wireguard {
     /// Folders containing wireguard configuration files
     folders: Vec<PathBuf>,
@@ -94,9 +103,10 @@ impl Default for Wireguard {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
 struct Interface {
     /// Name of the active interface
-    active_interface: String,
+    active_interface: Option<String>,
     /// Should the `active_interface` start on boot
     start_on_boot: bool,
     /// Network config path
@@ -106,7 +116,7 @@ struct Interface {
 impl Default for Interface {
     fn default() -> Self {
         Self {
-            active_interface: "".to_string(),
+            active_interface: None,
             start_on_boot: false,
             path: PathBuf::from("/etc/systemd/network/"),
         }

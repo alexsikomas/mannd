@@ -1,8 +1,4 @@
-<div align="center">
-    <img src="./svgs/banner.png" alt="Banner" style="border-radius: 15px;">
-</div>
-
-<hr style="visibility: hidden"/>
+# Networkd Wireguard Manager
 
 <p align="center">
 <img src="./svgs/overview.png" alt="Overview" style="border-radius: 15px;">
