@@ -10,30 +10,32 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     app::{ConfigMessage, Message, PathOptions},
-    cli::config::Config,
+    cli::config::{Config, Wireguard},
 };
 
 #[derive(PartialEq, Serialize, Deserialize)]
-enum ConfigOptions {
-    WireGuard,
+enum ConfigSelected {
+    Wireguard,
     Network,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct MainView {
-    wg_config_open: bool,
+    config_open: bool,
     #[serde(skip)]
     file_dialog: FileDialog,
-    config_options: ConfigOptions,
+    config_selected: ConfigSelected,
+    wireguard_options: WireguardOptions,
     network_options: NetworkOptions,
 }
 
 impl Default for MainView {
     fn default() -> Self {
         Self {
-            wg_config_open: false,
+            config_open: false,
             file_dialog: FileDialog::new(),
-            config_options: ConfigOptions::WireGuard,
+            config_selected: ConfigSelected::Wireguard,
+            wireguard_options: WireguardOptions::default(),
             network_options: NetworkOptions::default(),
         }
     }
@@ -52,7 +54,12 @@ impl MainView {
             start_on_boot: config.network.start_on_boot,
         };
 
+        let wireguard_options = WireguardOptions {
+            folders: config.wireguard.folders.clone(),
+        };
+
         let mut view = Self {
+            wireguard_options: wireguard_options,
             network_options: network_options,
             ..Default::default()
         };
@@ -72,31 +79,35 @@ impl MainView {
 
     pub fn config_button(&mut self, ctx: &egui::Context, ui: &mut Ui, messages: &mut Vec<Message>) {
         if ui.button("Configuration").clicked() {
-            self.wg_config_open = !self.wg_config_open;
+            self.config_open = !self.config_open;
         }
 
         egui::Window::new("Configuration")
-            .open(&mut self.wg_config_open)
+            .open(&mut self.config_open)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.selectable_value(
-                        &mut self.config_options,
-                        ConfigOptions::WireGuard,
+                        &mut self.config_selected,
+                        ConfigSelected::Wireguard,
                         "WireGuard",
                     );
                     ui.selectable_value(
-                        &mut self.config_options,
-                        ConfigOptions::Network,
+                        &mut self.config_selected,
+                        ConfigSelected::Network,
                         "Network",
                     );
                 });
                 ui.separator();
 
-                match self.config_options {
-                    ConfigOptions::WireGuard => {
-                        Self::config_wg_view(ui, &mut self.file_dialog);
+                match self.config_selected {
+                    ConfigSelected::Wireguard => {
+                        Self::config_wg_view(
+                            &self.wireguard_options.folders,
+                            ui,
+                            &mut self.file_dialog,
+                        );
                     }
-                    ConfigOptions::Network => {
+                    ConfigSelected::Network => {
                         Self::config_network_view(
                             ui,
                             &mut self.file_dialog,
@@ -114,13 +125,14 @@ impl MainView {
         self.file_dialog.update(ctx);
         if let Some(path) = self.file_dialog.take_picked() {
             messages.push(Message::Config(ConfigMessage::UpdateWgPath(
-                path,
+                path.clone(),
                 PathOptions::Add,
             )));
+            self.wireguard_options.folders.push(path);
         }
     }
 
-    fn config_wg_view(ui: &mut Ui, fd: &mut FileDialog) {
+    fn config_wg_view(folders: &Vec<PathBuf>, ui: &mut Ui, fd: &mut FileDialog) {
         let wg_button = ui.button("Add WireGuard Folder");
         if wg_button.clicked() {
             fd.pick_directory();
@@ -129,6 +141,25 @@ impl MainView {
         wg_button.on_hover_ui_at_pointer(|ui| {
             ui.label("Adds a WireGuard Folder to the list of tracked folders");
         });
+
+        ui.add_space(10.0);
+        egui::Grid::new("wireguard_grid")
+            .num_columns(1)
+            .spacing([10.0, 10.0])
+            .show(ui, |ui| {
+                for folder in folders {
+                    Frame::NONE
+                        .fill(egui::Color32::from_rgb(50, 50, 50))
+                        .inner_margin(Margin::same(4))
+                        .corner_radius(CornerRadius::same(5))
+                        .show(ui, |ui| {
+                            // BUG: since min window size enforced this is problematic for long
+                            // paths
+                            ui.label(folder.as_path().to_str().unwrap());
+                        });
+                    ui.end_row();
+                }
+            });
     }
 
     fn config_network_view(
@@ -167,7 +198,10 @@ impl MainView {
                     .selected_text(&options.selected)
                     .show_ui(ui, |ui| {
                         for interface in options.interfaces.iter().clone() {
-                            let file_name = interface.file_name().into_string().unwrap();
+                            let file_name = interface
+                                .file_name()
+                                .into_string()
+                                .unwrap_or("None".to_string());
                             ui.selectable_value(
                                 &mut options.selected,
                                 file_name.clone(),
@@ -218,5 +252,7 @@ impl NetworkOptions {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct WireguardOptions {}
+#[derive(Serialize, Deserialize, Default)]
+struct WireguardOptions {
+    folders: Vec<PathBuf>,
+}
