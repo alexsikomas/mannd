@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     app::{ConfigMessage, Message, PathOptions},
-    cli::config::{Config, Wireguard},
+    cli::config::Config,
 };
 
 #[derive(PartialEq, Serialize, Deserialize)]
@@ -101,115 +101,16 @@ impl MainView {
 
                 match self.config_selected {
                     ConfigSelected::Wireguard => {
-                        Self::config_wg_view(
-                            &self.wireguard_options.folders,
-                            ui,
-                            &mut self.file_dialog,
-                        );
+                        self.wireguard_options.render(ui, &mut self.file_dialog);
                     }
                     ConfigSelected::Network => {
-                        Self::config_network_view(
-                            ui,
-                            &mut self.file_dialog,
-                            &mut self.network_options,
-                            messages,
-                        );
+                        self.network_options.render(ui, &mut self.file_dialog);
                     }
                 }
             });
 
-        self.wg_folder_selection(ctx, messages);
-    }
-
-    fn wg_folder_selection(&mut self, ctx: &egui::Context, messages: &mut Vec<Message>) {
-        self.file_dialog.update(ctx);
-        if let Some(path) = self.file_dialog.take_picked() {
-            messages.push(Message::Config(ConfigMessage::UpdateWgPath(
-                path.clone(),
-                PathOptions::Add,
-            )));
-            self.wireguard_options.folders.push(path);
-        }
-    }
-
-    fn config_wg_view(folders: &Vec<PathBuf>, ui: &mut Ui, fd: &mut FileDialog) {
-        let wg_button = ui.button("Add WireGuard Folder");
-        if wg_button.clicked() {
-            fd.pick_directory();
-        };
-
-        wg_button.on_hover_ui_at_pointer(|ui| {
-            ui.label("Adds a WireGuard Folder to the list of tracked folders");
-        });
-
-        ui.add_space(10.0);
-        egui::Grid::new("wireguard_grid")
-            .num_columns(1)
-            .spacing([10.0, 10.0])
-            .show(ui, |ui| {
-                for folder in folders {
-                    Frame::NONE
-                        .fill(egui::Color32::from_rgb(50, 50, 50))
-                        .inner_margin(Margin::same(4))
-                        .corner_radius(CornerRadius::same(5))
-                        .show(ui, |ui| {
-                            // BUG: since min window size enforced this is problematic for long
-                            // paths
-                            ui.label(folder.as_path().to_str().unwrap());
-                        });
-                    ui.end_row();
-                }
-            });
-    }
-
-    fn config_network_view(
-        ui: &mut Ui,
-        fd: &mut FileDialog,
-        options: &mut NetworkOptions,
-        messages: &mut Vec<Message>,
-    ) {
-        egui::Grid::new("network_grid")
-            .num_columns(2)
-            .spacing([10.0, 10.0])
-            .show(ui, |ui| {
-                ui.label("Systemd Network Folder: ");
-                Frame::NONE
-                    .fill(egui::Color32::from_rgb(50, 50, 50))
-                    .inner_margin(Margin::same(4))
-                    .corner_radius(CornerRadius::same(5))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label("/etc/systemd/network/");
-                            if ui
-                                .add(
-                                    egui::Button::new("...")
-                                        .fill(egui::Color32::from_rgb(90, 90, 90)),
-                                )
-                                .clicked()
-                            {
-                                fd.pick_directory();
-                            }
-                        })
-                    });
-
-                ui.end_row();
-                ui.label("Inferface: ");
-                egui::ComboBox::from_label("")
-                    .selected_text(&options.selected)
-                    .show_ui(ui, |ui| {
-                        for interface in options.interfaces.iter().clone() {
-                            let file_name = interface
-                                .file_name()
-                                .into_string()
-                                .unwrap_or("None".to_string());
-                            ui.selectable_value(
-                                &mut options.selected,
-                                file_name.clone(),
-                                file_name,
-                            );
-                        }
-                    });
-            });
+        self.wireguard_options
+            .wg_folder_selection(&mut self.file_dialog, ctx, messages);
     }
 }
 
@@ -250,9 +151,98 @@ impl NetworkOptions {
             })
             .collect())
     }
+
+    pub fn render(&mut self, ui: &mut Ui, fd: &mut FileDialog) {
+        egui::Grid::new("network_grid")
+            .num_columns(2)
+            .spacing([10.0, 10.0])
+            .show(ui, |ui| {
+                ui.label("Systemd Network Folder: ");
+                Frame::NONE
+                    .fill(egui::Color32::from_rgb(50, 50, 50))
+                    .inner_margin(Margin::same(4))
+                    .corner_radius(CornerRadius::same(5))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("/etc/systemd/network/");
+                            if ui
+                                .add(
+                                    egui::Button::new("...")
+                                        .fill(egui::Color32::from_rgb(90, 90, 90)),
+                                )
+                                .clicked()
+                            {
+                                fd.pick_directory();
+                            }
+                        })
+                    });
+
+                ui.end_row();
+                ui.label("Inferface: ");
+                egui::ComboBox::from_label("")
+                    .selected_text(&self.selected)
+                    .show_ui(ui, |ui| {
+                        for interface in &self.interfaces {
+                            let file_name = interface
+                                .file_name()
+                                .into_string()
+                                .unwrap_or("None".to_string());
+                            ui.selectable_value(&mut self.selected, file_name.clone(), file_name);
+                        }
+                    });
+            });
+    }
 }
 
 #[derive(Serialize, Deserialize, Default)]
 struct WireguardOptions {
     folders: Vec<PathBuf>,
+}
+
+impl WireguardOptions {
+    pub fn render(&mut self, ui: &mut Ui, fd: &mut FileDialog) {
+        let wg_button = ui.button("Add WireGuard Folder");
+        if wg_button.clicked() {
+            fd.pick_directory();
+        };
+
+        wg_button.on_hover_ui_at_pointer(|ui| {
+            ui.label("Adds a WireGuard Folder to the list of tracked folders");
+        });
+
+        ui.add_space(10.0);
+        egui::Grid::new("wireguard_grid")
+            .num_columns(1)
+            .spacing([10.0, 10.0])
+            .show(ui, |ui| {
+                for folder in &self.folders {
+                    Frame::NONE
+                        .fill(egui::Color32::from_rgb(50, 50, 50))
+                        .inner_margin(Margin::same(4))
+                        .corner_radius(CornerRadius::same(5))
+                        .show(ui, |ui| {
+                            // BUG: since min window size enforced this is problematic for long
+                            // paths
+                            ui.label(folder.as_path().to_str().unwrap());
+                        });
+                    ui.end_row();
+                }
+            });
+    }
+
+    fn wg_folder_selection(
+        &mut self,
+        fd: &mut FileDialog,
+        ctx: &egui::Context,
+        messages: &mut Vec<Message>,
+    ) {
+        fd.update(ctx);
+        if let Some(path) = fd.take_picked() {
+            messages.push(Message::Config(ConfigMessage::UpdateWgPath(
+                path.clone(),
+                PathOptions::Add,
+            )));
+            self.folders.push(path);
+        }
+    }
 }
