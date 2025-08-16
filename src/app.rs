@@ -9,14 +9,17 @@ pub struct App {
     menu: Menu,
     main_view: MainView,
     config: Config,
+    messages: Vec<Message>,
 }
 
 impl Default for App {
     fn default() -> Self {
+        let config = Config::new().unwrap();
         Self {
             menu: Menu::default(),
-            main_view: MainView::default(),
-            config: Config::new().unwrap(),
+            main_view: MainView::new(&config),
+            config,
+            messages: vec![],
         }
     }
 }
@@ -30,11 +33,14 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.menu.top_panel(ctx);
-        self.main_view.central_panel(ctx);
+        let messages = self.main_view.render(ctx);
+        for message in messages {
+            Self::handle_messages(self, message);
+        }
     }
 }
 
-enum Message {
+pub enum Message {
     Config(ConfigMessage),
 }
 

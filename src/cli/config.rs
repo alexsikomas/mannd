@@ -11,15 +11,17 @@ use crate::{app::ConfigMessage, app::PathOptions};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
-    wireguard: Wireguard,
-    interface: Interface,
+    pub wireguard: Wireguard,
+    pub network: Network,
+    pub config_path: PathBuf,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             wireguard: Wireguard::default(),
-            interface: Interface::default(),
+            network: Network::default(),
+            config_path: PathBuf::new(),
         }
     }
 }
@@ -36,7 +38,6 @@ impl Config {
         if let Some(path) = dirs::config_dir() {
             config_path = path;
         } else {
-            println!("Could not find config directory from dirs");
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 "Could not find config directory",
@@ -60,28 +61,34 @@ impl Config {
                 default_config
             }
         };
+        config.config_path = config_path;
 
-        if let Err(e) = fs::exists(&config.interface.path) {
+        if let Err(e) = fs::exists(&config.network.path) {
             // possibly use channels to prompt for location in event it is somewhere else
             panic!("Cannot find systemd network folder! Check if it exists.");
         }
 
-        println!("{:?}", config);
         Ok(config)
     }
 
-    /// Reads the network files in `network_folder` and returns a vector of
-    /// directory entries
-    ///
-    /// Entries which return `io::Error` are ignored
-    pub fn get_network_files(&self) -> io::Result<Vec<DirEntry>> {
-        Ok(fs::read_dir(&self.interface.path)?
-            .filter_map(Result::ok)
-            .collect())
+    pub fn handle_message(&mut self, message: ConfigMessage) {
+        match message {
+            ConfigMessage::UpdateWgPath(path, wg_opt) => {}
+            ConfigMessage::UpdateNetworkPath(path) => {
+                self.network.update_path(path);
+            }
+            ConfigMessage::UpdateBoot(boot) => {
+                self.network.update_boot(boot);
+            }
+            ConfigMessage::UpdateInterface(interface) => {
+                self.network.update_active(interface);
+            }
+            _ => {}
+        }
     }
 
     /// Returns a list of files found in the `wireguard_folders` non-recursively
-    pub fn get_wg_files(&self) -> io::Result<Vec<DirEntry>> {
+    fn get_wg_files(&self) -> io::Result<Vec<DirEntry>> {
         let mut files = Vec::new();
         for dir in &self.wireguard.folders {
             files.extend(fs::read_dir(dir)?.filter_map(Result::ok));
@@ -89,31 +96,19 @@ impl Config {
         Ok(files)
     }
 
-    pub fn handle_message(&mut self, message: ConfigMessage) {
-        match message {
-            ConfigMessage::UpdateWgPath(path, wg_opt) => {}
-            ConfigMessage::UpdateNetworkPath(path) => {
-                self.interface.update_path(path);
-            }
-            ConfigMessage::UpdateBoot(boot) => {
-                self.interface.update_boot(boot);
-            }
-            ConfigMessage::UpdateInterface(interface) => {
-                self.interface.update_active(interface);
-            }
-            _ => {}
-        }
+    pub fn get_network_config(&self) -> &Network {
+        &self.network
     }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Wireguard {
+pub struct Wireguard {
     /// Folders containing wireguard configuration files
-    folders: Vec<PathBuf>,
+    pub folders: Vec<PathBuf>,
     /// Path to a wireguard configuration file
-    selected_file: PathBuf,
+    pub selected_file: PathBuf,
     /// Should the wireguard config of `selected_file` be active
-    enabled: bool,
+    pub enabled: bool,
 }
 
 impl Default for Wireguard {
@@ -127,16 +122,16 @@ impl Default for Wireguard {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Interface {
+pub struct Network {
     /// Name of the active interface
-    active_interface: Option<String>,
+    pub active_interface: Option<String>,
     /// Should the `active_interface` start on boot
-    start_on_boot: bool,
+    pub start_on_boot: bool,
     /// Network config path
-    path: PathBuf,
+    pub path: PathBuf,
 }
 
-impl Default for Interface {
+impl Default for Network {
     fn default() -> Self {
         Self {
             active_interface: None,
@@ -146,7 +141,7 @@ impl Default for Interface {
     }
 }
 
-impl Interface {
+impl Network {
     fn update_active(&mut self, cur: String) {}
     fn update_boot(&mut self, boot: bool) {
         self.start_on_boot = boot;
