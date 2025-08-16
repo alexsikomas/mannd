@@ -1,5 +1,4 @@
 use std::{
-    fmt::write,
     fs::{self, DirEntry},
     io,
     path::PathBuf,
@@ -65,15 +64,29 @@ impl Config {
 
         if let Err(e) = fs::exists(&config.network.path) {
             // possibly use channels to prompt for location in event it is somewhere else
-            panic!("Cannot find systemd network folder! Check if it exists.");
+            panic!("Cannot find systemd network folder! Check if it exists. {e}");
         }
 
         Ok(config)
     }
 
+    fn update_config(&self) {
+        fs::write(&self.config_path, toml::to_string(self).unwrap()).unwrap();
+    }
+
     pub fn handle_message(&mut self, message: ConfigMessage) {
         match message {
-            ConfigMessage::UpdateWgPath(path, wg_opt) => {}
+            ConfigMessage::UpdateWgPath(path, wg_opt) => match wg_opt {
+                PathOptions::Add => {
+                    self.wireguard.add_path(path);
+                }
+                PathOptions::Remove => {
+                    self.wireguard.remove_path(path);
+                }
+                PathOptions::RemoveAll => {
+                    self.wireguard.remove_all_paths();
+                }
+            },
             ConfigMessage::UpdateNetworkPath(path) => {
                 self.network.update_path(path);
             }
@@ -83,8 +96,8 @@ impl Config {
             ConfigMessage::UpdateInterface(interface) => {
                 self.network.update_active(interface);
             }
-            _ => {}
         }
+        self.update_config();
     }
 
     /// Returns a list of files found in the `wireguard_folders` non-recursively
@@ -118,6 +131,22 @@ impl Default for Wireguard {
             selected_file: PathBuf::new(),
             enabled: false,
         }
+    }
+}
+
+impl Wireguard {
+    fn add_path(&mut self, path: PathBuf) {
+        self.folders.push(path);
+    }
+
+    fn remove_path(&mut self, path: PathBuf) {
+        if let Some(i) = self.folders.iter().position(|s| *s == path) {
+            self.folders.remove(i);
+        }
+    }
+
+    fn remove_all_paths(&mut self) {
+        self.folders = vec![];
     }
 }
 

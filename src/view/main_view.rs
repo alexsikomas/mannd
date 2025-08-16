@@ -4,22 +4,25 @@ use std::{
     path::PathBuf,
 };
 
-use egui::{Button, CornerRadius, Frame, Margin, Ui};
+use egui::{CornerRadius, Frame, Margin, Ui};
 use egui_file_dialog::FileDialog;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     app::{ConfigMessage, Message, PathOptions},
     cli::config::Config,
 };
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Serialize, Deserialize)]
 enum ConfigOptions {
     WireGuard,
     Network,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct MainView {
     wg_config_open: bool,
+    #[serde(skip)]
     file_dialog: FileDialog,
     config_options: ConfigOptions,
     network_options: NetworkOptions,
@@ -94,7 +97,12 @@ impl MainView {
                         Self::config_wg_view(ui, &mut self.file_dialog);
                     }
                     ConfigOptions::Network => {
-                        Self::config_network_view(ui, &mut self.network_options, messages);
+                        Self::config_network_view(
+                            ui,
+                            &mut self.file_dialog,
+                            &mut self.network_options,
+                            messages,
+                        );
                     }
                 }
             });
@@ -123,7 +131,12 @@ impl MainView {
         });
     }
 
-    fn config_network_view(ui: &mut Ui, options: &mut NetworkOptions, messages: &mut Vec<Message>) {
+    fn config_network_view(
+        ui: &mut Ui,
+        fd: &mut FileDialog,
+        options: &mut NetworkOptions,
+        messages: &mut Vec<Message>,
+    ) {
         egui::Grid::new("network_grid")
             .num_columns(2)
             .spacing([10.0, 10.0])
@@ -142,7 +155,9 @@ impl MainView {
                                         .fill(egui::Color32::from_rgb(90, 90, 90)),
                                 )
                                 .clicked()
-                            {}
+                            {
+                                fd.pick_directory();
+                            }
                         })
                     });
 
@@ -151,15 +166,23 @@ impl MainView {
                 egui::ComboBox::from_label("")
                     .selected_text(&options.selected)
                     .show_ui(ui, |ui| {
-                        // TODO: read and write from toml
-                        ui.selectable_value(&mut options.selected, "wlan0".to_string(), "wlan0");
+                        for interface in options.interfaces.iter().clone() {
+                            let file_name = interface.file_name().into_string().unwrap();
+                            ui.selectable_value(
+                                &mut options.selected,
+                                file_name.clone(),
+                                file_name,
+                            );
+                        }
                     });
             });
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct NetworkOptions {
     path: PathBuf,
+    #[serde(skip)]
     interfaces: Vec<DirEntry>,
     selected: String,
     start_on_boot: bool,
@@ -177,15 +200,23 @@ impl Default for NetworkOptions {
 }
 
 impl NetworkOptions {
-    fn new() {}
-
     /// Reads the network files in `network_folder` and returns a vector of
     /// directory entries
     ///
     /// Entries which return `io::Error` are ignored
     fn get_network_files(path: &PathBuf) -> io::Result<Vec<DirEntry>> {
-        Ok(fs::read_dir(path)?.filter_map(Result::ok).collect())
+        Ok(fs::read_dir(path)?
+            .filter_map(Result::ok)
+            .filter(|s| {
+                s.path().is_file()
+                    && s.path()
+                        .extension()
+                        .map(|s| s == "network")
+                        .unwrap_or(false)
+            })
+            .collect())
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct WireguardOptions {}

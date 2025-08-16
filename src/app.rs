@@ -1,14 +1,18 @@
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     cli::config::Config,
     view::{main_view::MainView, menu::Menu},
 };
 
+#[derive(Serialize, Deserialize)]
 pub struct App {
     menu: Menu,
     main_view: MainView,
     config: Config,
+    #[serde(skip)]
     messages: Vec<Message>,
 }
 
@@ -61,7 +65,6 @@ impl App {
     fn handle_messages(&mut self, message: Message) {
         match message {
             Message::Config(conf) => self.config.handle_message(conf),
-            _ => {}
         };
     }
 }
