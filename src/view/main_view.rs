@@ -32,11 +32,11 @@ impl Default for MainView {
 impl MainView {
     pub fn central_panel(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            self.wg_path_button(ctx, ui);
+            self.config_button(ctx, ui);
         });
     }
 
-    pub fn wg_path_button(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+    pub fn config_button(&mut self, ctx: &egui::Context, ui: &mut Ui) {
         if ui.button("Configuration").clicked() {
             self.wg_config_open = !self.wg_config_open;
         }

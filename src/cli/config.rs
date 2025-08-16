@@ -7,6 +7,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::{app::ConfigMessage, app::PathOptions};
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
     wireguard: Wireguard,
@@ -61,7 +63,7 @@ impl Config {
 
         if let Err(e) = fs::exists(&config.interface.path) {
             // possibly use channels to prompt for location in event it is somewhere else
-            panic!("Cannot find systemd network folder!");
+            panic!("Cannot find systemd network folder! Check if it exists.");
         }
 
         println!("{:?}", config);
@@ -85,6 +87,22 @@ impl Config {
             files.extend(fs::read_dir(dir)?.filter_map(Result::ok));
         }
         Ok(files)
+    }
+
+    pub fn handle_message(&mut self, message: ConfigMessage) {
+        match message {
+            ConfigMessage::UpdateWgPath(path, wg_opt) => {}
+            ConfigMessage::UpdateNetworkPath(path) => {
+                self.interface.update_path(path);
+            }
+            ConfigMessage::UpdateBoot(boot) => {
+                self.interface.update_boot(boot);
+            }
+            ConfigMessage::UpdateInterface(interface) => {
+                self.interface.update_active(interface);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -124,6 +142,27 @@ impl Default for Interface {
             active_interface: None,
             start_on_boot: false,
             path: PathBuf::from("/etc/systemd/network/"),
+        }
+    }
+}
+
+impl Interface {
+    fn update_active(&mut self, cur: String) {}
+    fn update_boot(&mut self, boot: bool) {
+        self.start_on_boot = boot;
+    }
+
+    fn update_path(&mut self, path: PathBuf) {
+        match fs::exists(&path) {
+            Ok(_) => {
+                self.path = path;
+            }
+            Err(e) => {
+                panic!(
+                    "Error updating path as supplied path does not exist. {:?}",
+                    e
+                );
+            }
         }
     }
 }

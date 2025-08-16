@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::{
     cli::config::Config,
     view::{main_view::MainView, menu::Menu},
@@ -29,5 +31,31 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.menu.top_panel(ctx);
         self.main_view.central_panel(ctx);
+    }
+}
+
+enum Message {
+    Config(ConfigMessage),
+}
+
+pub enum PathOptions {
+    Add,
+    Remove,
+    RemoveAll,
+}
+
+pub enum ConfigMessage {
+    UpdateWgPath(PathBuf, PathOptions),
+    UpdateNetworkPath(PathBuf),
+    UpdateInterface(String),
+    UpdateBoot(bool),
+}
+
+impl App {
+    fn handle_messages(&mut self, message: Message) {
+        match message {
+            Message::Config(conf) => self.config.handle_message(conf),
+            _ => {}
+        };
     }
 }
