@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use egui::{Button, CornerRadius, Margin, Ui};
+use egui::{Button, CornerRadius, Frame, Margin, Ui};
 use egui_file_dialog::FileDialog;
 
 #[derive(PartialEq)]
@@ -14,6 +14,7 @@ pub struct MainView {
     file_dialog: FileDialog,
     picked_folder: Option<PathBuf>,
     config_options: ConfigOptions,
+    network_options: NetworkOptions,
 }
 
 impl Default for MainView {
@@ -23,6 +24,7 @@ impl Default for MainView {
             file_dialog: FileDialog::new(),
             picked_folder: None,
             config_options: ConfigOptions::WireGuard,
+            network_options: NetworkOptions::default(),
         }
     }
 }
@@ -61,7 +63,7 @@ impl MainView {
                         Self::config_wg_view(ui, &mut self.file_dialog);
                     }
                     ConfigOptions::Network => {
-                        Self::config_network_view(ui);
+                        Self::config_network_view(ui, &mut self.network_options);
                     }
                 }
             });
@@ -87,24 +89,48 @@ impl MainView {
         });
     }
 
-    fn config_network_view(ui: &mut Ui) {
-        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.label("Systemd Network Folder: ");
-            egui::Frame::none()
-                .fill(egui::Color32::from_rgb(50, 50, 50))
-                .inner_margin(Margin::same(4))
-                .corner_radius(CornerRadius::same(5))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("/etc/systemd/network/");
-                        if ui
-                            .add(egui::Button::new("...").fill(egui::Color32::from_rgb(90, 90, 90)))
-                            .clicked()
-                        {
-                            println!("CLICKED");
-                        }
-                    })
-                })
-        });
+    fn config_network_view(ui: &mut Ui, options: &mut NetworkOptions) {
+        egui::Grid::new("network_grid")
+            .num_columns(2)
+            .spacing([10.0, 10.0])
+            .show(ui, |ui| {
+                ui.label("Systemd Network Folder: ");
+                Frame::NONE
+                    .fill(egui::Color32::from_rgb(50, 50, 50))
+                    .inner_margin(Margin::same(4))
+                    .corner_radius(CornerRadius::same(5))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("/etc/systemd/network/");
+                            if ui
+                                .add(
+                                    egui::Button::new("...")
+                                        .fill(egui::Color32::from_rgb(90, 90, 90)),
+                                )
+                                .clicked()
+                            {
+                                println!("CLICKED");
+                            }
+                        })
+                    });
+
+                ui.end_row();
+                ui.label("Inferface: ");
+                egui::ComboBox::from_label("")
+                    .selected_text(&options.selected)
+                    .show_ui(ui, |ui| {
+                        // TODO: read and write from toml
+                        ui.selectable_value(&mut options.selected, "wlan0".to_string(), "wlan0");
+                    });
+            });
     }
 }
+
+#[derive(Default)]
+struct NetworkOptions {
+    path: PathBuf,
+    selected: String,
+    start_on_boot: bool,
+}
+
+struct WireguardOptions {}

@@ -26,8 +26,8 @@ impl Config {
     /// Creates a new `Folders` instance
     ///
     /// Ensures that configuration directory and files exist
+    /// Panics if the `interface` path cannot be found
     pub fn new() -> io::Result<Self> {
-        // TODO: Check for /etc/systemd/network/, if !exists prompt for location possibly panic
         let mut config = Self::default();
         let mut config_path: PathBuf;
 
@@ -58,6 +58,11 @@ impl Config {
                 default_config
             }
         };
+
+        if let Err(e) = fs::exists(&config.interface.path) {
+            // possibly use channels to prompt for location in event it is somewhere else
+            panic!("Cannot find systemd network folder!");
+        }
 
         println!("{:?}", config);
         Ok(config)
