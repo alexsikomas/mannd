@@ -1,5 +1,9 @@
 use std::{cell::RefCell, path::PathBuf};
 
+use egui::{
+    epaint::text::{FontInsert, InsertFontFamily},
+    Color32, FontDefinitions,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -13,6 +17,8 @@ pub struct App {
     sidebar: Sidebar,
     central_panel: Panel,
     config: Config,
+    #[serde(skip)]
+    style: AppStyle,
 }
 
 impl Default for App {
@@ -23,12 +29,21 @@ impl Default for App {
             sidebar: Sidebar::new(&config),
             central_panel: Panel::default(),
             config,
+            style: AppStyle::default(),
         }
     }
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        cc.egui_ctx.add_font(FontInsert::new(
+            "Outfit",
+            egui::FontData::from_static(include_bytes!("../assets/outfit-font/Outfit-Regular.otf")),
+            vec![InsertFontFamily {
+                family: egui::FontFamily::Proportional,
+                priority: egui::epaint::text::FontPriority::Highest,
+            }],
+        ));
         egui_extras::install_image_loaders(&cc.egui_ctx);
         Default::default()
     }
@@ -69,5 +84,35 @@ impl App {
         match message {
             Message::Config(conf) => self.config.handle_message(conf),
         };
+    }
+}
+
+pub struct AppColours {
+    connected: Color32,
+    disconnected: Color32,
+    text: Color32,
+    frame: Color32,
+}
+
+impl Default for AppColours {
+    fn default() -> Self {
+        Self {
+            connected: Color32::from_rgb(0, 255, 0),
+            disconnected: Color32::from_rgb(255, 0, 0),
+            text: Color32::from_rgb(234, 219, 180),
+            frame: Color32::from_rgb(28, 32, 33),
+        }
+    }
+}
+
+pub struct AppStyle {
+    colours: AppColours,
+}
+
+impl Default for AppStyle {
+    fn default() -> Self {
+        Self {
+            colours: AppColours::default(),
+        }
     }
 }

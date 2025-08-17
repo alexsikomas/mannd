@@ -4,12 +4,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use egui::{CornerRadius, Frame, Margin, Ui, Widget};
+use egui::{Color32, CornerRadius, Frame, Margin, Ui, Widget};
 use egui_file_dialog::FileDialog;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    app::{ConfigMessage, Message, PathOptions},
+    app::{AppColours, ConfigMessage, Message, PathOptions},
     cli::config::Config,
 };
 
@@ -72,12 +72,13 @@ impl Sidebar {
     pub fn render(&mut self, ctx: &egui::Context) -> Vec<Message> {
         let mut messages = vec![];
         egui::SidePanel::left("left_panel").show(ctx, |ui| {
-            self.render_config_ui(ctx, ui, &mut messages);
+            self.render_config_buttons(ctx, ui, &mut messages);
         });
+        self.render_config_ui(ctx, &mut messages);
         messages
     }
 
-    pub fn render_config_ui(
+    pub fn render_config_buttons(
         &mut self,
         ctx: &egui::Context,
         ui: &mut Ui,
@@ -88,13 +89,27 @@ impl Sidebar {
             .num_columns(1)
             .spacing([10.0, 10.0])
             .show(ui, |ui| {
-                if ui.button("Configuration").clicked() {
+                if ui
+                    .button((
+                        egui::Image::new(egui::include_image!("../../assets/gui/gears-solid.svg")),
+                        "Configuration",
+                    ))
+                    .clicked()
+                {
                     self.config_open = !self.config_open;
                 }
                 ui.end_row();
-                if ui.button("Connect").clicked() {}
+                if ui
+                    .button((
+                        egui::Image::new(egui::include_image!("../../assets/gui/link.svg")),
+                        egui::RichText::new("Connect").color(Color32::from_rgb(0, 255, 0)),
+                    ))
+                    .clicked()
+                {}
             });
+    }
 
+    fn render_config_ui(&mut self, ctx: &egui::Context, messages: &mut Vec<Message>) {
         egui::Window::new("Configuration")
             .open(&mut self.config_open)
             .show(ctx, |ui| {

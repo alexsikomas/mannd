@@ -52,7 +52,7 @@ impl Menu {
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add(
-                        egui::Image::new(egui::include_image!("../../svgs/application/circle.svg"))
+                        egui::Image::new(egui::include_image!("../../assets/gui/circle.svg"))
                             .tint(self.connected_colour),
                     );
                     ui.add(

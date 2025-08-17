@@ -1,7 +1,7 @@
 # Networkd Wireguard Manager
 
 <p align="center">
-<img src="./svgs/overview.png" alt="Overview" style="border-radius: 15px;">
+<img src="./assets/overview.png" alt="Overview" style="border-radius: 15px;">
 </p>
 
 <p align="center">
@@ -11,12 +11,13 @@
 <hr style="visibility: hidden"/>
 
 <p align="center">
-<img src="./svgs/install.png" alt="Install" style="border-radius: 15px;">
+<img src="./assets/install.png" alt="Install" style="border-radius: 15px;">
 </p>
 
 ### Acknowledgements
 *  [Rust](https://www.rust-lang.org/)
 *  [EGui](https://github.com/emilk/egui)
+*  Icons from [Font Awesome](https://fontawesome.com/)
 *  Graphics created with [Inkscape](https://inkscape.org/)
 *  Font used in graphics: [Outfit](https://github.com/Outfitio/Outfit-Fonts)
 
