@@ -38,7 +38,9 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         cc.egui_ctx.add_font(FontInsert::new(
             "Outfit",
-            egui::FontData::from_static(include_bytes!("../assets/outfit-font/Outfit-Regular.otf")),
+            egui::FontData::from_static(include_bytes!(
+                "../assets/poppins-font/Poppins-Regular.ttf"
+            )),
             vec![InsertFontFamily {
                 family: egui::FontFamily::Proportional,
                 priority: egui::epaint::text::FontPriority::Highest,
@@ -51,7 +53,7 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.menu.top_panel(ctx);
+        self.menu.render(ctx);
         let mut messages = Vec::new();
         messages.extend(self.sidebar.render(ctx));
         messages.extend(self.central_panel.render(ctx));

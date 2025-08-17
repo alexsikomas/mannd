@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use egui::{Color32, CornerRadius, Frame, Margin, Ui, Widget};
+use egui::{Color32, CornerRadius, Frame, Margin, Pos2, Rect, Ui, Widget};
 use egui_file_dialog::FileDialog;
 use serde::{Deserialize, Serialize};
 
@@ -130,12 +130,25 @@ impl Sidebar {
                 match self.config_selected {
                     ConfigSelected::Wireguard => {
                         self.wireguard_options.render(ui, &mut self.file_dialog);
-                        self.wireguard_options
-                            .select_folder(&mut self.file_dialog, ctx, messages);
+                        self.file_dialog.update(ctx);
+                        if let Some(path) = self.file_dialog.take_picked() {
+                            messages.push(Message::Config(ConfigMessage::UpdateWgPath(
+                                path.clone(),
+                                PathOptions::Add,
+                            )));
+                            self.wireguard_options.folders.push(path);
+                        }
                     }
                     ConfigSelected::Network => {
                         self.network_options
                             .render(ui, &mut self.file_dialog, messages);
+                        self.file_dialog.update(ctx);
+                        if let Some(path) = self.file_dialog.take_picked() {
+                            messages.push(Message::Config(ConfigMessage::UpdateNetworkPath(
+                                path.clone(),
+                            )));
+                            self.wireguard_options.folders.push(path);
+                        }
                     }
                 }
             });
@@ -191,18 +204,18 @@ impl NetworkOptions {
                     .inner_margin(Margin::same(4))
                     .corner_radius(CornerRadius::same(5))
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
+                        ui.horizontal_centered(|ui| {
                             ui.label("/etc/systemd/network/");
                             if ui
-                                .add(
-                                    egui::Button::new("...")
-                                        .fill(egui::Color32::from_rgb(90, 90, 90)),
+                                .button(
+                                    egui::RichText::new("...")
+                                        .color(Color32::from_rgb(150, 150, 150)),
                                 )
                                 .clicked()
                             {
                                 fd.pick_directory();
                             }
-                        })
+                        });
                     });
 
                 ui.end_row();
@@ -274,21 +287,5 @@ impl WireguardOptions {
                     ui.end_row();
                 }
             });
-    }
-
-    fn select_folder(
-        &mut self,
-        fd: &mut FileDialog,
-        ctx: &egui::Context,
-        messages: &mut Vec<Message>,
-    ) {
-        fd.update(ctx);
-        if let Some(path) = fd.take_picked() {
-            messages.push(Message::Config(ConfigMessage::UpdateWgPath(
-                path.clone(),
-                PathOptions::Add,
-            )));
-            self.folders.push(path);
-        }
     }
 }

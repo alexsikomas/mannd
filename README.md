@@ -18,6 +18,7 @@
 *  [Rust](https://www.rust-lang.org/)
 *  [EGui](https://github.com/emilk/egui)
 *  Icons from [Font Awesome](https://fontawesome.com/)
+*  Font family used in application: [Poppins](https://github.com/itfoundry/Poppins)
 *  Graphics created with [Inkscape](https://inkscape.org/)
 *  Font used in graphics: [Outfit](https://github.com/Outfitio/Outfit-Fonts)
 
