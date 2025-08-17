@@ -4,13 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     cli::config::Config,
-    view::{main_view::MainView, menu::Menu},
+    gui::{main_panel::Panel, menu::Menu},
 };
 
 #[derive(Serialize, Deserialize)]
 pub struct App {
     menu: Menu,
-    main_view: MainView,
+    central_panel: Panel,
     config: Config,
     #[serde(skip)]
     messages: Vec<Message>,
@@ -21,7 +21,7 @@ impl Default for App {
         let config = Config::new().unwrap();
         Self {
             menu: Menu::default(),
-            main_view: MainView::new(&config),
+            central_panel: Panel::new(&config),
             config,
             messages: vec![],
         }
@@ -37,9 +37,9 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.menu.top_panel(ctx);
-        let messages = self.main_view.render(ctx);
+        let messages = self.central_panel.render(ctx);
         for message in messages {
-            Self::handle_messages(self, message);
+            Self::handle_message(self, message);
         }
     }
 }
@@ -62,7 +62,7 @@ pub enum ConfigMessage {
 }
 
 impl App {
-    fn handle_messages(&mut self, message: Message) {
+    fn handle_message(&mut self, message: Message) {
         match message {
             Message::Config(conf) => self.config.handle_message(conf),
         };

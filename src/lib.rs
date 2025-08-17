@@ -1,4 +1,4 @@
 mod app;
 mod cli;
-mod view;
+mod gui;
 pub use app::App;

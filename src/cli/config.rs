@@ -171,7 +171,10 @@ impl Default for Network {
 }
 
 impl Network {
-    fn update_active(&mut self, cur: String) {}
+    fn update_active(&mut self, cur: String) {
+        self.active_interface = Some(cur);
+    }
+
     fn update_boot(&mut self, boot: bool) {
         self.start_on_boot = boot;
     }

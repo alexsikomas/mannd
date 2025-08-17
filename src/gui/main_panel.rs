@@ -1,10 +1,10 @@
 use std::{
     fs::{self, DirEntry},
     io,
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
-use egui::{CornerRadius, Frame, Margin, Ui};
+use egui::{CornerRadius, Frame, Margin, Ui, Widget};
 use egui_file_dialog::FileDialog;
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +20,7 @@ enum ConfigSelected {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct MainView {
+pub struct Panel {
     config_open: bool,
     #[serde(skip)]
     file_dialog: FileDialog,
@@ -29,7 +29,7 @@ pub struct MainView {
     network_options: NetworkOptions,
 }
 
-impl Default for MainView {
+impl Default for Panel {
     fn default() -> Self {
         Self {
             config_open: false,
@@ -41,7 +41,7 @@ impl Default for MainView {
     }
 }
 
-impl MainView {
+impl Panel {
     pub fn new(config: &Config) -> Self {
         let network_options = NetworkOptions {
             path: config.network.path.clone(),
@@ -72,12 +72,17 @@ impl MainView {
     pub fn render(&mut self, ctx: &egui::Context) -> Vec<Message> {
         let mut messages = vec![];
         egui::CentralPanel::default().show(ctx, |ui| {
-            self.config_button(ctx, ui, &mut messages);
+            self.render_config_ui(ctx, ui, &mut messages);
         });
         messages
     }
 
-    pub fn config_button(&mut self, ctx: &egui::Context, ui: &mut Ui, messages: &mut Vec<Message>) {
+    pub fn render_config_ui(
+        &mut self,
+        ctx: &egui::Context,
+        ui: &mut Ui,
+        messages: &mut Vec<Message>,
+    ) {
         if ui.button("Configuration").clicked() {
             self.config_open = !self.config_open;
         }
@@ -102,15 +107,15 @@ impl MainView {
                 match self.config_selected {
                     ConfigSelected::Wireguard => {
                         self.wireguard_options.render(ui, &mut self.file_dialog);
+                        self.wireguard_options
+                            .select_folder(&mut self.file_dialog, ctx, messages);
                     }
                     ConfigSelected::Network => {
-                        self.network_options.render(ui, &mut self.file_dialog);
+                        self.network_options
+                            .render(ui, &mut self.file_dialog, messages);
                     }
                 }
             });
-
-        self.wireguard_options
-            .wg_folder_selection(&mut self.file_dialog, ctx, messages);
     }
 }
 
@@ -139,7 +144,7 @@ impl NetworkOptions {
     /// directory entries
     ///
     /// Entries which return `io::Error` are ignored
-    fn get_network_files(path: &PathBuf) -> io::Result<Vec<DirEntry>> {
+    fn get_network_files(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
         Ok(fs::read_dir(path)?
             .filter_map(Result::ok)
             .filter(|s| {
@@ -152,7 +157,7 @@ impl NetworkOptions {
             .collect())
     }
 
-    pub fn render(&mut self, ui: &mut Ui, fd: &mut FileDialog) {
+    pub fn render(&mut self, ui: &mut Ui, fd: &mut FileDialog, messages: &mut Vec<Message>) {
         egui::Grid::new("network_grid")
             .num_columns(2)
             .spacing([10.0, 10.0])
@@ -187,9 +192,27 @@ impl NetworkOptions {
                                 .file_name()
                                 .into_string()
                                 .unwrap_or("None".to_string());
-                            ui.selectable_value(&mut self.selected, file_name.clone(), file_name);
+                            if ui
+                                .selectable_value(&mut self.selected, file_name.clone(), file_name)
+                                .clicked()
+                            {
+                                messages.push(Message::Config(ConfigMessage::UpdateInterface(
+                                    self.selected.clone(),
+                                )));
+                            }
                         }
                     });
+
+                ui.end_row();
+                ui.label("Start on boot:");
+                if egui::Checkbox::without_text(&mut self.start_on_boot)
+                    .ui(ui)
+                    .changed()
+                {
+                    messages.push(Message::Config(ConfigMessage::UpdateBoot(
+                        self.start_on_boot.clone(),
+                    )));
+                }
             });
     }
 }
@@ -230,7 +253,7 @@ impl WireguardOptions {
             });
     }
 
-    fn wg_folder_selection(
+    fn select_folder(
         &mut self,
         fd: &mut FileDialog,
         ctx: &egui::Context,
