@@ -1,3 +1,4 @@
+use egui::{AtomExt, Color32, Vec2};
 use log::warn;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -5,12 +6,16 @@ use std::fs;
 #[derive(Serialize, Deserialize)]
 pub struct Menu {
     show_license: bool,
+    connected_colour: Color32,
+    disconnected_colour: Color32,
 }
 
 impl Default for Menu {
     fn default() -> Self {
         Self {
             show_license: false,
+            connected_colour: Color32::from_rgb(0, 255, 0),
+            disconnected_colour: Color32::from_rgb(255, 0, 0),
         }
     }
 }
@@ -45,6 +50,18 @@ impl Menu {
                         }
                     });
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add(
+                        egui::Image::new(egui::include_image!("../../svgs/application/circle.svg"))
+                            .tint(self.connected_colour),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new("Connected").color(self.connected_colour),
+                        )
+                        .selectable(false),
+                    );
+                });
             });
         });
     }

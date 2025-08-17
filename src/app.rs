@@ -1,19 +1,18 @@
-use std::path::PathBuf;
+use std::{cell::RefCell, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
     cli::config::Config,
-    gui::{main_panel::Panel, menu::Menu},
+    gui::{main_panel::Panel, menu::Menu, sidebar::Sidebar},
 };
 
 #[derive(Serialize, Deserialize)]
 pub struct App {
     menu: Menu,
+    sidebar: Sidebar,
     central_panel: Panel,
     config: Config,
-    #[serde(skip)]
-    messages: Vec<Message>,
 }
 
 impl Default for App {
@@ -21,15 +20,16 @@ impl Default for App {
         let config = Config::new().unwrap();
         Self {
             menu: Menu::default(),
-            central_panel: Panel::new(&config),
+            sidebar: Sidebar::new(&config),
+            central_panel: Panel::default(),
             config,
-            messages: vec![],
         }
     }
 }
 
 impl App {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         Default::default()
     }
 }
@@ -37,9 +37,12 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.menu.top_panel(ctx);
-        let messages = self.central_panel.render(ctx);
+        let mut messages = Vec::new();
+        messages.extend(self.sidebar.render(ctx));
+        messages.extend(self.central_panel.render(ctx));
+
         for message in messages {
-            Self::handle_message(self, message);
+            self.handle_message(message);
         }
     }
 }
