@@ -1,4 +1,4 @@
-use egui::{AtomExt, Color32, Ui, Vec2};
+use egui::{text::LayoutJob, AtomExt, Color32, Layout, RichText, Ui, Vec2};
 use log::warn;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -60,6 +60,7 @@ impl Menu {
     }
 
     fn credits_window(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        // TODO: This looks messy, clean up structure or seperate into functions
         egui::Window::new("Credits")
             .open(&mut self.show_credits)
             .show(ctx, |ui| {
@@ -79,12 +80,28 @@ impl Menu {
                             "Poppins (Regular)",
                             "https://github.com/itfoundry/Poppins",
                         );
+                        ui.end_row();
+                        let mut job = LayoutJob::default();
+
+                        
+                        RichText::new("Icons: ").append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
+                        RichText::new("[1]").small().raised().append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
+                        ui.label(job);
+
+                        ui.hyperlink_to("Font Awesome", "https://fontawesome.com/");
                     });
 
                 ui.add_space(20.);
                 ui.label(egui::RichText::new(
                     "There are also numerous other Rust crates which I'm thankful for, please check the Cargo.toml for more details.",
                 ));
+
+                let mut job = LayoutJob::default();
+                RichText::new("[1] ").small().raised().append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
+                RichText::new(
+                    "This application uses icons from Font Awesome. Some icons have been modified. The original licenses apply to all modified resources.",
+                ).italics().append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
+                ui.label(job);
             });
     }
 
