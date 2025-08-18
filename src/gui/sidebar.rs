@@ -4,12 +4,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use egui::{Color32, CornerRadius, Frame, Margin, Pos2, Rect, Ui, Widget};
+use egui::{Color32, CornerRadius, Frame, Margin, Ui, Widget};
 use egui_file_dialog::FileDialog;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    app::{AppColours, ConfigMessage, Message, PathOptions},
+    app::{ConfigMessage, Message, PathOptions},
     cli::config::Config,
 };
 
@@ -78,7 +78,7 @@ impl Sidebar {
     pub fn render(&mut self, ctx: &egui::Context) -> Vec<Message> {
         let mut messages = vec![];
         egui::SidePanel::left("left_panel").show(ctx, |ui| {
-            self.render_config_buttons(ctx, ui, &mut messages);
+            self.render_config_buttons(ui);
         });
         self.render_config_ui(ctx, &mut messages);
         messages
@@ -86,12 +86,7 @@ impl Sidebar {
 
     /// Renders the buttons in the sidebar, if images cannot be loaded
     /// they are replaced by a red triangle
-    pub fn render_config_buttons(
-        &mut self,
-        ctx: &egui::Context,
-        ui: &mut Ui,
-        messages: &mut Vec<Message>,
-    ) {
+    pub fn render_config_buttons(&mut self, ui: &mut Ui) {
         ui.add_space(10.);
         egui::Grid::new("sidebar")
             .num_columns(1)

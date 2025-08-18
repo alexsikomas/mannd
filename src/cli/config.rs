@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{app::ConfigMessage, app::PathOptions};
 
+#[derive(Debug)]
 pub enum ConfigError {
     Io(io::Error),
     TomlSerialize(toml::ser::Error),

@@ -1,4 +1,4 @@
-use egui::{text::LayoutJob, AtomExt, Color32, Layout, RichText, Ui, Vec2};
+use egui::{Color32, Ui};
 use log::warn;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -44,8 +44,8 @@ impl Menu {
                     };
                 });
 
-                self.credits_window(ctx, ui);
-                self.license_window(ctx, ui);
+                self.credits_window(ctx);
+                self.license_window(ctx);
 
                 // Makes connection status on the right rather than left
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -65,7 +65,7 @@ impl Menu {
     }
 
     /// Renders the credits window to the screen if `show_credits` is `true`
-    fn credits_window(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+    fn credits_window(&mut self, ctx: &egui::Context) {
         // TODO: This looks messy, clean up structure or seperate into functions
         egui::Window::new("Credits")
             .open(&mut self.show_credits)
@@ -85,16 +85,12 @@ impl Menu {
                         ui.end_row();
                         ui.label("Font:");
                         ui.hyperlink_to(
-                            "Poppins (Regular)",
+                            "Poppins",
                             "https://github.com/itfoundry/Poppins",
                         );
                         ui.end_row();
 
-                        let mut job = LayoutJob::default();
-                        RichText::new("Icons: ").append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
-                        RichText::new("[1]").small().raised().append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
-                        ui.label(job);
-
+                        ui.label("Icons:");
                         ui.hyperlink_to("Font Awesome", "https://fontawesome.com/");
                     });
 
@@ -103,19 +99,11 @@ impl Menu {
                     "There are also numerous other Rust crates which I'm thankful for, please check the Cargo.toml for more details.",
                 ));
 
-
-                // footnote
-                let mut job = LayoutJob::default();
-                RichText::new("[1] ").small().raised().append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
-                RichText::new(
-                    "This application uses icons from Font Awesome. Some icons have been modified. The original licenses apply to all modified resources.",
-                ).italics().append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
-                ui.label(job);
             });
     }
 
     /// Renders the license window to the screen if `show_license` is `true`
-    fn license_window(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+    fn license_window(&mut self, ctx: &egui::Context) {
         let window = egui::Window::new("License");
         window.open(&mut self.show_license).show(ctx, |ui| {
             // TODO: Include at compile time for ease of distribution

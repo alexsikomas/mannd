@@ -23,20 +23,30 @@ pub struct App {
 
 impl Default for App {
     fn default() -> Self {
-        // TODO: Add prompt for network location on fail
-        let config = match Config::new() {
-            Ok(c) => c,
+        let mut store = Self {
+            menu: Menu::default(),
+            sidebar: Sidebar::default(),
+            central_panel: Panel::default(),
+            config: Config::default(),
+            style: AppStyle::default(),
+        };
+
+        match Config::new() {
+            Ok(c) => {
+                store.sidebar = Sidebar::new(&c);
+                store.config = c;
+            }
             Err(e) => {
-                panic!("Failure during initialisation of config file, check log!")
+                eprintln!("Error: {:?}", e);
+                eprintln!("\nThere has been an error while trying to parse/access your configuration file.");
+                eprintln!("Typically your configuration folder is made and found at ~/.config/networkd-wireguard-manager/");
+                eprintln!("Check that this is not a permission error, if it is reload the application and everything should work normally.");
+                eprintln!("The app will now exit.");
+                std::process::exit(1);
             }
         };
-        Self {
-            menu: Menu::default(),
-            sidebar: Sidebar::new(&config),
-            central_panel: Panel::default(),
-            config,
-            style: AppStyle::default(),
-        }
+
+        store
     }
 }
 
@@ -53,7 +63,7 @@ impl App {
             }],
         ));
         egui_extras::install_image_loaders(&cc.egui_ctx);
-        Default::default()
+        Self::default()
     }
 }
 
