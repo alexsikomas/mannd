@@ -1,8 +1,8 @@
-use std::{cell::RefCell, path::PathBuf};
+use std::path::PathBuf;
 
 use egui::{
     epaint::text::{FontInsert, InsertFontFamily},
-    Color32, FontDefinitions,
+    Color32,
 };
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +23,7 @@ pub struct App {
 
 impl Default for App {
     fn default() -> Self {
+        // TODO: Add prompt for network location on fail
         let config = Config::new().unwrap();
         Self {
             menu: Menu::default(),
@@ -37,7 +38,7 @@ impl Default for App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         cc.egui_ctx.add_font(FontInsert::new(
-            "Outfit",
+            "Poppins",
             egui::FontData::from_static(include_bytes!(
                 "../assets/poppins-font/Poppins-Regular.ttf"
             )),
@@ -64,16 +65,21 @@ impl eframe::App for App {
     }
 }
 
+/// This is the communication format that functions
+/// return for processing in update loop
 pub enum Message {
     Config(ConfigMessage),
 }
 
+/// Operations that may be performed on a path,
+/// used by `UpdateWgPath`
 pub enum PathOptions {
     Add,
     Remove,
     RemoveAll,
 }
 
+/// Handled by `config`
 pub enum ConfigMessage {
     UpdateWgPath(PathBuf, PathOptions),
     UpdateNetworkPath(PathBuf),
@@ -82,6 +88,7 @@ pub enum ConfigMessage {
 }
 
 impl App {
+    /// Sends `Message` to relavent `handle_message` function
     fn handle_message(&mut self, message: Message) {
         match message {
             Message::Config(conf) => self.config.handle_message(conf),

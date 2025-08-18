@@ -63,7 +63,6 @@ impl Config {
         config.config_path = config_path;
 
         if let Err(e) = fs::exists(&config.network.path) {
-            // possibly use channels to prompt for location in event it is somewhere else
             panic!("Cannot find systemd network folder! Check if it exists. {e}");
         }
 
@@ -135,16 +134,19 @@ impl Default for Wireguard {
 }
 
 impl Wireguard {
+    /// Adds a path to the wireguard folders
     fn add_path(&mut self, path: PathBuf) {
         self.folders.push(path);
     }
 
+    /// Removes a path from the wireguard folders
     fn remove_path(&mut self, path: PathBuf) {
         if let Some(i) = self.folders.iter().position(|s| *s == path) {
             self.folders.remove(i);
         }
     }
 
+    /// Removes all the folders in the wireguard configuration
     fn remove_all_paths(&mut self) {
         self.folders = vec![];
     }

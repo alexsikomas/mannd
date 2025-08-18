@@ -42,6 +42,10 @@ impl Default for Sidebar {
 }
 
 impl Sidebar {
+    /// Creates a new sidebar instance
+    ///
+    /// # Panics
+    /// If the network path cannot be found this will panic
     pub fn new(config: &Config) -> Self {
         let network_options = NetworkOptions {
             path: config.network.path.clone(),
@@ -69,6 +73,8 @@ impl Sidebar {
         view
     }
 
+    /// Render loop to be sent back to the controller in the update loop,
+    /// returns a vector of messages to be processed in the update loop.
     pub fn render(&mut self, ctx: &egui::Context) -> Vec<Message> {
         let mut messages = vec![];
         egui::SidePanel::left("left_panel").show(ctx, |ui| {
@@ -78,6 +84,8 @@ impl Sidebar {
         messages
     }
 
+    /// Renders the buttons in the sidebar, if images cannot be loaded
+    /// they are replaced by a red triangle
     pub fn render_config_buttons(
         &mut self,
         ctx: &egui::Context,
@@ -109,6 +117,7 @@ impl Sidebar {
             });
     }
 
+    /// Renders the config window when `config_open` is true
     fn render_config_ui(&mut self, ctx: &egui::Context, messages: &mut Vec<Message>) {
         egui::Window::new("Configuration")
             .open(&mut self.config_open)
@@ -147,7 +156,8 @@ impl Sidebar {
                             messages.push(Message::Config(ConfigMessage::UpdateNetworkPath(
                                 path.clone(),
                             )));
-                            self.wireguard_options.folders.push(path);
+                            // TODO: update possible interfaces
+                            self.network_options.path = path;
                         }
                     }
                 }
@@ -193,6 +203,7 @@ impl NetworkOptions {
             .collect())
     }
 
+    /// Renders the network side of the config window
     pub fn render(&mut self, ui: &mut Ui, fd: &mut FileDialog, messages: &mut Vec<Message>) {
         egui::Grid::new("network_grid")
             .num_columns(2)
@@ -205,7 +216,7 @@ impl NetworkOptions {
                     .corner_radius(CornerRadius::same(5))
                     .show(ui, |ui| {
                         ui.horizontal_centered(|ui| {
-                            ui.label("/etc/systemd/network/");
+                            ui.label(self.path.to_str().unwrap());
                             if ui
                                 .button(
                                     egui::RichText::new("...")
@@ -259,6 +270,10 @@ struct WireguardOptions {
 }
 
 impl WireguardOptions {
+    /// Renders the wireguard side of the config menu
+    ///
+    /// # Panics
+    /// If any wireguard folder path causes an error
     pub fn render(&mut self, ui: &mut Ui, fd: &mut FileDialog) {
         let wg_button = ui.button("Add WireGuard Folder");
         if wg_button.clicked() {

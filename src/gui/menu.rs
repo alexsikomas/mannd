@@ -5,7 +5,9 @@ use std::fs;
 
 #[derive(Serialize, Deserialize)]
 pub struct Menu {
+    /// Shows license window
     show_license: bool,
+    /// Shows credits window
     show_credits: bool,
     connected_colour: Color32,
     disconnected_colour: Color32,
@@ -23,6 +25,7 @@ impl Default for Menu {
 }
 
 impl Menu {
+    /// Render loop to be sent back to the controller in the update loop
     pub fn render(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
@@ -43,6 +46,8 @@ impl Menu {
 
                 self.credits_window(ctx, ui);
                 self.license_window(ctx, ui);
+
+                // Makes connection status on the right rather than left
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add(
                         egui::Image::new(egui::include_image!("../../assets/gui/circle.svg"))
@@ -59,6 +64,7 @@ impl Menu {
         });
     }
 
+    /// Renders the credits window to the screen if `show_credits` is `true`
     fn credits_window(&mut self, ctx: &egui::Context, ui: &mut Ui) {
         // TODO: This looks messy, clean up structure or seperate into functions
         egui::Window::new("Credits")
@@ -68,6 +74,8 @@ impl Menu {
                     "Acknowledgements to various resources which made this application possible.",
                 ));
                 ui.add_space(10.);
+
+                // Links section
                 egui::Grid::new("credits_grid")
                     .num_columns(2)
                     .spacing([10.0, 1.0])
@@ -81,9 +89,8 @@ impl Menu {
                             "https://github.com/itfoundry/Poppins",
                         );
                         ui.end_row();
-                        let mut job = LayoutJob::default();
 
-                        
+                        let mut job = LayoutJob::default();
                         RichText::new("Icons: ").append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
                         RichText::new("[1]").small().raised().append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
                         ui.label(job);
@@ -96,6 +103,8 @@ impl Menu {
                     "There are also numerous other Rust crates which I'm thankful for, please check the Cargo.toml for more details.",
                 ));
 
+
+                // footnote
                 let mut job = LayoutJob::default();
                 RichText::new("[1] ").small().raised().append_to(&mut job, ui.style(), egui::FontSelection::Default, egui::Align::Center);
                 RichText::new(
@@ -105,6 +114,7 @@ impl Menu {
             });
     }
 
+    /// Renders the license window to the screen if `show_license` is `true`
     fn license_window(&mut self, ctx: &egui::Context, ui: &mut Ui) {
         let window = egui::Window::new("License");
         window.open(&mut self.show_license).show(ctx, |ui| {
