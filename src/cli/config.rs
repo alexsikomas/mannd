@@ -4,7 +4,6 @@ use std::{
     path::{self, PathBuf},
 };
 
-use egui::load::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::{app::ConfigMessage, app::PathOptions};
@@ -38,59 +37,38 @@ impl Config {
     ///
     /// Ensures that configuration directory and files exist
     pub fn new() -> Result<Self, ConfigError> {
-        let mut config = Self::default();
-        let mut config_path: PathBuf;
-
-        if let Some(path) = dirs::config_dir() {
-            config_path = path;
-        } else {
-            return Err(ConfigError::ConfigDirNotFound);
-        }
+        let mut config_path = dirs::config_dir().ok_or(ConfigError::ConfigDirNotFound)?;
 
         config_path.push("networkd-wireguard-manager");
         fs::create_dir_all(&config_path)?;
 
         config_path.push("config.toml");
-        let toml_file = fs::read_to_string(&config_path);
-        config = match toml_file {
-            Ok(data) => match toml::from_str(&data) {
-                Ok(d) => d,
-                Err(e) => {
-                    return Err(ConfigError::TomlDeserialize(e));
-                }
-            },
+        // TODO: Make write_default_config function to simplify below
+        let toml_file = fs::read_to_string(&config_path)?;
+
+        let mut config: Config = match toml::from_str(&toml_file) {
+            Ok(c) => c,
             Err(_) => {
                 let default_config = Self::default();
-                // BUG: will make an empty config if serialisation fails
-                let default_toml = match toml::to_string(&default_config) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        return Err(ConfigError::TomlSerialize(e));
-                    }
-                };
+                let default_toml = toml::to_string(&default_config)?;
                 fs::write(&config_path, default_toml)?;
                 default_config
             }
         };
         config.config_path = config_path;
 
-        if let Err(e) = fs::exists(&config.network.path) {
-            return Err(ConfigError::Io(io::Error::new(
+        if std::path::Path::exists(&config.network.path) {
+            Ok(config)
+        } else {
+            Err(ConfigError::Io(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Cannot find systemd network folder!",
-            )));
+            )))
         }
-
-        Ok(config)
     }
 
     fn update_config(&self) -> Result<(), ConfigError> {
-        let content = match toml::to_string(&self) {
-            Ok(c) => c,
-            Err(e) => {
-                return Err(ConfigError::TomlSerialize(e));
-            }
-        };
+        let content = toml::to_string(&self)?;
         fs::write(&self.config_path, content)?;
         Ok(())
     }
@@ -102,7 +80,7 @@ impl Config {
                     self.wireguard.add_path(path);
                 }
                 PathOptions::Remove => {
-                    self.wireguard.remove_path(path);
+                    self.wireguard.remove_path(&path);
                 }
                 PathOptions::RemoveAll => {
                     self.wireguard.remove_all_paths();
@@ -163,10 +141,8 @@ impl Wireguard {
     }
 
     /// Removes a path from the wireguard folders
-    fn remove_path(&mut self, path: PathBuf) {
-        if let Some(i) = self.folders.iter().position(|s| *s == path) {
-            self.folders.remove(i);
-        }
+    fn remove_path(&mut self, path: &PathBuf) {
+        self.folders.retain(|p| p != path);
     }
 
     /// Removes all the folders in the wireguard configuration
@@ -197,16 +173,15 @@ impl Default for Network {
 
 impl Network {
     fn update_active(&mut self, cur: String) -> Result<(), ConfigError> {
-        let mut interface_path = self.path.clone();
-        interface_path.push(cur.clone());
-        if std::path::Path::exists(&interface_path) {
+        if std::path::Path::exists(&self.path.join(&cur)) {
             self.active_interface = Some(cur);
-            return Ok(());
+            Ok(())
+        } else {
+            Err(ConfigError::Io(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Could not find the specified interface in the network folder",
+            )))
         }
-        Err(ConfigError::Io(io::Error::new(
-            io::ErrorKind::NotFound,
-            "Could not find the specified interface in the network folder",
-        )))
     }
 
     fn update_boot(&mut self, boot: bool) {
@@ -216,17 +191,30 @@ impl Network {
     fn update_path(&mut self, path: PathBuf) -> Result<(), ConfigError> {
         if path::Path::exists(&path) {
             self.path = path;
-            return Ok(());
+            Ok(())
+        } else {
+            Err(ConfigError::Io(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Could not locate provided path, check that the application has permissions!",
+            )))
         }
-        Err(ConfigError::Io(io::Error::new(
-            io::ErrorKind::NotFound,
-            "Could not locate provided path, check that the application has permissions!",
-        )))
     }
 }
 
 impl From<io::Error> for ConfigError {
     fn from(value: io::Error) -> Self {
         ConfigError::Io(value)
+    }
+}
+
+impl From<toml::de::Error> for ConfigError {
+    fn from(value: toml::de::Error) -> Self {
+        ConfigError::TomlDeserialize(value)
+    }
+}
+
+impl From<toml::ser::Error> for ConfigError {
+    fn from(value: toml::ser::Error) -> Self {
+        ConfigError::TomlSerialize(value)
     }
 }
