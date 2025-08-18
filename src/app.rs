@@ -24,7 +24,12 @@ pub struct App {
 impl Default for App {
     fn default() -> Self {
         // TODO: Add prompt for network location on fail
-        let config = Config::new().unwrap();
+        let config = match Config::new() {
+            Ok(c) => c,
+            Err(e) => {
+                panic!("Failure during initialisation of config file, check log!")
+            }
+        };
         Self {
             menu: Menu::default(),
             sidebar: Sidebar::new(&config),
