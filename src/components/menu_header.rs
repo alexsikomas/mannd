@@ -1,7 +1,8 @@
-use dioxus::prelude::*;
+use dioxus::{logger::tracing::info, prelude::*};
 use dioxus_free_icons::{icons::fa_solid_icons::FaGear, Icon};
 #[component]
 pub fn MenuHeader() -> Element {
+    let mut settings_open = use_signal(|| false);
     rsx! {
         header { class: "sticky top-0 z-50 border-b border-border bg-card/50 backdrop-blur-sm",
             div { class: "container mx-auto flex items-center justify-between px-4 py-4",
@@ -11,7 +12,7 @@ pub fn MenuHeader() -> Element {
                         p { class: "text-sm text-muted-foreground", "For Networkd" }
                     }
                 }
-                button {
+                button { onclick: move |_| { settings_open.set(!settings_open()) },
                     Icon {
                         width: 30,
                         height: 30,
@@ -21,5 +22,16 @@ pub fn MenuHeader() -> Element {
                 }
             }
         }
+        SettingsMenu { open: settings_open }
+    }
+}
+#[component]
+fn SettingsMenu(open: Signal<bool>) -> Element {
+    if open() {
+        rsx! {
+            h2 { "TEST" }
+        }
+    } else {
+        rsx! {}
     }
 }

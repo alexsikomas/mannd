@@ -16,6 +16,7 @@ fn App() -> Element {
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
         document::Link { rel: "stylesheet", href: asset!("input.css") }
+        document::Link { rel: "stylesheet", href: asset!("assets/styles/main.css") }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
         MenuHeader {}
     }
