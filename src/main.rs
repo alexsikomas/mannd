@@ -1,18 +1,31 @@
-#![warn(clippy::all, rust_2018_idioms)]
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
-fn main() -> eframe::Result {
-    let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_transparent(true)
-            .with_inner_size([400.0, 300.0])
-            .with_min_inner_size([300.0, 220.0])
-            .with_close_button(true),
-        ..Default::default()
-    };
-    eframe::run_native(
-        "Networkd WireGuard Manager",
-        native_options,
-        Box::new(|cc| Ok(Box::new(networkd_wireguard_manager::App::new(cc)))),
-    )
+use dioxus::{
+    desktop::{Config, WindowBuilder},
+    dioxus_core::LaunchConfig, prelude::*,
+};
+const FAVICON: Asset = asset!("/assets/favicon.ico");
+const MAIN_CSS: Asset = asset!("/assets/main.css");
+const HEADER_SVG: Asset = asset!("/assets/header.svg");
+const TAILWIND_CSS: Asset = asset!("/assets/tailwind.css");
+fn main() {
+    let window = WindowBuilder::new().with_decorations(false);
+    LaunchBuilder::desktop().with_cfg(Config::new().with_window(window)).launch(App);
+}
+#[component]
+fn App() -> Element {
+    rsx! {
+        document::Link { rel: "icon", href: FAVICON }
+        document::Link { rel: "stylesheet", href: MAIN_CSS }
+        document::Link { rel: "stylesheet", href: TAILWIND_CSS }
+        Hero {}
+    }
+}
+#[component]
+pub fn Hero() -> Element {
+    rsx! {
+        div { id: "main",
+            div {
+                p { "Test" }
+            }
+        }
+    }
 }
