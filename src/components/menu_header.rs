@@ -4,7 +4,7 @@ use dioxus_free_icons::{icons::fa_solid_icons::FaGear, Icon};
 pub fn MenuHeader() -> Element {
     let mut settings_open = use_signal(|| false);
     rsx! {
-        header { class: "sticky top-0 z-50 border-b border-border bg-card/50 backdrop-blur-sm",
+        header { class: "sticky top-0 z-50 w-full border-b",
             div { class: "container mx-auto flex items-center justify-between px-4 py-4",
                 div { class: "flex items-center gap-3",
                     div {
@@ -22,7 +22,6 @@ pub fn MenuHeader() -> Element {
                 }
             }
         }
-        SettingsMenu { open: settings_open }
     }
 }
 #[component]

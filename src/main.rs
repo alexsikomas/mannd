@@ -1,14 +1,22 @@
 mod components;
 use crate::components::*;
 use dioxus::{
-    desktop::{Config, WindowBuilder},
+    desktop::{
+        tao::window::WindowAttributes, Config, LogicalPosition, LogicalSize,
+        WindowBuilder,
+    },
     dioxus_core::LaunchConfig, logger::tracing::info, prelude::*,
 };
 const FAVICON: Asset = asset!("/assets/favicon.ico");
 const HEADER_SVG: Asset = asset!("/assets/header.svg");
 const TAILWIND_CSS: Asset = asset!("/assets/styles/tailwind.css");
 fn main() {
-    let window = WindowBuilder::new().with_decorations(false);
+    let window = WindowBuilder::new()
+        .with_decorations(false)
+        .with_inner_size(LogicalSize::new(400, 600))
+        .with_min_inner_size(LogicalSize::new(350, 480))
+        .with_max_inner_size(LogicalSize::new(504, 896))
+        .with_minimizable(true);
     LaunchBuilder::desktop().with_cfg(Config::new().with_window(window)).launch(App);
 }
 #[component]

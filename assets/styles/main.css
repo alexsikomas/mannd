@@ -3,11 +3,12 @@
 /* App-wide styling */
 body {
     font-family: 'Poppins', sans-serif;
-    margin: 20px;
+    background-color: #fbf8f1;
+    color: #1c222b;
 }
 
 header {
-    max-width: 1200px;
+    background-color: #f5f1ea;
 }
 
 .poppins-thin {
