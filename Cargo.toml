@@ -1,13 +1,12 @@
 [package]
 name = "networkd-wg-manager"
 version = "0.1.0"
-authors = ["Alexander Sikomas <115405642+alexandersikomas@users.noreply.github.com>"]
+authors = ["Alexander Sikomas"]
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 dioxus = { version = "0.6.0", features = [] }
+dioxus-free-icons = { version = "0.9", features = ["font-awesome-solid"] }
 
 [features]
 default = ["desktop"]
