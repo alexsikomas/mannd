@@ -51,12 +51,12 @@ fn SettingsMenu(open: Signal<bool>) -> Element {
                     }
                 }
                 div { class: "gap-2 flex p-2",
-                    for (index , & item) in opts.read().iter().enumerate() {
+                    for & item in opts.read().iter() {
                         if *current.read() == item {
                             button { class: "p-1 bg-[#f9c647] rounded-lg", "{item}" }
                         } else {
                             button {
-                                onclick: move |_| { current.set(opts()[(index)]) },
+                                onclick: move |_| { current.set(item) },
                                 class: "p-1",
                                 "{item}"
                             }
