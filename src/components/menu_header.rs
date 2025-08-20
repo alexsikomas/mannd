@@ -1,6 +1,6 @@
 use dioxus::{logger::tracing::info, prelude::*};
 use dioxus_free_icons::{
-    icons::fa_solid_icons::{FaGear, FaXmark},
+    icons::fa_solid_icons::{FaFolderPlus, FaGear, FaUpload, FaXmark},
     Icon,
 };
 #[component]
@@ -16,7 +16,9 @@ pub fn MenuHeader() -> Element {
                     }
                 }
                 button {
-                    onclick: move |_| { settings_open.set(!settings_open()) },
+                    onclick: move |_| {
+                        settings_open.toggle();
+                    },
                     class: "p-1",
                     Icon {
                         width: 30,
@@ -50,7 +52,7 @@ fn SettingsMenu(open: Signal<bool>) -> Element {
                         icon: FaXmark,
                     }
                 }
-                div { class: "gap-2 flex p-2",
+                div { class: "gap-2 flex p-2 pb-5",
                     for & item in opts.read().iter() {
                         if *current.read() == item {
                             button { class: "p-1 bg-[#f9c647] rounded-lg", "{item}" }
@@ -63,9 +65,61 @@ fn SettingsMenu(open: Signal<bool>) -> Element {
                         }
                     }
                 }
+                if *current.read() == "WireGuard" {
+                    WireguardMenu {}
+                } else {
+                    NetworkMenu {}
+                }
             }
         }
     } else {
         rsx! {}
     }
+}
+#[component]
+fn WireguardMenu() -> Element {
+    let mut is_open = use_signal(|| false);
+    rsx! {
+        div {
+            class: format!(
+                "transition-all ease-out w-5/6 mx-auto mt-4 bg-[#fbf8f1] shadow-md rounded-md overflow-hidden {}",
+                if *is_open.read() { " outline-2 outline-[#f9c647]" } else { "" },
+            ),
+            div { class: "rounded-md",
+                h2 { class: "mb-0",
+                    button {
+                        class: format!(
+                            "flex items-center justify-between w-full p-4 font-medium text-left rounded-md {}",
+                            if *is_open.read() { "bg-[#f9c647]" } else { "bg-[#fbf8f1]" },
+                        ),
+                        onclick: move |_| {
+                            is_open.toggle();
+                        },
+                        span { "Folders" }
+                    }
+                }
+                div {
+                    class: format!(
+                        "transition-all duration-200 overflow-hidden {}",
+                        (if *is_open.read() { "ease-in max-h-screen" } else { "ease-out max-h-0" }),
+                    ),
+                    div { class: "p-4",
+                        button { class: "relative p-1 flex items-center gap-2",
+                            Icon {
+                                width: 16,
+                                height: 16,
+                                fill: "black",
+                                icon: FaFolderPlus,
+                            }
+                            "Add Folder"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+#[component]
+fn NetworkMenu() -> Element {
+    rsx! {}
 }
