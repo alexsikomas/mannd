@@ -8,12 +8,12 @@ use dioxus_free_icons::{
 pub fn MenuHeader() -> Element {
     let mut settings_open = use_signal(|| false);
     rsx! {
-        header { class: "sticky top-0 z-50 w-full border-b-1 border-gray-500/50 bg-[#fff7ea] shadow-sm",
+        header { class: "sticky top-0 z-50 w-full border-b-1 border-gray-500/50 bg-muted shadow-sm",
             div { class: "container mx-auto flex items-center justify-between px-6 py-5",
                 div { class: "flex items-center gap-3",
                     div {
-                        h1 { class: "text-3xl font-bold text-[#dfa107]", "WireGuard Manager" }
-                        p { class: "text-sm text-gray-700 font-medium tracking-wide",
+                        h1 { class: "text-3xl font-bold text-foreground", "WireGuard Manager" }
+                        p { class: "text-sm text-foreground/80 font-medium tracking-wide",
                             "For Networkd"
                         }
                     }
@@ -22,7 +22,7 @@ pub fn MenuHeader() -> Element {
                     onclick: move |_| {
                         settings_open.toggle();
                     },
-                    class: "p-3 bg-[#f9c647] hover:bg-[#f7b731] rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 active:scale-95 hover:outline-2",
+                    class: "p-3 bg-accent hover:bg-accent-2 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 active:scale-95 hover:outline-2 focus:outline-none",
                     Icon {
                         width: 30,
                         height: 30,
@@ -55,7 +55,7 @@ fn SettingsMenu(open: Signal<bool>) -> Element {
                     onclick: move |_| {
                         open.toggle();
                     },
-                    class: "absolute top-6 right-4 p-2 bg-[#FF784F] hover:bg-orange-600 rounded-xl shadow-md hover:shadow-lg transition-all duration-100 transform hover:scale-105 hover:outline-2",
+                    class: "absolute top-6 right-4 p-2 bg-warn hover:bg-warn-2 rounded-xl shadow-md hover:shadow-lg transition-all duration-100 transform hover:scale-105 hover:outline-2 focus:outline-none",
                     Icon {
                         width: 32,
                         height: 32,
@@ -66,13 +66,13 @@ fn SettingsMenu(open: Signal<bool>) -> Element {
                 div { class: "flex gap-3 p-6 pb-4 border-b border-gray-200/50",
                     for & item in opts.read().iter() {
                         if *current.read() == item {
-                            button { class: "px-6 py-3 bg-[#f9c647] text-gray-800 font-semibold rounded-xl shadow-lg transform scale-105 transition-all duration-100 outline-2",
+                            button { class: "px-6 py-3 bg-accent-2 text-gray-800 font-semibold rounded-xl shadow-lg transform scale-105 transition-all duration-100 outline-2",
                                 "{item}"
                             }
                         } else {
                             button {
                                 onclick: move |_| { current.set(item) },
-                                class: "px-6 py-3 bg-white/80 hover:bg-[#f9c647]/20 text-gray-600 hover:text-gray-800 font-medium rounded-xl shadow-md hover:shadow-lg transition-all duration-100 transform hover:scale-105",
+                                class: "px-6 py-3 bg-white/80 hover:bg-accent/20 text-gray-600 hover:text-gray-800 font-medium rounded-xl shadow-md hover:shadow-lg transition-all duration-100 transform hover:scale-105",
                                 "{item}"
                             }
                         }
@@ -99,7 +99,7 @@ fn WireguardMenu() -> Element {
         div {
             class: format!(
                 "transition-all ease-out duration-300 w-full mx-auto bg-white/80 shadow-lg rounded-2xl overflow-hidden border border-gray-200/50 {}",
-                if *is_open.read() { "" } else { "hover:border-[#f9c647]/30" },
+                if *is_open.read() { "" } else { "hover:border-accent/20" },
             ),
             div { class: "rounded-2xl",
                 h2 { class: "mb-0",
@@ -107,7 +107,7 @@ fn WireguardMenu() -> Element {
                         class: format!(
                             "flex items-center justify-between w-full p-6 font-semibold text-left transition-all duration-200 rounded-2xl {}",
                             if *is_open.read() {
-                                "bg-gradient-to-r from-[#f9c647] to-[#f7b731] text-gray-800 shadow-lg"
+                                "bg-accent text-gray-800 shadow-lg"
                             } else {
                                 "bg-gradient-to-r from-white/90 to-[#fbf8f1] text-gray-700 hover:from-[#f9c647]/10 hover:to-[#f7b731]/10"
                             },
@@ -140,7 +140,7 @@ fn WireguardMenu() -> Element {
                         }),
                     ),
                     div { class: "p-6 bg-gradient-to-b from-white/50 to-[#fbf8f1]/30",
-                        button { class: "flex items-center gap-3 px-6 py-4 bg-gradient-to-r from-[#f9c647] to-[#f7b731] hover:from-[#f7b731] to-[#f5a623] text-gray-800 font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 active:scale-95",
+                        button { class: "flex items-center gap-3 px-6 py-4 bg-accent hover:bg-accent-2 text-gray-800 font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 active:scale-95",
                             Icon {
                                 width: 16,
                                 height: 16,
@@ -162,12 +162,12 @@ fn NetworkMenu() -> Element {
     let mut selected_interface = use_signal(|| "wg0".to_string());
     let mut config_path = use_signal(|| "/etc/wireguard/wg0.conf".to_string());
     rsx! {
-        div { class: "w-5/6 mx-auto mt-4 bg-[#fbf8f1] shadow-md rounded-md overflow-hidden",
+        div { class: "w-5/6 mx-auto mt-4 bg-background shadow-md rounded-md overflow-hidden",
             div { class: "p-4 space-y-4",
                 div { class: "flex items-center justify-between",
-                    label { class: "font-medium text-gray-700", "Active Interface:" }
+                    label { class: "font-medium text-foreground", "Active Interface:" }
                     select {
-                        class: "bg-[#fbf8f1] border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#f9c647] focus:border-[#f9c647] transition-all",
+                        class: "border border-gray-300 hover:border-gray-500 rounded-md px-1 py-1 text-sm transition-all focus:outline-none",
                         value: "{selected_interface}",
                         onchange: move |evt| selected_interface.set(evt.value()),
                         option { value: "wg0", "wg0" }
@@ -186,8 +186,8 @@ fn NetworkMenu() -> Element {
                         }
                         div {
                             class: format!(
-                                "w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-[#f9c647]/25 rounded-full peer transition-all {}",
-                                if start_on_boot() { "peer-checked:bg-[#f9c647]" } else { "" },
+                                "w-11 h-6 bg-gray-200 rounded-full peer transition-all {}",
+                                if start_on_boot() { "peer-checked:bg-accent-2" } else { "" },
                             ),
                         }
                         div {
@@ -199,13 +199,13 @@ fn NetworkMenu() -> Element {
                     }
                 }
                 div { class: "space-y-2",
-                    label { class: "block font-medium text-gray-700", "Config Path:" }
-                    div { class: "flex items-center gap-2",
-                        div { class: "flex-1 bg-[#fbf8f1] border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-600 truncate",
+                    div { class: "flex items-center gap-3",
+                        label { class: "block font-medium text-gray-700 mr-5", "Config Path:" }
+                        div { class: "flex-1 bg-background border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-600 truncate",
                             "{config_path}"
                         }
                         button {
-                            class: "btn-main bg-[#f9c647] hover:bg-[#f7b731] px-3 py-2 rounded-md text-sm font-medium transition-all inset-shadow-2xs",
+                            class: "btn-main focus:outline-none bg-accent hover:bg-accent-2 hover:outline-1 px-3 py-2 rounded-md text-sm font-medium transition-all inset-shadow-2xs",
                             onclick: move |_| {
                                 println!("Opening file dialog...");
                             },

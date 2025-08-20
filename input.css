@@ -1,3 +1,18 @@
 @import "tailwindcss";
 @source "./src/**/*.{rs,html,css}";
-@source "./assets/styles/*.css"
+@source "./assets/styles/*.css";
+
+@theme {
+    --color-background: oklch(0.98 0.01 85.87);
+    --color-card: oklch(0.99 0.01 85.87);
+    --color-popover: oklch(0.99 0.01 85.87);
+    --color-primary: oklch(0.85 0.15 85.87);
+    --color-muted: oklch(0.96 0.01 85.87);
+    --color-muted-foreground: oklch(0.45 0.02 258.34);
+    --color-accent: oklch(0.85 0.15 85.87);
+    --color-accent-2: oklch(0.8181 0.156 80.65);
+    --color-warn: oklch(0.62 0.22 23.4);
+    --color-warn-2: oklch(0.56 0.22 23.4);
+    --color-border: oklch(0.92 0.01 85.87);
+    --color-input: oklch(0.98 0.01 85.87);
+}
