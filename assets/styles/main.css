@@ -11,7 +11,11 @@ header {
     background-color: #f5f1ea;
 }
 
-button:hover {
+button {
+    transition: all 0.1s ease-in-out;
+}
+
+.btn-main:hover {
     background-color: #f9c647;
     border-radius: var(--radius-lg);
 }
