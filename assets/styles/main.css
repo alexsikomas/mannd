@@ -5,11 +5,16 @@ body {
     font-family: 'Poppins', sans-serif;
     background-color: #fbf8f1;
     color: #1c222b;
+    -webkit-user-select: none;
+    /* Safari */
+    -moz-user-select: none;
+    /* Firefox */
+    -ms-user-select: none;
+    /* IE/Edge */
+    user-select: none;
+    /* Standard */
 }
 
-header {
-    background-color: #f5f1ea;
-}
 
 button {
     transition: all 0.1s ease-in-out;

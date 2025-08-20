@@ -4,17 +4,16 @@ use dioxus_free_icons::{
     Icon,
 };
 #[component]
+/// Header component containing the application name, subtitle and settings icon
 pub fn MenuHeader() -> Element {
     let mut settings_open = use_signal(|| false);
     rsx! {
-        header { class: "sticky top-0 z-50 w-full border-b border-gray-200/50 bg-gradient-to-r from-[#fffbf4] to-[#fbf8f1] backdrop-blur-sm shadow-sm",
+        header { class: "sticky top-0 z-50 w-full border-b-1 border-gray-500/50 bg-[#fff7ea] shadow-sm",
             div { class: "container mx-auto flex items-center justify-between px-6 py-5",
                 div { class: "flex items-center gap-3",
                     div {
-                        h1 { class: "text-3xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent",
-                            "WireGuard Manager"
-                        }
-                        p { class: "text-sm text-gray-500 font-medium tracking-wide",
+                        h1 { class: "text-3xl font-bold text-[#dfa107]", "WireGuard Manager" }
+                        p { class: "text-sm text-gray-700 font-medium tracking-wide",
                             "For Networkd"
                         }
                     }
@@ -23,7 +22,7 @@ pub fn MenuHeader() -> Element {
                     onclick: move |_| {
                         settings_open.toggle();
                     },
-                    class: "p-3 bg-[#f9c647] hover:bg-[#f7b731] rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 active:scale-95",
+                    class: "p-3 bg-[#f9c647] hover:bg-[#f7b731] rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 active:scale-95 hover:outline-2",
                     Icon {
                         width: 30,
                         height: 30,
@@ -37,12 +36,13 @@ pub fn MenuHeader() -> Element {
     }
 }
 #[component]
+/// Renders the settings menu, takes in boolean to determine if to render
 fn SettingsMenu(open: Signal<bool>) -> Element {
     let opts = use_signal(|| vec!["WireGuard", "Network"]);
     let mut current = use_signal(|| "WireGuard");
     if open() {
         rsx! {
-            div { class: "fixed inset-0 z-50 transition-all ease-in-out duration-300 bg-black/60 backdrop-blur-sm",
+            div { class: "fixed inset-0 z-50 transition-all ease-out duration-500 bg-black/60 backdrop-blur-sm hover:bg-black/70",
                 button {
                     onclick: move |_| {
                         open.toggle();
@@ -55,10 +55,10 @@ fn SettingsMenu(open: Signal<bool>) -> Element {
                     onclick: move |_| {
                         open.toggle();
                     },
-                    class: "absolute top-4 right-4 p-2 bg-[#FF5F15] hover:bg-[] rounded-xl shadow-md hover:shadow-lg transition-all duration-200 transform hover:scale-105",
+                    class: "absolute top-6 right-4 p-2 bg-[#FF784F] hover:bg-orange-600 rounded-xl shadow-md hover:shadow-lg transition-all duration-100 transform hover:scale-105 hover:outline-2",
                     Icon {
-                        width: 20,
-                        height: 20,
+                        width: 32,
+                        height: 32,
                         fill: "black",
                         icon: FaXmark,
                     }
@@ -66,13 +66,13 @@ fn SettingsMenu(open: Signal<bool>) -> Element {
                 div { class: "flex gap-3 p-6 pb-4 border-b border-gray-200/50",
                     for & item in opts.read().iter() {
                         if *current.read() == item {
-                            button { class: "px-6 py-3 bg-[#f9c647] text-gray-800 font-semibold rounded-xl shadow-lg transform scale-105 transition-all duration-200",
+                            button { class: "px-6 py-3 bg-[#f9c647] text-gray-800 font-semibold rounded-xl shadow-lg transform scale-105 transition-all duration-100 outline-2",
                                 "{item}"
                             }
                         } else {
                             button {
                                 onclick: move |_| { current.set(item) },
-                                class: "px-6 py-3 bg-white/80 hover:bg-[#f9c647]/20 text-gray-600 hover:text-gray-800 font-medium rounded-xl shadow-md hover:shadow-lg transition-all duration-200 transform hover:scale-105",
+                                class: "px-6 py-3 bg-white/80 hover:bg-[#f9c647]/20 text-gray-600 hover:text-gray-800 font-medium rounded-xl shadow-md hover:shadow-lg transition-all duration-100 transform hover:scale-105",
                                 "{item}"
                             }
                         }
@@ -92,23 +92,20 @@ fn SettingsMenu(open: Signal<bool>) -> Element {
     }
 }
 #[component]
+/// Renders the WireGuard section in the settings menu
 fn WireguardMenu() -> Element {
     let mut is_open = use_signal(|| false);
     rsx! {
         div {
             class: format!(
-                "transition-all ease-out duration-300 w-full mx-auto bg-white/80 shadow-lg hover:shadow-xl rounded-2xl overflow-hidden border border-gray-200/50 {}",
-                if *is_open.read() {
-                    "ring-2 ring-[#f9c647]/50 shadow-[#f9c647]/20"
-                } else {
-                    "hover:border-[#f9c647]/30"
-                },
+                "transition-all ease-out duration-300 w-full mx-auto bg-white/80 shadow-lg rounded-2xl overflow-hidden border border-gray-200/50 {}",
+                if *is_open.read() { "" } else { "hover:border-[#f9c647]/30" },
             ),
             div { class: "rounded-2xl",
                 h2 { class: "mb-0",
                     button {
                         class: format!(
-                            "flex items-center justify-between w-full p-6 font-semibold text-left transition-all duration-300 rounded-2xl {}",
+                            "flex items-center justify-between w-full p-6 font-semibold text-left transition-all duration-200 rounded-2xl {}",
                             if *is_open.read() {
                                 "bg-gradient-to-r from-[#f9c647] to-[#f7b731] text-gray-800 shadow-lg"
                             } else {
@@ -159,6 +156,7 @@ fn WireguardMenu() -> Element {
     }
 }
 #[component]
+/// Renders the network side in the settings menu
 fn NetworkMenu() -> Element {
     let mut start_on_boot = use_signal(|| false);
     let mut selected_interface = use_signal(|| "wg0".to_string());
