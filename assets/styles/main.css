@@ -11,6 +11,23 @@ header {
     background-color: #f5f1ea;
 }
 
+button:hover {
+    background-color: #f9c647;
+    border-radius: var(--radius-lg);
+}
+
+#settings-dialog {
+    border: none;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+#settings-dialog::backdrop {
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+
 .poppins-thin {
     font-family: "Poppins", sans-serif;
     font-weight: 100;

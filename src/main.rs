@@ -15,7 +15,6 @@ fn main() {
         .with_decorations(false)
         .with_inner_size(LogicalSize::new(400, 600))
         .with_min_inner_size(LogicalSize::new(350, 480))
-        .with_max_inner_size(LogicalSize::new(504, 896))
         .with_minimizable(true);
     LaunchBuilder::desktop().with_cfg(Config::new().with_window(window)).launch(App);
 }
