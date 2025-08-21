@@ -15,8 +15,7 @@
 </p>
 
 ### Acknowledgements
-*  [Rust](https://www.rust-lang.org/)
-*  [EGui](https://github.com/emilk/egui)
+*  [Dioxus](https://github.com/DioxusLabs/dioxus)
 *  Icons from [Font Awesome](https://fontawesome.com/)
 *  Font family used in application: [Poppins](https://github.com/itfoundry/Poppins)
 *  Graphics created with [Inkscape](https://inkscape.org/)

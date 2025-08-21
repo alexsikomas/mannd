@@ -3,10 +3,14 @@ use dioxus_free_icons::{
     icons::fa_solid_icons::{FaChevronDown, FaFolderPlus, FaGear, FaXmark},
     Icon,
 };
+
+use crate::utils;
+
 #[component]
 /// Header component containing the application name, subtitle and settings icon
 pub fn MenuHeader() -> Element {
     let mut settings_open = use_signal(|| false);
+
     rsx! {
         header { class: "sticky top-0 z-50 w-full border-b-1 border-gray-500/50 bg-muted shadow-sm",
             div { class: "container mx-auto flex items-center justify-between px-6 py-5",
@@ -35,26 +39,25 @@ pub fn MenuHeader() -> Element {
         SettingsMenu { open: settings_open }
     }
 }
+
 #[component]
 /// Renders the settings menu, takes in boolean to determine if to render
 fn SettingsMenu(open: Signal<bool>) -> Element {
     let opts = use_signal(|| vec!["WireGuard", "Network"]);
     let mut current = use_signal(|| "WireGuard");
+
+    let toggle_oepn = move |_| {
+        open.toggle();
+    };
+
     if open() {
         rsx! {
             div { class: "fixed inset-0 z-50 transition-all ease-out duration-500 bg-black/60 backdrop-blur-sm hover:bg-black/70",
-                button {
-                    onclick: move |_| {
-                        open.toggle();
-                    },
-                    class: "w-full h-full",
-                }
+                button { onclick: toggle_oepn, class: "w-full h-full" }
             }
             div { class: "fixed z-50 w-11/12 max-w-4xl h-5/6 top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-gradient-to-br from-[#fffbf4] to-[#fbf8f1] shadow-2xl border border-gray-200/50 animate-in fade-in-0 zoom-in-95 duration-300",
                 button {
-                    onclick: move |_| {
-                        open.toggle();
-                    },
+                    onclick: toggle_oepn,
                     class: "absolute top-6 right-4 p-2 bg-warn hover:bg-warn-2 rounded-xl shadow-md hover:shadow-lg transition-all duration-100 transform hover:scale-105 hover:outline-2 focus:outline-none",
                     Icon {
                         width: 32,
@@ -66,11 +69,14 @@ fn SettingsMenu(open: Signal<bool>) -> Element {
                 div { class: "flex gap-3 p-6 pb-4 border-b border-gray-200/50",
                     for & item in opts.read().iter() {
                         if *current.read() == item {
-                            button { class: "px-6 py-3 bg-accent-2 text-gray-800 font-semibold rounded-xl shadow-lg transform scale-105 transition-all duration-100 outline-2",
+                            button {
+                                key: "{item}",
+                                class: "px-6 py-3 bg-accent-2 text-gray-800 font-semibold rounded-xl shadow-lg transform scale-105 transition-all duration-100 outline-2",
                                 "{item}"
                             }
                         } else {
                             button {
+                                key: "{item}",
                                 onclick: move |_| { current.set(item) },
                                 class: "px-6 py-3 bg-white/80 hover:bg-accent/20 text-gray-600 hover:text-gray-800 font-medium rounded-xl shadow-md hover:shadow-lg transition-all duration-100 transform hover:scale-105",
                                 "{item}"
@@ -91,6 +97,7 @@ fn SettingsMenu(open: Signal<bool>) -> Element {
         rsx! {}
     }
 }
+
 #[component]
 /// Renders the WireGuard section in the settings menu
 fn WireguardMenu() -> Element {
@@ -153,12 +160,14 @@ fn WireguardMenu() -> Element {
         }
     }
 }
+
 #[component]
 /// Renders the network side in the settings menu
 fn NetworkMenu() -> Element {
-    let mut start_on_boot = use_signal(|| false);
     let mut selected_interface = use_signal(|| "wg0".to_string());
-    let mut config_path = use_signal(|| "/etc/wireguard/wg0.conf".to_string());
+
+    let mut app_config = use_context::<Signal<utils::config::Config>>();
+    let start_on_boot = app_config.read().network.start_on_boot;
     rsx! {
         div { class: "w-5/6 mx-auto mt-4 bg-background shadow-md rounded-md overflow-hidden",
             div { class: "p-4 space-y-4",
@@ -179,19 +188,19 @@ fn NetworkMenu() -> Element {
                         input {
                             r#type: "checkbox",
                             class: "sr-only peer",
-                            checked: start_on_boot(),
-                            onchange: move |evt| start_on_boot.set(evt.checked()),
+                            checked: start_on_boot,
+                            onchange: move |evt| app_config.write().network.start_on_boot = evt.checked(),
                         }
                         div {
                             class: format!(
                                 "w-11 h-6 bg-gray-200 rounded-full peer transition-all {}",
-                                if start_on_boot() { "peer-checked:bg-accent-2" } else { "" },
+                                if start_on_boot { "peer-checked:bg-accent-2" } else { "" },
                             ),
                         }
                         div {
                             class: format!(
                                 "absolute top-[2px] left-[2px] bg-white border border-gray-300 rounded-full h-5 w-5 transition-all {}",
-                                if start_on_boot() { "translate-x-full border-white" } else { "" },
+                                if start_on_boot { "translate-x-full border-white" } else { "" },
                             ),
                         }
                     }
@@ -200,7 +209,7 @@ fn NetworkMenu() -> Element {
                     div { class: "flex items-center gap-3",
                         label { class: "block font-medium text-gray-700 mr-5", "Config Path:" }
                         div { class: "flex-1 bg-background border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-600 truncate",
-                            "{config_path}"
+                            "{app_config.read().network.path.to_string_lossy()}"
                         }
                         button {
                             class: "btn-main focus:outline-none bg-accent hover:bg-accent-2 hover:outline-1 px-3 py-2 rounded-md text-sm font-medium transition-all inset-shadow-2xs",
