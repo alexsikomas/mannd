@@ -12,8 +12,6 @@ dioxus-free-icons = { version = "0.9", features = ["font-awesome-solid"] }
 default = ["desktop"]
 desktop = ["dioxus/desktop"]
 
-[profile]
-
 [profile.wasm-dev]
 inherits = "dev"
 opt-level = 1

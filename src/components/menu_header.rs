@@ -105,7 +105,7 @@ fn WireguardMenu() -> Element {
                 h2 { class: "mb-0",
                     button {
                         class: format!(
-                            "flex items-center justify-between w-full p-6 font-semibold text-left transition-all duration-200 rounded-2xl {}",
+                            "flex items-center justify-between w-full p-6 font-semibold text-left rounded-2xl {}",
                             if *is_open.read() {
                                 "bg-accent text-gray-800 shadow-lg"
                             } else {
@@ -118,7 +118,7 @@ fn WireguardMenu() -> Element {
                         span { class: "text-lg", "Folders" }
                         span {
                             class: format!(
-                                "transform transition-transform duration-300 text-xl {}",
+                                "text-xl transition-transform {}",
                                 if *is_open.read() { "rotate-180" } else { "" },
                             ),
                             Icon {
@@ -132,22 +132,20 @@ fn WireguardMenu() -> Element {
                 }
                 div {
                     class: format!(
-                        "transition-all duration-300 overflow-hidden {}",
-                        (if *is_open.read() {
-                            "ease-out max-h-96 opacity-100"
-                        } else {
-                            "ease-in max-h-0 opacity-0"
-                        }),
+                        "grid transition-[grid-template-rows] duration-300 ease-in-out {}",
+                        if *is_open.read() { "grid-rows-[1fr]" } else { "grid-rows-[0fr]" },
                     ),
-                    div { class: "p-6 bg-gradient-to-b from-white/50 to-[#fbf8f1]/30",
-                        button { class: "flex items-center gap-3 px-6 py-4 bg-accent hover:bg-accent-2 text-gray-800 font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 active:scale-95",
-                            Icon {
-                                width: 16,
-                                height: 16,
-                                fill: "black",
-                                icon: FaFolderPlus,
+                    div { class: "overflow-hidden",
+                        div { class: "p-6 bg-gradient-to-b from-white/50 to-[#fbf8f1]/30",
+                            button { class: "flex items-center gap-3 px-6 py-4 bg-accent hover:bg-accent-2 text-gray-800 font-semibold rounded-xl shadow-lg hover:shadow-xl hover:scale-105 active:scale-95",
+                                Icon {
+                                    width: 16,
+                                    height: 16,
+                                    fill: "black",
+                                    icon: FaFolderPlus,
+                                }
+                                "Add Folder"
                             }
-                            "Add Folder"
                         }
                     }
                 }
