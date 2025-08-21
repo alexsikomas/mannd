@@ -167,7 +167,11 @@ fn NetworkMenu() -> Element {
     let mut selected_interface = use_signal(|| "wg0".to_string());
 
     let mut app_config = use_context::<Signal<utils::config::Config>>();
-    let start_on_boot = app_config.read().network.start_on_boot;
+    let start_on_boot = use_memo(move || app_config.read().network.start_on_boot);
+    use_effect(move || {
+        let config = app_config.read();
+        config.update_config();
+    });
     rsx! {
         div { class: "w-5/6 mx-auto mt-4 bg-background shadow-md rounded-md overflow-hidden",
             div { class: "p-4 space-y-4",
@@ -177,9 +181,9 @@ fn NetworkMenu() -> Element {
                         class: "border border-gray-300 hover:border-gray-500 rounded-md px-1 py-1 text-sm transition-all focus:outline-none",
                         value: "{selected_interface}",
                         onchange: move |evt| selected_interface.set(evt.value()),
-                        option { value: "wg0", "wg0" }
-                        option { value: "wg1", "wg1" }
-                        option { value: "wg2", "wg2" }
+                        for interface in &app_config.read().network.interfaces {
+                            option { value: interface.clone(), "{interface}" }
+                        }
                     }
                 }
                 div { class: "flex items-center justify-between",
@@ -189,18 +193,20 @@ fn NetworkMenu() -> Element {
                             r#type: "checkbox",
                             class: "sr-only peer",
                             checked: start_on_boot,
-                            onchange: move |evt| app_config.write().network.start_on_boot = evt.checked(),
+                            onchange: move |evt| {
+                                app_config.write().network.start_on_boot = evt.checked();
+                            },
                         }
                         div {
                             class: format!(
                                 "w-11 h-6 bg-gray-200 rounded-full peer transition-all {}",
-                                if start_on_boot { "peer-checked:bg-accent-2" } else { "" },
+                                if start_on_boot() { "peer-checked:bg-accent-2" } else { "" },
                             ),
                         }
                         div {
                             class: format!(
                                 "absolute top-[2px] left-[2px] bg-white border border-gray-300 rounded-full h-5 w-5 transition-all {}",
-                                if start_on_boot { "translate-x-full border-white" } else { "" },
+                                if start_on_boot() { "translate-x-full border-white" } else { "" },
                             ),
                         }
                     }

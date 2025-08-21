@@ -1,12 +1,10 @@
 use std::{
-    fs::{self, DirEntry},
+    fs::{self, DirEntry, FileType},
     io,
     path::{self, PathBuf},
 };
 
 use serde::{Deserialize, Serialize};
-
-use crate::{ConfigMessage, PathOptions};
 
 #[derive(Debug)]
 pub enum ConfigError {
@@ -33,36 +31,32 @@ impl Default for Config {
     }
 }
 
+// TODO: Convert to async
 impl Config {
     /// Creates a new `Folders` instance
     ///
     /// Ensures that configuration directory and files exist
     pub fn new() -> Result<Self, ConfigError> {
         let mut config_path = dirs::config_dir().ok_or(ConfigError::ConfigDirNotFound)?;
-        println!("1: {:?}", config_path);
 
         config_path.push("networkd-wireguard-manager");
         fs::create_dir_all(&config_path)?;
-        println!("2: Created DIR");
         config_path.push("config.toml");
+
         // TODO: Make write_default_config function to simplify below
         let toml_file = fs::read_to_string(&config_path)?;
-        println!("3: TOML READ");
-
         let mut config: Config = match toml::from_str(&toml_file) {
             Ok(c) => c,
             Err(_) => {
                 let default_config = Self::default();
                 let default_toml = toml::to_string(&default_config)?;
                 fs::write(&config_path, default_toml)?;
-                println!("4: FAILED TOML PARSE");
                 default_config
             }
         };
         config.config_path = config_path;
-        println!("4: PASSED TOML PARSE");
         if std::path::Path::exists(&config.network.path) {
-            println!("5: PASSED ALL!");
+            config.network.update_interfaces()?;
             Ok(config)
         } else {
             println!("5: FAILED SYSTEMD NETWORK!");
@@ -73,41 +67,14 @@ impl Config {
         }
     }
 
-    fn update_config(&self) -> Result<(), ConfigError> {
+    pub fn update_config(&self) -> Result<(), ConfigError> {
         let content = toml::to_string(&self)?;
         fs::write(&self.config_path, content)?;
         Ok(())
     }
 
-    pub fn handle_message(&mut self, message: ConfigMessage) -> Result<(), ConfigError> {
-        match message {
-            ConfigMessage::UpdateWgPath(path, wg_opt) => match wg_opt {
-                PathOptions::Add => {
-                    self.wireguard.add_path(path);
-                }
-                PathOptions::Remove => {
-                    self.wireguard.remove_path(&path);
-                }
-                PathOptions::RemoveAll => {
-                    self.wireguard.remove_all_paths();
-                }
-            },
-            ConfigMessage::UpdateNetworkPath(path) => {
-                self.network.update_path(path);
-            }
-            ConfigMessage::UpdateBoot(boot) => {
-                self.network.update_boot(boot);
-            }
-            ConfigMessage::UpdateInterface(interface) => {
-                self.network.update_active(interface);
-            }
-        }
-        self.update_config();
-        Ok(())
-    }
-
     /// Returns a list of files found in the `wireguard_folders` non-recursively
-    fn get_wg_files(&self) -> io::Result<Vec<DirEntry>> {
+    pub fn get_wg_files(&self) -> io::Result<Vec<DirEntry>> {
         let mut files = Vec::new();
         for dir in &self.wireguard.folders {
             files.extend(fs::read_dir(dir)?.filter_map(Result::ok));
@@ -125,6 +92,7 @@ pub struct Network {
     pub active_interface: Option<String>,
     pub start_on_boot: bool,
     pub path: PathBuf,
+    pub interfaces: Vec<String>,
 }
 
 impl Default for Network {
@@ -133,6 +101,7 @@ impl Default for Network {
             active_interface: None,
             start_on_boot: false,
             path: PathBuf::from("/etc/systemd/network/"),
+            interfaces: vec![],
         }
     }
 }
@@ -164,6 +133,20 @@ impl Network {
                 "Could not locate provided path, check that the application has permissions!",
             )))
         }
+    }
+
+    fn update_interfaces(&mut self) -> Result<(), ConfigError> {
+        self.interfaces = vec![];
+        for entry in fs::read_dir(&self.path)? {
+            let entry = entry?;
+            let path = entry.path().clone();
+            let ext = path.extension().unwrap();
+            if ext == "network" {
+                self.interfaces
+                    .push(entry.file_name().into_string().unwrap());
+            }
+        }
+        Ok(())
     }
 }
 
