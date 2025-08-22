@@ -1,20 +1,19 @@
 use std::{
-    fs::{self, DirEntry, FileType},
-    io,
-    path::{self, PathBuf},
+    ffi::OsStr, io, path::{self, PathBuf}
 };
+use tokio::fs::{self, DirEntry};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConfigError {
-    Io(io::Error),
-    TomlSerialize(toml::ser::Error),
-    TomlDeserialize(toml::de::Error),
+    Io(String),
+    TomlSerialize(String),
+    TomlDeserialize(String),
     ConfigDirNotFound,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
     pub wireguard: Wireguard,
     pub network: Network,
@@ -31,53 +30,56 @@ impl Default for Config {
     }
 }
 
-// TODO: Convert to async
 impl Config {
     /// Creates a new `Folders` instance
     ///
     /// Ensures that configuration directory and files exist
-    pub fn new() -> Result<Self, ConfigError> {
+    pub async fn new() -> Result<Self, ConfigError> {
         let mut config_path = dirs::config_dir().ok_or(ConfigError::ConfigDirNotFound)?;
 
         config_path.push("networkd-wireguard-manager");
-        fs::create_dir_all(&config_path)?;
+        fs::create_dir_all(&config_path).await?;
         config_path.push("config.toml");
 
-        // TODO: Make write_default_config function to simplify below
-        let toml_file = fs::read_to_string(&config_path)?;
-        let mut config: Config = match toml::from_str(&toml_file) {
+        let toml_file = match fs::read_to_string(&config_path).await {
             Ok(c) => c,
-            Err(_) => {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 let default_config = Self::default();
                 let default_toml = toml::to_string(&default_config)?;
-                fs::write(&config_path, default_toml)?;
-                default_config
+                fs::write(&config_path, default_toml).await?;
+                return Ok(default_config);
             }
+            Err(e) => return Err(e.into())
         };
-        config.config_path = config_path;
-        if std::path::Path::exists(&config.network.path) {
-            config.network.update_interfaces()?;
+
+
+        let mut config: Config = toml::from_str(&toml_file)?;
+        config.config_path = config_path.clone();
+
+        if fs::metadata(&config.network.path).await.is_ok() {
+            config.network.update_interfaces().await?;
             Ok(config)
         } else {
-            println!("5: FAILED SYSTEMD NETWORK!");
-            Err(ConfigError::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Cannot find systemd network folder!",
-            )))
+            Err(ConfigError::Io(
+                "Cannot find systemd network folder!".to_string(),
+            ))
         }
     }
 
-    pub fn update_config(&self) -> Result<(), ConfigError> {
+    pub async fn update_config(&self) -> Result<(), ConfigError> {
         let content = toml::to_string(&self)?;
-        fs::write(&self.config_path, content)?;
+        fs::write(&self.config_path, content).await?;
         Ok(())
     }
 
     /// Returns a list of files found in the `wireguard_folders` non-recursively
-    pub fn get_wg_files(&self) -> io::Result<Vec<DirEntry>> {
+    pub async fn get_wg_files(&self) -> io::Result<Vec<DirEntry>> {
         let mut files = Vec::new();
         for dir in &self.wireguard.folders {
-            files.extend(fs::read_dir(dir)?.filter_map(Result::ok));
+            let mut entries = fs::read_dir(dir).await?;
+            while let Some(entry) = entries.next_entry().await? {
+                files.push(entry);
+            }
         }
         Ok(files)
     }
@@ -87,9 +89,9 @@ impl Config {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Network {
-    pub active_interface: Option<String>,
+    pub active_interface: String,
     pub start_on_boot: bool,
     pub path: PathBuf,
     pub interfaces: Vec<String>,
@@ -98,7 +100,7 @@ pub struct Network {
 impl Default for Network {
     fn default() -> Self {
         Self {
-            active_interface: None,
+            active_interface: "".to_string(),
             start_on_boot: false,
             path: PathBuf::from("/etc/systemd/network/"),
             interfaces: vec![],
@@ -107,15 +109,13 @@ impl Default for Network {
 }
 
 impl Network {
-    fn update_active(&mut self, cur: String) -> Result<(), ConfigError> {
-        if std::path::Path::exists(&self.path.join(&cur)) {
-            self.active_interface = Some(cur);
+    async fn update_active(&mut self, cur: String) -> Result<(), ConfigError> {
+        if fs::metadata(&self.path.join(&cur)).await.is_ok() {
+            self.active_interface = cur;
             Ok(())
         } else {
-            Err(ConfigError::Io(io::Error::new(
-                io::ErrorKind::NotFound,
-                "Could not find the specified interface in the network folder",
-            )))
+            Err(ConfigError::Io("Could not find the specified interface in the network folder".to_string(),
+            ))
         }
     }
 
@@ -123,34 +123,30 @@ impl Network {
         self.start_on_boot = boot;
     }
 
-    fn update_path(&mut self, path: PathBuf) -> Result<(), ConfigError> {
-        if path::Path::exists(&path) {
+    async fn update_path(&mut self, path: PathBuf) -> Result<(), ConfigError> {
+        if fs::metadata(&path).await.is_ok() {
             self.path = path;
             Ok(())
         } else {
-            Err(ConfigError::Io(io::Error::new(
-                io::ErrorKind::NotFound,
-                "Could not locate provided path, check that the application has permissions!",
-            )))
+            Err(ConfigError::Io(
+                "Could not locate provided path, check that the application has permissions!".to_string(),
+            ))
         }
     }
 
-    fn update_interfaces(&mut self) -> Result<(), ConfigError> {
+    async fn update_interfaces(&mut self) -> Result<(), ConfigError> {
         self.interfaces = vec![];
-        for entry in fs::read_dir(&self.path)? {
-            let entry = entry?;
-            let path = entry.path().clone();
-            let ext = path.extension().unwrap();
-            if ext == "network" {
-                self.interfaces
-                    .push(entry.file_name().into_string().unwrap());
+        let mut entries = fs::read_dir(&self.path).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            if entry.path().extension().unwrap_or_else(||OsStr::new("")) == "network" {
+                self.interfaces.push(entry.file_name().into_string().unwrap());
             }
         }
         Ok(())
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Wireguard {
     pub folders: Vec<PathBuf>,
     pub selected_file: PathBuf,
@@ -186,18 +182,18 @@ impl Wireguard {
 
 impl From<io::Error> for ConfigError {
     fn from(value: io::Error) -> Self {
-        ConfigError::Io(value)
+        ConfigError::Io(value.to_string())
     }
 }
 
 impl From<toml::de::Error> for ConfigError {
     fn from(value: toml::de::Error) -> Self {
-        ConfigError::TomlDeserialize(value)
+        ConfigError::TomlDeserialize(value.to_string())
     }
 }
 
 impl From<toml::ser::Error> for ConfigError {
     fn from(value: toml::ser::Error) -> Self {
-        ConfigError::TomlSerialize(value)
+        ConfigError::TomlSerialize(value.to_string())
     }
 }

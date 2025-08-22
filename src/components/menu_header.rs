@@ -102,6 +102,7 @@ fn SettingsMenu(open: Signal<bool>) -> Element {
 /// Renders the WireGuard section in the settings menu
 fn WireguardMenu() -> Element {
     let mut is_open = use_signal(|| false);
+    let mut app_config = use_context::<Signal<utils::config::Config>>();
     rsx! {
         div {
             class: format!(
@@ -144,7 +145,9 @@ fn WireguardMenu() -> Element {
                     ),
                     div { class: "overflow-hidden",
                         div { class: "p-6 bg-gradient-to-b from-white/50 to-[#fbf8f1]/30",
-                            button { class: "flex items-center gap-3 px-6 py-4 bg-accent hover:bg-accent-2 text-gray-800 font-semibold rounded-xl shadow-lg hover:shadow-xl hover:scale-105 active:scale-95",
+                            button {
+                                onclick: move |_| {},
+                                class: "flex items-center gap-3 px-6 py-4 bg-accent hover:bg-accent-2 text-gray-800 font-semibold rounded-xl shadow-lg hover:shadow-xl hover:scale-105 active:scale-95",
                                 Icon {
                                     width: 16,
                                     height: 16,
@@ -164,14 +167,14 @@ fn WireguardMenu() -> Element {
 #[component]
 /// Renders the network side in the settings menu
 fn NetworkMenu() -> Element {
-    let mut selected_interface = use_signal(|| "wg0".to_string());
-
     let mut app_config = use_context::<Signal<utils::config::Config>>();
     let start_on_boot = use_memo(move || app_config.read().network.start_on_boot);
+
     use_effect(move || {
         let config = app_config.read();
         config.update_config();
     });
+
     rsx! {
         div { class: "w-5/6 mx-auto mt-4 bg-background shadow-md rounded-md overflow-hidden",
             div { class: "p-4 space-y-4",
@@ -179,8 +182,10 @@ fn NetworkMenu() -> Element {
                     label { class: "font-medium text-foreground", "Active Interface:" }
                     select {
                         class: "border border-gray-300 hover:border-gray-500 rounded-md px-1 py-1 text-sm transition-all focus:outline-none",
-                        value: "{selected_interface}",
-                        onchange: move |evt| selected_interface.set(evt.value()),
+                        value: "{app_config.read().network.active_interface}",
+                        onchange: move |evt| {
+                            app_config.write().network.active_interface = evt.value();
+                        },
                         for interface in &app_config.read().network.interfaces {
                             option { value: interface.clone(), "{interface}" }
                         }

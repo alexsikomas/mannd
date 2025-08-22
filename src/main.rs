@@ -27,14 +27,23 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    use_context_provider(|| Signal::new(utils::config::Config::new().unwrap()));
+    let config = use_resource(move || async move {utils::config::Config::new().await});
 
-    rsx! {
-        style { {include_str!("../assets/styles/tailwind.css")} }
-        style { {include_str!("../assets/styles/main.css")} }
-        style { {include_str!("../input.css")} }
-        document::Link { rel: "icon", href: FAVICON }
-        MenuHeader {}
+    match config.value().as_ref() {
+        None => rsx! {
+            // TOOD: replace with actual load component
+            h1 { "Loading config" }
+        },
+        Some(config_data) => {
+            use_context_provider(|| Signal::new(config_data.unwrap().clone()));
+            rsx! {
+                style { {include_str!("../assets/styles/tailwind.css")} }
+                style { {include_str!("../assets/styles/main.css")} }
+                style { {include_str!("../input.css")} }
+                document::Link { rel: "icon", href: FAVICON }
+                MenuHeader {}
+            }
+        },
     }
 }
 
