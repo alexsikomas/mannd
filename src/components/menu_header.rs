@@ -1,10 +1,11 @@
-use dioxus::prelude::*;
+use dioxus::{html::optgroup::label, prelude::*};
 use dioxus_free_icons::{
     icons::fa_solid_icons::{FaChevronDown, FaFolderPlus, FaGear, FaXmark},
     Icon,
 };
-
-use crate::utils;
+use tokio::{spawn};
+use futures_util::StreamExt;
+use crate::utils::{self, config::ConfigMessage};
 
 #[component]
 /// Header component containing the application name, subtitle and settings icon
@@ -175,6 +176,13 @@ fn NetworkMenu() -> Element {
         config.update_config();
     });
 
+    let coroutine = use_coroutine(move |mut rx: UnboundedReceiver<ConfigMessage>| async move {
+        let mut config = app_config.clone();
+        while let Some(msg) = rx.next().await {
+            config.write().handle_message(msg);
+        }
+    });
+
     rsx! {
         div { class: "w-5/6 mx-auto mt-4 bg-background shadow-md rounded-md overflow-hidden",
             div { class: "p-4 space-y-4",
@@ -183,9 +191,7 @@ fn NetworkMenu() -> Element {
                     select {
                         class: "border border-gray-300 hover:border-gray-500 rounded-md px-1 py-1 text-sm transition-all focus:outline-none",
                         value: "{app_config.read().network.active_interface}",
-                        onchange: move |evt| {
-                            app_config.write().network.active_interface = evt.value();
-                        },
+                        onchange: move |evt| {},
                         for interface in &app_config.read().network.interfaces {
                             option { value: interface.clone(), "{interface}" }
                         }
@@ -199,7 +205,7 @@ fn NetworkMenu() -> Element {
                             class: "sr-only peer",
                             checked: start_on_boot,
                             onchange: move |evt| {
-                                app_config.write().network.start_on_boot = evt.checked();
+                               coroutine.send(ConfigMessage::UpdateInterface(evt.value())); 
                             },
                         }
                         div {

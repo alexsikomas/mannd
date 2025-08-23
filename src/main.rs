@@ -35,7 +35,7 @@ fn App() -> Element {
             h1 { "Loading config" }
         },
         Some(config_data) => {
-            use_context_provider(|| Signal::new(config_data.unwrap().clone()));
+            use_context_provider(|| Signal::new(config_data.clone()));
             rsx! {
                 style { {include_str!("../assets/styles/tailwind.css")} }
                 style { {include_str!("../assets/styles/main.css")} }
@@ -47,23 +47,3 @@ fn App() -> Element {
     }
 }
 
-pub enum Message {
-    Config(ConfigMessage),
-}
-
-pub enum MessageError {}
-
-/// Operations that may be performed on a path,
-/// used by `UpdateWgPath`
-pub enum PathOptions {
-    Add,
-    Remove,
-    RemoveAll,
-}
-
-pub enum ConfigMessage {
-    UpdateWgPath(PathBuf, PathOptions),
-    UpdateNetworkPath(PathBuf),
-    UpdateInterface(String),
-    UpdateBoot(bool),
-}

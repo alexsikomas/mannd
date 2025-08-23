@@ -2657,6 +2657,7 @@ dependencies = [
  "dioxus",
  "dioxus-free-icons",
  "dirs",
+ "futures-util",
  "serde",
  "tokio",
  "toml 0.9.5",

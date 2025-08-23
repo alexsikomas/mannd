@@ -1,5 +1,5 @@
 use std::{
-    ffi::OsStr, io, path::{self, PathBuf}
+    ffi::OsStr, io, path::{self, PathBuf}, sync::Arc
 };
 use tokio::fs::{self, DirEntry};
 
@@ -87,6 +87,33 @@ impl Config {
     pub fn get_network_config(&self) -> &Network {
         &self.network
     }
+
+    pub async fn handle_message(&mut self, message: ConfigMessage) -> Result<(), ConfigError> {
+        match message {
+            ConfigMessage::UpdateWgPath(path, wg_opt) => match wg_opt {
+                PathOptions::Add => {
+                    self.wireguard.add_path(path);
+                }
+                PathOptions::Remove => {
+                    self.wireguard.remove_path(&path);
+                }
+                PathOptions::RemoveAll => {
+                    self.wireguard.remove_all_paths();
+                }
+            },
+            ConfigMessage::UpdateNetworkPath(path) => {
+                self.network.update_path(path);
+            }
+            ConfigMessage::UpdateBoot(boot) => {
+                self.network.update_boot(boot);
+            }
+            ConfigMessage::UpdateInterface(interface) => {
+                self.network.update_active(interface);
+            }
+        }
+        self.update_config().await?;
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -109,7 +136,7 @@ impl Default for Network {
 }
 
 impl Network {
-    async fn update_active(&mut self, cur: String) -> Result<(), ConfigError> {
+    pub async fn update_active(&mut self, cur: String) -> Result<(), ConfigError> {
         if fs::metadata(&self.path.join(&cur)).await.is_ok() {
             self.active_interface = cur;
             Ok(())
@@ -196,4 +223,17 @@ impl From<toml::ser::Error> for ConfigError {
     fn from(value: toml::ser::Error) -> Self {
         ConfigError::TomlSerialize(value.to_string())
     }
+}
+
+pub enum PathOptions {
+    Add,
+    Remove,
+    RemoveAll,
+}
+
+pub enum ConfigMessage {
+    UpdateWgPath(PathBuf, PathOptions),
+    UpdateNetworkPath(PathBuf),
+    UpdateInterface(String),
+    UpdateBoot(bool),
 }
