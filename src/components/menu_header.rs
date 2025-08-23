@@ -1,4 +1,4 @@
-use dioxus::{html::optgroup::label, prelude::*};
+use dioxus::{prelude::*};
 use dioxus_free_icons::{
     icons::fa_solid_icons::{FaChevronDown, FaFolderPlus, FaGear, FaXmark},
     Icon,
@@ -17,9 +17,9 @@ pub fn MenuHeader() -> Element {
             div { class: "container mx-auto flex items-center justify-between px-6 py-5",
                 div { class: "flex items-center gap-3",
                     div {
-                        h1 { class: "text-3xl font-bold text-foreground", "WireGuard Manager" }
+                        h1 { class: "text-3xl font-bold text-foreground", "NetdGUI" }
                         p { class: "text-sm text-foreground/80 font-medium tracking-wide",
-                            "For Networkd"
+                            "A manager for networkd"
                         }
                     }
                 }
@@ -67,19 +67,19 @@ fn SettingsMenu(open: Signal<bool>) -> Element {
                         icon: FaXmark,
                     }
                 }
-                div { class: "flex gap-3 p-6 pb-4 border-b border-gray-200/50",
+                div { class: "flex gap-3 p-6 pb-4 border-b border-gray-200/50 bg-gradient-to-r from-[#fbf8f1] to-[#f8f4e6]",
                     for & item in opts.read().iter() {
                         if *current.read() == item {
                             button {
                                 key: "{item}",
-                                class: "px-6 py-3 bg-accent-2 text-gray-800 font-semibold rounded-xl shadow-lg transform scale-105 transition-all duration-100 outline-2",
+                                class: "px-6 py-3 bg-accent-2 text-gray-800 font-semibold rounded-xl shadow-lg transform scale-105 transition-all duration-100 outline-1",
                                 "{item}"
                             }
                         } else {
                             button {
                                 key: "{item}",
                                 onclick: move |_| { current.set(item) },
-                                class: "px-6 py-3 bg-white/80 hover:bg-accent/20 text-gray-600 hover:text-gray-800 font-medium rounded-xl shadow-md hover:shadow-lg transition-all duration-100 transform hover:scale-105",
+                                class: "px-6 py-3 hover:bg-accent/20 text-gray-600 hover:text-gray-800 font-medium rounded-xl shadow-md hover:shadow-lg transition-all duration-100 transform hover:scale-105",
                                 "{item}"
                             }
                         }

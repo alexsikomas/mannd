@@ -42,6 +42,7 @@ fn App() -> Element {
                 style { {include_str!("../input.css")} }
                 document::Link { rel: "icon", href: FAVICON }
                 MenuHeader {}
+                TabSwitch {}
             }
         },
     }
