@@ -104,6 +104,14 @@ fn SettingsMenu(open: Signal<bool>) -> Element {
 fn WireguardMenu() -> Element {
     let mut is_open = use_signal(|| false);
     let mut app_config = use_context::<Signal<utils::config::Config>>();
+
+    let handle_config = use_coroutine(move |mut rx: UnboundedReceiver<ConfigMessage>| async move {
+        let mut config = app_config.clone();
+        while let Some(msg) = rx.next().await {
+            config.write().handle_message(msg).await;
+        };
+    });
+
     rsx! {
         div {
             class: format!(
@@ -176,10 +184,10 @@ fn NetworkMenu() -> Element {
         config.update_config();
     });
 
-    let coroutine = use_coroutine(move |mut rx: UnboundedReceiver<ConfigMessage>| async move {
+    let handle_config = use_coroutine(move |mut rx: UnboundedReceiver<ConfigMessage>| async move {
         let mut config = app_config.clone();
         while let Some(msg) = rx.next().await {
-            config.write().handle_message(msg);
+            config.write().handle_message(msg).await;
         }
     });
 
@@ -205,7 +213,7 @@ fn NetworkMenu() -> Element {
                             class: "sr-only peer",
                             checked: start_on_boot,
                             onchange: move |evt| {
-                               coroutine.send(ConfigMessage::UpdateInterface(evt.value())); 
+                               handle_config.send(ConfigMessage::UpdateBoot(evt.checked())); 
                             },
                         }
                         div {

@@ -27,7 +27,7 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    let config = use_resource(move || async move {utils::config::Config::new().await});
+    let config = use_resource(move || async move {utils::config::Config::new().await.unwrap()});
 
     match config.value().as_ref() {
         None => rsx! {

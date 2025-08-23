@@ -1,9 +1,19 @@
+use dioxus::{
+    hooks::{use_context, use_coroutine, use_effect, use_resource, Coroutine, UnboundedReceiver},
+    signals::{Readable, Signal, Writable},
+};
+use futures_util::StreamExt;
 use std::{
-    ffi::OsStr, io, path::{self, PathBuf}, sync::Arc
+    ffi::OsStr,
+    io,
+    path::{self, PathBuf},
+    sync::Arc,
 };
 use tokio::fs::{self, DirEntry};
 
 use serde::{Deserialize, Serialize};
+
+use crate::utils::config;
 
 #[derive(Debug, Clone)]
 pub enum ConfigError {
@@ -49,9 +59,8 @@ impl Config {
                 fs::write(&config_path, default_toml).await?;
                 return Ok(default_config);
             }
-            Err(e) => return Err(e.into())
+            Err(e) => return Err(e.into()),
         };
-
 
         let mut config: Config = toml::from_str(&toml_file)?;
         config.config_path = config_path.clone();
@@ -141,7 +150,8 @@ impl Network {
             self.active_interface = cur;
             Ok(())
         } else {
-            Err(ConfigError::Io("Could not find the specified interface in the network folder".to_string(),
+            Err(ConfigError::Io(
+                "Could not find the specified interface in the network folder".to_string(),
             ))
         }
     }
@@ -156,7 +166,8 @@ impl Network {
             Ok(())
         } else {
             Err(ConfigError::Io(
-                "Could not locate provided path, check that the application has permissions!".to_string(),
+                "Could not locate provided path, check that the application has permissions!"
+                    .to_string(),
             ))
         }
     }
@@ -165,8 +176,9 @@ impl Network {
         self.interfaces = vec![];
         let mut entries = fs::read_dir(&self.path).await?;
         while let Some(entry) = entries.next_entry().await? {
-            if entry.path().extension().unwrap_or_else(||OsStr::new("")) == "network" {
-                self.interfaces.push(entry.file_name().into_string().unwrap());
+            if entry.path().extension().unwrap_or_else(|| OsStr::new("")) == "network" {
+                self.interfaces
+                    .push(entry.file_name().into_string().unwrap());
             }
         }
         Ok(())
