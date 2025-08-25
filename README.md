@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-    A user-friendly GUI for managing  <a href="https://www.wireguard.com/">WireGuard</a> configurations. Seamlessly switch between VPN connections without manually editing files, with a focus on <a href="https://mullvad.net/en">Mullvad</a> integration.
+    An intuitive GUI for `systemd-networkd` that simplifies managing Wi-Fi networks and WireGuard configurations, allowing you to switch between VPN connections without ever touching a configuration file.
 </p>
 
 <hr style="visibility: hidden"/>
@@ -15,8 +15,7 @@
 </p>
 
 ### Acknowledgements
-*  [Rust](https://www.rust-lang.org/)
-*  [EGui](https://github.com/emilk/egui)
+*  [Dioxus](https://github.com/DioxusLabs/dioxus)
 *  Icons from [Font Awesome](https://fontawesome.com/)
 *  Font family used in application: [Poppins](https://github.com/itfoundry/Poppins)
 *  Graphics created with [Inkscape](https://inkscape.org/)
