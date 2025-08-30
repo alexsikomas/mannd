@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+neli = { version = "0.7.1", features = ["tokio"] }
+neli-wifi = { version = "0.6.1", features = ["async"] }
+thiserror = "2.0.16"
+tokio = { version = "1.47.1", features = ["full"] }
+zbus = { version = "5.10.0", features = ["tokio"] }
+zbus_systemd = { version = "0.25701.0", features = ["network1", "resolve1"] }
