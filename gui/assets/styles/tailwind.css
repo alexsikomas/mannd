@@ -42,7 +42,6 @@
     --default-font-family: var(--font-sans);
     --default-mono-font-family: var(--font-mono);
     --color-background: oklch(0.98 0.01 85.87);
-    --color-primary: oklch(0.85 0.15 85.87);
     --color-muted: oklch(0.96 0.01 85.87);
     --color-accent: oklch(0.85 0.15 85.87);
     --color-accent-2: oklch(0.8181 0.156 80.65);

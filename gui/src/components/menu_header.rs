@@ -17,7 +17,7 @@ pub fn MenuHeader() -> Element {
             div { class: "container mx-auto flex items-center justify-between px-6 py-5",
                 div { class: "flex items-center gap-3",
                     div {
-                        h1 { class: "text-3xl font-bold text-foreground", "NetdGUI" }
+                        h1 { class: "text-3xl font-bold text-foreground", "ndGUI" }
                         p { class: "text-sm text-foreground/80 font-medium tracking-wide",
                             "A manager for networkd"
                         }
