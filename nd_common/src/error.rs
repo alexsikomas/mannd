@@ -1,4 +1,7 @@
-use std::fmt::Debug;
+use std::{
+    fmt::{format, Debug},
+    io::Result,
+};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -20,6 +23,8 @@ pub enum NetworkdLibError {
     // NeliHeaderError(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("Netlink Socket Error: {0}")]
     NeliSocketError(#[from] neli::err::SocketError),
+    #[error("Wifi Error from neli-wifi: {0}")]
+    WifiError(String),
 
     // zbus errors
     #[error("Zbus Error: {0}")]
@@ -58,3 +63,20 @@ where
 //         NetworkdLibError::NeliHeaderError(Box::new(err))
 //     }
 // }
+
+/// To circumvent duplication of match statements from neli-wifi which uses the depracted NlError
+pub trait NeliError {
+    fn to_wifi_error(&self, msg: &str) -> NetworkdLibError;
+}
+
+impl<T> NeliError for T
+where
+    T: std::error::Error + Send + Sync + 'static,
+{
+    fn to_wifi_error(&self, msg: &str) -> NetworkdLibError {
+        match self.source() {
+            Some(err) => NetworkdLibError::WifiError(format!("{msg}: {self}")),
+            _ => NetworkdLibError::WifiError(format!("{msg}: Error source could not be found!")),
+        }
+    }
+}

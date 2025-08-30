@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-neli = { version = "0.7.1", features = ["tokio"] }
+neli = { version = "0.7.1", features = ["tokio", "async"] }
 neli-wifi = { version = "0.6.1", features = ["async"] }
 thiserror = "2.0.16"
 tokio = { version = "1.47.1", features = ["full"] }
