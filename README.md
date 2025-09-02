@@ -1,4 +1,4 @@
-# Networkd Wireguard Manager
+# mannd 
 
 <p align="center">
 <img src="./assets/overview.png" alt="Overview" style="border-radius: 15px;">

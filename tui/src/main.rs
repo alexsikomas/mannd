@@ -9,7 +9,12 @@ async fn main() -> Result<()> {
     let result = run(terminal).await?;
     ratatui::restore();
 
-    let mut test = nd_common::nl80211::wireless::Wireless::new().await?;
+    let mut test = nd_common::nl80211::wireless::Wireless::connect().await?;
+    let interface = test.get_interfaces().await?;
+    nd_common::nl80211::wireless::Wireless::format_interfaces(&interface);
+    nd_common::nl80211::wireless::Wireless::format_station(
+        &test.get_station(interface[0].index).await?,
+    );
     Ok(())
 }
 

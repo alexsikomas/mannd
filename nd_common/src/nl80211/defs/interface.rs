@@ -1,12 +1,7 @@
-/*
-* The following code is from: https://github.com/MaxVerevkin/neli-wifi
-* Copyright of copied code belongs to the original author(s).
-*/
-
 use neli::attr::Attribute;
 use neli::err::DeError;
 
-use crate::nl80211::defs::{Attrs, Nl80211Attr};
+use crate::nl80211::defs::attr::{Attrs, Nl80211Attr};
 
 /// A struct representing a wifi interface
 #[non_exhaustive]
@@ -72,9 +67,9 @@ impl TryFrom<Attrs<'_, Nl80211Attr>> for Interface {
 #[cfg(test)]
 mod test_interface {
     use super::*;
-    use crate::nl80211::defs::Nl80211Attr::*;
+    use crate::nl80211::defs::attr::Nl80211Attr::*;
     use neli::attr::AttrHandle;
-    use neli::genl::{AttrType, AttrTypeBuilder, Nlattr, NlattrBuilder};
+    use neli::genl::{AttrTypeBuilder, Nlattr, NlattrBuilder};
     use neli::types::Buffer;
 
     fn new_attr(t: Nl80211Attr, d: Vec<u8>) -> Nlattr<Nl80211Attr, Buffer> {
