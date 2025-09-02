@@ -2949,8 +2949,8 @@ dependencies = [
 name = "nd_common"
 version = "0.1.0"
 dependencies = [
- "neli 0.7.1",
- "neli-wifi",
+ "neli",
+ "neli-proc-macros",
  "thiserror 2.0.16",
  "tokio",
  "zbus 5.10.0",
@@ -2989,19 +2989,6 @@ dependencies = [
 
 [[package]]
 name = "neli"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93062a0dce6da2517ea35f301dfc88184ce18d3601ec786a727a87bf535deca9"
-dependencies = [
- "byteorder",
- "libc",
- "log",
- "neli-proc-macros 0.1.4",
- "tokio",
-]
-
-[[package]]
-name = "neli"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e328dd8a89fa4992c0628ef4ebd9c0b432a5e92522abead20b0f5a8f7bcb812"
@@ -3012,22 +2999,9 @@ dependencies = [
  "getset",
  "libc",
  "log",
- "neli-proc-macros 0.2.1",
+ "neli-proc-macros",
  "parking_lot",
  "tokio",
-]
-
-[[package]]
-name = "neli-proc-macros"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c8034b7fbb6f9455b2a96c19e6edf8dc9fc34c70449938d8ee3b4df363f61fe"
-dependencies = [
- "either",
- "proc-macro2",
- "quote",
- "serde",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -3041,16 +3015,6 @@ dependencies = [
  "quote",
  "serde",
  "syn 2.0.106",
-]
-
-[[package]]
-name = "neli-wifi"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a72cd90a5d1ab54ed62cfe032972cb78303cfffd7d82c87c5da889a353fc451"
-dependencies = [
- "neli 0.6.5",
- "neli-proc-macros 0.1.4",
 ]
 
 [[package]]
@@ -4974,6 +4938,7 @@ dependencies = [
  "crossterm 0.29.0",
  "nd_common",
  "ratatui",
+ "tokio",
 ]
 
 [[package]]

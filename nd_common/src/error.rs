@@ -1,3 +1,4 @@
+use core::error;
 use std::{
     fmt::{format, Debug},
     io::Result,
@@ -16,13 +17,18 @@ pub enum NetworkdLibError {
     #[error("Netlink Builder Error: {0}")]
     NeliBuilderError(#[from] neli::err::BuilderError),
     #[error("Netlink Router Error: {0}")]
-    NeliRouterError(Box<dyn std::error::Error + Send + Sync + 'static>),
+    NeliRouterError(Box<dyn ThreadSafeError>),
     #[error("Netlink Packet Error: {0}")]
-    NeliPacketError(Box<dyn std::error::Error + Send + Sync + 'static>),
+    NeliPacketError(Box<dyn ThreadSafeError>),
     // #[error("Netlink Header Error: {0}")]
     // NeliHeaderError(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("Netlink Socket Error: {0}")]
     NeliSocketError(#[from] neli::err::SocketError),
+
+    #[error("Error Resolving Value: {0}")]
+    ResolveError(String),
+
+    // This is a generic error was used before for neli-wifi errors
     #[error("Wifi Error from neli-wifi: {0}")]
     WifiError(String),
 
@@ -71,7 +77,7 @@ pub trait NeliError {
 
 impl<T> NeliError for T
 where
-    T: std::error::Error + Send + Sync + 'static,
+    T: ThreadSafeError,
 {
     fn to_wifi_error(&self, msg: &str) -> NetworkdLibError {
         match self.source() {
@@ -80,3 +86,7 @@ where
         }
     }
 }
+
+pub trait ThreadSafeError: std::error::Error + Send + Sync + 'static {}
+
+impl<T> ThreadSafeError for T where T: std::error::Error + Send + Sync + 'static {}
