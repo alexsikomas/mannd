@@ -1,13 +1,21 @@
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    error::Error,
+    ops::{Deref, Mul},
+};
 
 use crate::{
     error::NetworkdLibError,
-    nl80211::defs::{
-        attr::{Attrs, Nl80211Attr},
-        cmd::Nl80211Cmd,
-        interface::Interface,
-        station::Station,
-        NL_80211_GENL_NAME, NL_80211_GENL_VERSION,
+    nl80211::{
+        self,
+        defs::{
+            attr::{Attrs, Nl80211Attr},
+            bss::Bss,
+            cmd::Nl80211Cmd,
+            interface::Interface,
+            station::Station,
+            NL_80211_GENL_NAME, NL_80211_GENL_VERSION,
+        },
     },
 };
 use neli::{
@@ -15,18 +23,20 @@ use neli::{
         nl::{NlmF, Nlmsg},
         socket::NlFamily,
     },
-    err::{DeError, MsgError},
+    err::{DeError, MsgError, Nlmsgerr},
     genl::{Genlmsghdr, GenlmsghdrBuilder, NlattrBuilder, NoUserHeader},
-    nl::NlPayload,
+    nl::{NlPayload, NlmsghdrBuilder},
     router::asynchronous::{NlRouter, NlRouterReceiverHandle},
     types::GenlBuffer,
     utils::Groups,
 };
+use tokio::signal;
 
 pub struct Wireless {
     router: NlRouter,
     handle: NlRouterReceiverHandle<u16, Genlmsghdr<u8, u16, NoUserHeader>>,
     family_id: u16,
+    mcast: Multicast,
 }
 
 impl Wireless {
@@ -34,15 +44,25 @@ impl Wireless {
         let (mut router, mut handle) =
             NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
         let family_id = router.resolve_genl_family(NL_80211_GENL_NAME).await?;
+        let scan_group = router
+            .resolve_nl_mcast_group(NL_80211_GENL_NAME, "scan")
+            .await?;
+
+        let (mcast_sock, mut mcast_recv) =
+            NlRouter::connect(NlFamily::Generic, None, Groups::new_groups(&[scan_group])).await?;
 
         Ok(Self {
             router,
             handle,
             family_id,
+            mcast: Multicast {
+                sock: mcast_sock,
+                recv: mcast_recv,
+            },
         })
     }
 
-    pub async fn get_info_vec<T>(
+    async fn get_info_vec<T>(
         &mut self,
         interface_index: Option<i32>,
         cmd: Nl80211Cmd,
@@ -112,6 +132,48 @@ impl Wireless {
         Ok(retval)
     }
 
+    async fn perform_action(
+        &mut self,
+        interface_index: Option<i32>,
+        cmd: Nl80211Cmd,
+    ) -> Result<NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>>, NetworkdLibError>
+    {
+        let msghdr = GenlmsghdrBuilder::<Nl80211Cmd, Nl80211Attr>::default()
+            .cmd(cmd)
+            .attrs({
+                let mut attrs = GenlBuffer::new();
+                if let Some(interface_index) = interface_index {
+                    attrs.push(
+                        NlattrBuilder::default()
+                            .nla_type(
+                                neli::genl::AttrTypeBuilder::default()
+                                    .nla_type(Nl80211Attr::AttrIfindex)
+                                    .build()
+                                    .unwrap(),
+                            )
+                            .nla_payload(interface_index)
+                            .build()
+                            .unwrap(),
+                    );
+                }
+                attrs
+            })
+            .version(NL_80211_GENL_VERSION)
+            .build()
+            .unwrap();
+
+        let mut recv: NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>> = self
+            .router
+            .send(
+                self.family_id,
+                NlmF::REQUEST | NlmF::ACK,
+                NlPayload::Payload(msghdr),
+            )
+            .await?;
+
+        Ok(recv)
+    }
+
     /// Returns vector of interfaces.
     pub async fn get_interfaces(&mut self) -> Result<Vec<Interface>, NetworkdLibError> {
         Ok(self.get_info_vec(None, Nl80211Cmd::CmdGetInterface).await?)
@@ -124,6 +186,41 @@ impl Wireless {
     ) -> Result<Vec<Station>, NetworkdLibError> {
         Ok(self
             .get_info_vec(interface_index, Nl80211Cmd::CmdGetStation)
+            .await?)
+    }
+
+    pub async fn get_bss(
+        &mut self,
+        interface_index: Option<i32>,
+    ) -> Result<Vec<Bss>, NetworkdLibError> {
+        self.perform_action(interface_index, Nl80211Cmd::CmdTriggerScan)
+            .await?;
+
+        // Wait until CmdNewScanResults is recieved i.e. scan completed
+        loop {
+            match self
+                .mcast
+                .recv
+                .next::<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>>()
+                .await
+            {
+                Some(Ok(v)) => match v.get_payload() {
+                    Some(p) => {
+                        if p.cmd().cmp(&Nl80211Cmd::CmdNewScanResults).is_eq() {
+                            break;
+                        }
+                    }
+                    None => {}
+                },
+                Some(Err(e)) => {
+                    return Err(NetworkdLibError::NeliRouterError(Box::new(e)));
+                }
+                _ => {}
+            }
+        }
+
+        Ok(self
+            .get_info_vec(interface_index, Nl80211Cmd::CmdGetScan)
             .await?)
     }
 
@@ -146,7 +243,7 @@ impl Wireless {
 
     async fn del_interface() {}
 
-    /// Used to make neli-wifi interfaces readable, only meant for debugging
+    /// For debugging purposes
     pub fn format_interfaces(interfaces: &Vec<Interface>) {
         if interfaces.is_empty() {
             println!("No Wi-Fi interfaces found!");
@@ -196,6 +293,7 @@ impl Wireless {
         println!("--------------------------------------------------");
     }
 
+    /// For debugging purposes
     pub fn format_station(stations: &Vec<Station>) {
         if stations.is_empty() {
             println!("No station found!");
@@ -248,10 +346,6 @@ impl Wireless {
                 println!(" No. Packet Retries: {}", v);
             }
 
-            if let Some(v) = station.ht_mcs {
-                println!()
-            }
-
             // wifi 4-7 in order
             let connection_types = vec![
                 station.ht_mcs,
@@ -276,6 +370,59 @@ impl Wireless {
         println!("--------------------------------------------------");
     }
 
+    pub fn format_bss(bss_vec: Vec<Bss>) {
+        if bss_vec.is_empty() {
+            println!("Scan empty!");
+            return;
+        }
+
+        println!("Found {} BSS:", bss_vec.len());
+        println!("--------------------------------------------------");
+
+        for (i, bss) in bss_vec.iter().enumerate() {
+            println!("BSS [{}]:\n", i + 1);
+
+            if let Some(info) = &bss.information_elements {
+                // info in form [0,l,...] where l is number of elements until end of ssid
+                let len = info[1] as usize;
+                let mut buf = String::with_capacity(len);
+                for i in 2..(len + 2) {
+                    buf.push(info[i] as char);
+                }
+                println!(" SSID: {buf}");
+            }
+
+            if let Some(id) = &bss.bssid {
+                println!(" BSSID: {}", Self::format_mac_address(id))
+            }
+
+            if let Some(freq) = bss.frequency {
+                println!(" Frequency: {}", freq)
+            }
+
+            if let Some(interval) = bss.beacon_interval {
+                println!(" Beacon Interval: {}", interval)
+            }
+
+            if let Some(seen) = bss.seen_ms_ago {
+                println!(" Last seen: {}ms", seen)
+            }
+
+            if let Some(status) = bss.status {
+                println!(" Status: {}", status)
+            }
+
+            if let Some(signal) = bss.signal {
+                println!(" Signal: {}mBm", signal)
+            }
+
+            if i < bss_vec.len() - 1 {
+                println!("--------------------------------------------------");
+            }
+        }
+        println!("--------------------------------------------------");
+    }
+
     fn format_mac_address(mac: &[u8]) -> String {
         if mac.is_empty() {
             return "N/A".to_string();
@@ -285,4 +432,9 @@ impl Wireless {
             .collect::<Vec<String>>()
             .join(":")
     }
+}
+
+struct Multicast {
+    sock: NlRouter,
+    recv: NlRouterReceiverHandle<u16, Genlmsghdr<u8, u16>>,
 }

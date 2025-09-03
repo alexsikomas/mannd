@@ -15,6 +15,8 @@ async fn main() -> Result<()> {
     nd_common::nl80211::wireless::Wireless::format_station(
         &test.get_station(interface[0].index).await?,
     );
+    let bss = test.get_bss(interface[0].index).await?;
+    nd_common::nl80211::wireless::Wireless::format_bss(bss);
     Ok(())
 }
 

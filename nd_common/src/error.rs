@@ -24,6 +24,8 @@ pub enum NetworkdLibError {
     // NeliHeaderError(Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("Netlink Socket Error: {0}")]
     NeliSocketError(#[from] neli::err::SocketError),
+    #[error("{0}")]
+    NeliScanError(#[from] neli::err::RouterError)
 
     #[error("Error Resolving Value: {0}")]
     ResolveError(String),
