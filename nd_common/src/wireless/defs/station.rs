@@ -1,7 +1,7 @@
 use neli::attr::Attribute;
 use neli::err::DeError;
 
-use crate::nl80211::defs::attr::{Attrs, Nl80211Attr, Nl80211RateInfo, Nl80211StaInfo};
+use crate::wireless::defs::attr::{Attrs, Nl80211Attr, Nl80211RateInfo, Nl80211StaInfo};
 
 /// A struct representing a remote station (Access Point)
 #[non_exhaustive]

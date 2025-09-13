@@ -3,7 +3,7 @@ use std::fmt;
 use neli::attr::Attribute;
 use neli::err::DeError;
 
-use crate::nl80211::defs::attr::{Attrs, Nl80211Attr, Nl80211Bss};
+use crate::wireless::defs::attr::{Attrs, Nl80211Attr, Nl80211Bss};
 
 /// A struct representing a BSS (Basic Service Set)
 #[non_exhaustive]

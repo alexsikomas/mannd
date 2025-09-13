@@ -20,5 +20,8 @@ gui_release:
 	cargo build --release --package gui
 	sudo setcap cap_net_admin+ep ./target/debug/gui
 
+test_lib:
+	cargo test -p nd_common -- --nocapture
+
 clean:
 	cargo clean

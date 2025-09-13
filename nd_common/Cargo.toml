@@ -9,4 +9,8 @@ neli-proc-macros = "0.2.1"
 thiserror = "2.0.16"
 tokio = { version = "1.47.1", features = ["full"] }
 zbus = { version = "5.10.0", features = ["tokio"] }
-zbus_systemd = { version = "0.25701.0", features = ["network1", "resolve1"] }
+zbus_systemd = { version = "0.25701.0", features = [
+    "network1",
+    "resolve1",
+    "systemd1",
+] }

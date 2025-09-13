@@ -1,21 +1,14 @@
-use std::{
-    borrow::Cow,
-    error::Error,
-    ops::{Deref, Mul},
-};
+use std::borrow::Cow;
 
 use crate::{
-    error::NetworkdLibError,
-    nl80211::{
-        self,
-        defs::{
-            attr::{Attrs, Nl80211Attr},
-            bss::Bss,
-            cmd::Nl80211Cmd,
-            interface::Interface,
-            station::Station,
-            NL_80211_GENL_NAME, NL_80211_GENL_VERSION,
-        },
+    error::NdError,
+    wireless::defs::{
+        attr::{Attrs, Nl80211Attr},
+        bss::Bss,
+        cmd::Nl80211Cmd,
+        interface::Interface,
+        station::Station,
+        NL_80211_GENL_NAME, NL_80211_GENL_VERSION,
     },
 };
 use neli::{
@@ -23,24 +16,23 @@ use neli::{
         nl::{NlmF, Nlmsg},
         socket::NlFamily,
     },
-    err::{DeError, MsgError, Nlmsgerr},
+    err::{DeError, MsgError},
     genl::{Genlmsghdr, GenlmsghdrBuilder, NlattrBuilder, NoUserHeader},
-    nl::{NlPayload, NlmsghdrBuilder},
+    nl::NlPayload,
     router::asynchronous::{NlRouter, NlRouterReceiverHandle},
     types::GenlBuffer,
     utils::Groups,
 };
-use tokio::signal;
 
-pub struct Wireless {
+pub struct Netlink {
     router: NlRouter,
     handle: NlRouterReceiverHandle<u16, Genlmsghdr<u8, u16, NoUserHeader>>,
     family_id: u16,
     mcast: Multicast,
 }
 
-impl Wireless {
-    pub async fn connect() -> Result<Self, NetworkdLibError> {
+impl Netlink {
+    pub async fn wireless_connect() -> Result<Self, NdError> {
         let (mut router, mut handle) =
             NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
         let family_id = router.resolve_genl_family(NL_80211_GENL_NAME).await?;
@@ -62,11 +54,16 @@ impl Wireless {
         })
     }
 
+    pub async fn wired_connect() -> Result<Self, NdError> {
+        let (mut router, mut handle) =
+            NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
+    }
+
     async fn get_info_vec<T>(
         &mut self,
         interface_index: Option<i32>,
         cmd: Nl80211Cmd,
-    ) -> Result<Vec<T>, NetworkdLibError>
+    ) -> Result<Vec<T>, NdError>
     where
         T: for<'a> TryFrom<Attrs<'a, Nl80211Attr>, Error = DeError>,
     {
@@ -113,7 +110,7 @@ impl Wireless {
             match response.nl_type() {
                 Nlmsg::Noop => (),
                 Nlmsg::Error => {
-                    return Err(NetworkdLibError::NeliMsgError(MsgError::new(
+                    return Err(NdError::NeliMsgError(MsgError::new(
                         "Parsing response.nl_type in get_info_vec",
                     )))
                 }
@@ -132,12 +129,12 @@ impl Wireless {
         Ok(retval)
     }
 
+    /// Used to send commands
     async fn perform_action(
         &mut self,
         interface_index: Option<i32>,
         cmd: Nl80211Cmd,
-    ) -> Result<NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>>, NetworkdLibError>
-    {
+    ) -> Result<NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>>, NdError> {
         let msghdr = GenlmsghdrBuilder::<Nl80211Cmd, Nl80211Attr>::default()
             .cmd(cmd)
             .attrs({
@@ -175,24 +172,22 @@ impl Wireless {
     }
 
     /// Returns vector of interfaces.
-    pub async fn get_interfaces(&mut self) -> Result<Vec<Interface>, NetworkdLibError> {
+    pub async fn get_interfaces(&mut self) -> Result<Vec<Interface>, NdError> {
         Ok(self.get_info_vec(None, Nl80211Cmd::CmdGetInterface).await?)
     }
 
-    /// Returns all the available wireless networks
+    /// Returns vector of stations
     pub async fn get_station(
         &mut self,
         interface_index: Option<i32>,
-    ) -> Result<Vec<Station>, NetworkdLibError> {
+    ) -> Result<Vec<Station>, NdError> {
         Ok(self
             .get_info_vec(interface_index, Nl80211Cmd::CmdGetStation)
             .await?)
     }
 
-    pub async fn get_bss(
-        &mut self,
-        interface_index: Option<i32>,
-    ) -> Result<Vec<Bss>, NetworkdLibError> {
+    /// Returns all the available wireless networks
+    pub async fn get_bss(&mut self, interface_index: Option<i32>) -> Result<Vec<Bss>, NdError> {
         self.perform_action(interface_index, Nl80211Cmd::CmdTriggerScan)
             .await?;
 
@@ -213,7 +208,7 @@ impl Wireless {
                     None => {}
                 },
                 Some(Err(e)) => {
-                    return Err(NetworkdLibError::NeliRouterError(Box::new(e)));
+                    return Err(NdError::NeliRouterError(Box::new(e)));
                 }
                 _ => {}
             }

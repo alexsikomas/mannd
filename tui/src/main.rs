@@ -1,6 +1,13 @@
 use color_eyre::eyre::Result;
 use crossterm::event::{self, Event};
+use nd_common::wireless::{iwd::Iwd, nl80211::Netlink, wpa_supplicant::WpaSupplicant};
 use ratatui::{DefaultTerminal, Frame};
+
+struct App {
+    iwd: Option<Iwd>,
+    wpa: Option<WpaSupplicant>,
+    netlink: Netlink,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -9,14 +16,6 @@ async fn main() -> Result<()> {
     let result = run(terminal).await?;
     ratatui::restore();
 
-    let mut test = nd_common::nl80211::wireless::Wireless::connect().await?;
-    let interface = test.get_interfaces().await?;
-    nd_common::nl80211::wireless::Wireless::format_interfaces(&interface);
-    nd_common::nl80211::wireless::Wireless::format_station(
-        &test.get_station(interface[0].index).await?,
-    );
-    let bss = test.get_bss(interface[0].index).await?;
-    nd_common::nl80211::wireless::Wireless::format_bss(bss);
     Ok(())
 }
 
