@@ -6,13 +6,13 @@ impl WifiAdapter for WpaSupplicant {
     async fn connect_network(&self, ssid: &str, psk: &str) -> Result<(), NdError> {
         todo!()
     }
-    async fn disconnect(&self) {
+    async fn disconnect(&self) -> Result<(), NdError> {
         todo!()
     }
-    async fn status(&self) -> String {
+    async fn status(&self) -> Result<String, NdError> {
         todo!()
     }
-    async fn list_configured_networks(&self) -> Vec<String> {
+    async fn list_configured_networks(&self) -> Result<Vec<String>, NdError> {
         todo!()
     }
     async fn add_network(&self, ssid: &str, psk: &str) -> Result<(), NdError> {

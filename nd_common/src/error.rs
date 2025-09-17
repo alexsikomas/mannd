@@ -1,7 +1,4 @@
-use std::{
-    fmt::{format, Debug},
-    io::Result,
-};
+use std::fmt::Debug;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

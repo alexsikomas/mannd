@@ -1,4 +1,4 @@
-use zbus::{fdo::ObjectManagerProxy, zvariant::Value, Connection};
+use zbus::{Connection, fdo::ObjectManagerProxy, zvariant::Value};
 
 use crate::{error::NdError, wireless::WifiAdapter};
 
@@ -12,13 +12,13 @@ impl WifiAdapter for Iwd {
     async fn connect_network(&self, ssid: &str, psk: &str) -> Result<(), NdError> {
         todo!()
     }
-    async fn disconnect(&self) {
+    async fn disconnect(&self) -> Result<(), NdError> {
         todo!()
     }
-    async fn status(&self) -> String {
+    async fn status(&self) -> Result<String, NdError> {
         todo!()
     }
-    async fn list_configured_networks(&self) -> Vec<String> {
+    async fn list_configured_networks(&self) -> Result<Vec<String>, NdError> {
         todo!()
     }
     async fn add_network(&self, ssid: &str, psk: &str) -> Result<(), NdError> {
@@ -54,6 +54,7 @@ impl Iwd {
     ) -> Result<Option<String>, NdError> {
         let proxy = ObjectManagerProxy::new(conn, service.clone(), "/").await?;
         for (path, interface) in proxy.get_managed_objects().await? {
+            // BUG: if multiple adapters will just return first one
             if interface.contains_key("net.connman.iwd.Station") {
                 return Ok(Some(path.to_string()));
             }

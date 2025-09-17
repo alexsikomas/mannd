@@ -2,13 +2,14 @@ use std::borrow::Cow;
 
 use crate::{
     error::NdError,
+    ethtool::{ETHTOOL_GENL_NAME, EthtoolCmds},
     wireless::defs::{
+        NL_80211_GENL_NAME, NL_80211_GENL_VERSION,
         attr::{Attrs, Nl80211Attr},
         bss::Bss,
         cmd::Nl80211Cmd,
         interface::Interface,
         station::Station,
-        NL_80211_GENL_NAME, NL_80211_GENL_VERSION,
     },
 };
 use neli::{
@@ -24,15 +25,109 @@ use neli::{
     utils::Groups,
 };
 
-pub struct Netlink {
+pub struct WiredNetlink {
+    router: NlRouter,
+    handle: NlRouterReceiverHandle<u16, Genlmsghdr<u8, u16, NoUserHeader>>,
+    family_id: u16,
+}
+
+pub struct WirelessNetlink {
     router: NlRouter,
     handle: NlRouterReceiverHandle<u16, Genlmsghdr<u8, u16, NoUserHeader>>,
     family_id: u16,
     mcast: Multicast,
 }
 
-impl Netlink {
-    pub async fn wireless_connect() -> Result<Self, NdError> {
+impl WiredNetlink {
+    pub async fn connect() -> Result<Self, NdError> {
+        let (mut router, mut handle) =
+            NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
+        let family_id = router.resolve_genl_family(ETHTOOL_GENL_NAME).await?;
+
+        Ok(Self {
+            router,
+            handle,
+            family_id,
+        })
+    }
+
+    // TODO: continue when I have access to device with ethernet
+    // async fn info<T>(
+    //     &mut self,
+    //     interface_index: Option<i32>,
+    //     cmd: EthtoolCmds,
+    // ) -> Result<Vec<T>, NdError>
+    // where
+    //     T: for<'a> TryFrom<Attrs<'a, Nl80211Attr>, Error = DeError>,
+    // {
+    //     let msghdr = GenlmsghdrBuilder::<EthtoolCmds, EthtoolAttr>::default()
+    //         .cmd(cmd)
+    //         .attrs({
+    //             let mut attrs = GenlBuffer::new();
+    //             if let Some(interface_index) = interface_index {
+    //                 attrs.push(
+    //                     NlattrBuilder::default()
+    //                         .nla_type(
+    //                             neli::genl::AttrTypeBuilder::default()
+    //                                 .nla_type(EthtoolAttr::Header)
+    //                                 .build()
+    //                                 .unwrap(),
+    //                         )
+    //                         .nla_payload(interface_index)
+    //                         .build()
+    //                         .unwrap(),
+    //                 );
+    //             }
+    //             attrs
+    //         })
+    //         .build()
+    //         .unwrap();
+    //
+    //     let mut recv: NlRouterReceiverHandle<Nlmsg, Genlmsghdr<EthtoolCmds, EthtoolAttr>> = self
+    //         .router
+    //         .send(
+    //             self.family_id,
+    //             NlmF::REQUEST | NlmF::DUMP,
+    //             NlPayload::Payload(msghdr),
+    //         )
+    //         .await?;
+    //
+    //     let mut retval = Vec::new();
+    //
+    //     while let Some(response) = recv
+    //         .next::<Nlmsg, Genlmsghdr<EthtoolCmds, EthtoolAttr>>()
+    //         .await
+    //     {
+    //         let response = response?;
+    //         match response.nl_type() {
+    //             Nlmsg::Noop => (),
+    //             Nlmsg::Error => {
+    //                 return Err(NdError::NeliMsgError(MsgError::new(
+    //                     "Parsing response.nl_type in get_info_vec",
+    //                 )));
+    //             }
+    //             Nlmsg::Done => return Ok(retval),
+    //             _ => retval.push(
+    //                 response
+    //                     .get_payload()
+    //                     .unwrap()
+    //                     .attrs()
+    //                     .get_attr_handle()
+    //                     .try_into()?,
+    //             ),
+    //         };
+    //     }
+    //
+    //     Ok(retval)
+    // }
+
+    async fn action() {
+        todo!();
+    }
+}
+
+impl WirelessNetlink {
+    pub async fn connect() -> Result<Self, NdError> {
         let (mut router, mut handle) =
             NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
         let family_id = router.resolve_genl_family(NL_80211_GENL_NAME).await?;
@@ -54,12 +149,7 @@ impl Netlink {
         })
     }
 
-    pub async fn wired_connect() -> Result<Self, NdError> {
-        let (mut router, mut handle) =
-            NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
-    }
-
-    async fn get_info_vec<T>(
+    async fn nl_info<T>(
         &mut self,
         interface_index: Option<i32>,
         cmd: Nl80211Cmd,
@@ -112,7 +202,7 @@ impl Netlink {
                 Nlmsg::Error => {
                     return Err(NdError::NeliMsgError(MsgError::new(
                         "Parsing response.nl_type in get_info_vec",
-                    )))
+                    )));
                 }
                 Nlmsg::Done => return Ok(retval),
                 _ => retval.push(
@@ -130,7 +220,7 @@ impl Netlink {
     }
 
     /// Used to send commands
-    async fn perform_action(
+    async fn nl_action(
         &mut self,
         interface_index: Option<i32>,
         cmd: Nl80211Cmd,
@@ -173,7 +263,7 @@ impl Netlink {
 
     /// Returns vector of interfaces.
     pub async fn get_interfaces(&mut self) -> Result<Vec<Interface>, NdError> {
-        Ok(self.get_info_vec(None, Nl80211Cmd::CmdGetInterface).await?)
+        Ok(self.nl_info(None, Nl80211Cmd::CmdGetInterface).await?)
     }
 
     /// Returns vector of stations
@@ -182,13 +272,13 @@ impl Netlink {
         interface_index: Option<i32>,
     ) -> Result<Vec<Station>, NdError> {
         Ok(self
-            .get_info_vec(interface_index, Nl80211Cmd::CmdGetStation)
+            .nl_info(interface_index, Nl80211Cmd::CmdGetStation)
             .await?)
     }
 
     /// Returns all the available wireless networks
     pub async fn get_bss(&mut self, interface_index: Option<i32>) -> Result<Vec<Bss>, NdError> {
-        self.perform_action(interface_index, Nl80211Cmd::CmdTriggerScan)
+        self.nl_action(interface_index, Nl80211Cmd::CmdTriggerScan)
             .await?;
 
         // Wait until CmdNewScanResults is recieved i.e. scan completed
@@ -215,13 +305,8 @@ impl Netlink {
         }
 
         Ok(self
-            .get_info_vec(interface_index, Nl80211Cmd::CmdGetScan)
+            .nl_info(interface_index, Nl80211Cmd::CmdGetScan)
             .await?)
-    }
-
-    /// Connects to a wireless network
-    async fn net_connect() {
-        todo!()
     }
 
     /// Changes the power management mode
