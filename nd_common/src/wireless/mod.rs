@@ -1,25 +1,15 @@
+use async_trait::async_trait;
+
 use crate::error::NdError;
 
+#[async_trait]
 pub trait WifiAdapter {
-    fn connect_network(
-        &self,
-        ssid: &str,
-        psk: &str,
-    ) -> impl std::future::Future<Output = Result<(), NdError>> + Send;
-    fn disconnect(&self) -> impl std::future::Future<Output = Result<(), NdError>> + Send;
-    fn status(&self) -> impl std::future::Future<Output = Result<String, NdError>> + Send;
-    fn list_configured_networks(
-        &self,
-    ) -> impl std::future::Future<Output = Result<Vec<String>, NdError>> + Send;
-    fn add_network(
-        &self,
-        ssid: &str,
-        psk: &str,
-    ) -> impl std::future::Future<Output = Result<(), NdError>> + Send;
-    fn remove_network(
-        &self,
-        ssid: &str,
-    ) -> impl std::future::Future<Output = Result<(), NdError>> + Send;
+    async fn connect_network(&self, ssid: &str, psk: &str) -> Result<(), NdError>;
+    async fn disconnect(&self) -> Result<(), NdError>;
+    async fn status(&self) -> Result<String, NdError>;
+    async fn list_configured_networks(&self) -> Result<Vec<String>, NdError>;
+    async fn add_network(&self, ssid: &str, psk: &str) -> Result<(), NdError>;
+    async fn remove_network(&self, ssid: &str) -> Result<(), NdError>;
 }
 
 pub mod defs;

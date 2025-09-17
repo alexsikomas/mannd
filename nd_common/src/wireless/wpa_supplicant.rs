@@ -1,7 +1,10 @@
+use async_trait::async_trait;
+
 use crate::{error::NdError, wireless::WifiAdapter};
 
 pub struct WpaSupplicant {}
 
+#[async_trait]
 impl WifiAdapter for WpaSupplicant {
     async fn connect_network(&self, ssid: &str, psk: &str) -> Result<(), NdError> {
         todo!()

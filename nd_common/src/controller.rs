@@ -1,18 +1,13 @@
 use crate::{
     error::NdError,
     netlink::{WiredNetlink, WirelessNetlink},
-    wireless::{iwd::Iwd, wpa_supplicant::WpaSupplicant},
+    wireless::{WifiAdapter, iwd::Iwd, wpa_supplicant::WpaSupplicant},
 };
 use zbus::Connection;
 
-enum Adapter {
-    Iwd(Iwd),
-    Wpa(WpaSupplicant),
-}
-
 struct Controller {
     // Wireless Daemons
-    wifi: Option<Adapter>,
+    wifi: Option<Box<dyn WifiAdapter + Send + Sync>>,
     /// Used for ethernet and wireless information iwd/wpa don't provide
     nl_wifi: Option<WirelessNetlink>,
     nl_wired: Option<WiredNetlink>,
@@ -38,11 +33,15 @@ impl Controller {
         let conn = self.connection.clone();
         match Iwd::new(conn).await {
             Ok(iwd) => {
-                self.wifi = Some(Adapter::Iwd(iwd));
+                self.wifi = Some(Box::new(iwd));
                 Ok(())
             }
             Err(e) => Err(e),
         }
+    }
+
+    async fn ssid_connect(&self, ssid: &str, psk: &str) -> Result<(), NdError> {
+        todo!()
     }
 }
 
@@ -57,7 +56,6 @@ async fn new() -> Result<(), NdError> {
 
 #[cfg(iwd_installed)]
 #[tokio::test]
-// will fail if iwd not installed
 async fn connect_iwd() -> Result<(), NdError> {
     let mut controller = Controller::new().await;
     match controller {

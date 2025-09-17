@@ -28,6 +28,8 @@ pub enum NdError {
     PropertyNotFound(String),
     #[error("Adapter not found: {0}")]
     AdapterNotFound(String),
+    #[error("Security type is invalid!")]
+    InvalidSecurityType,
 
     // zbus errors
     #[error("Zbus Error: {0}")]
