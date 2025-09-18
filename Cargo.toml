@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["nd_common", "gui", "tui"]
+members = ["com", "gui", "tui"]
 
 [profile.release]
 opt-level = "z"

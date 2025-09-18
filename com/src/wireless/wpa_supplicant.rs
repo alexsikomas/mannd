@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use zbus::Connection;
 
 use crate::{error::NdError, wireless::WifiAdapter};
 
@@ -6,6 +7,9 @@ pub struct WpaSupplicant {}
 
 #[async_trait]
 impl WifiAdapter for WpaSupplicant {
+    async fn new(conn: Connection) -> Result<Self, NdError> {
+        todo!()
+    }
     async fn connect_network(&self, ssid: &str, psk: &str) -> Result<(), NdError> {
         todo!()
     }

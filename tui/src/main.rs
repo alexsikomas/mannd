@@ -1,12 +1,10 @@
 use color_eyre::eyre::Result;
+use com::{controller::Controller, netlink::WirelessNetlink};
 use crossterm::event::{self, Event};
-use nd_common::wireless::{iwd::Iwd, nl80211::Netlink, wpa_supplicant::WpaSupplicant};
 use ratatui::{DefaultTerminal, Frame};
 
 struct App {
-    iwd: Option<Iwd>,
-    wpa: Option<WpaSupplicant>,
-    netlink: Netlink,
+    controller: Controller,
 }
 
 #[tokio::main]
@@ -15,6 +13,10 @@ async fn main() -> Result<()> {
     let terminal = ratatui::init();
     let result = run(terminal).await?;
     ratatui::restore();
+    // let mut netlink = WirelessNetlink::connect().await?;
+    // let interface = netlink.get_interfaces().await?;
+    // let bss = netlink.get_bss(interface.first().unwrap().index).await?;
+    // WirelessNetlink::format_bss(bss);
 
     Ok(())
 }

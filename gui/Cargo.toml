@@ -5,22 +5,22 @@ authors = ["Alexander Sikomas"]
 edition = "2021"
 
 [dependencies]
+com = { path = "../com" }
 dioxus = { version = "0.6.0", features = [] }
 dioxus-free-icons = { version = "0.9", features = ["font-awesome-solid"] }
 dirs = "6.0.0"
-serde = "1.0.219"
-toml = "0.9.5"
-tokio = { version = "1.47.1", features = [
-    "rt-multi-thread",
-    "macros",
-    "fs",
-    "net",
-    "io-util",
-    "sync",
-    "time",
-] }
 futures-util = "0.3.31"
-nd_common = { path = "../nd_common" }
+serde = "1.0.219"
+tokio = { version = "1.47.1", features = [
+  "fs",
+  "io-util",
+  "macros",
+  "net",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+toml = "0.9.5"
 
 [features]
 default = ["desktop"]

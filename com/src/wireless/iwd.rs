@@ -1,11 +1,8 @@
-use std::{io::Read, net};
+use std::{env, fmt::format, path::PathBuf};
 
 use async_trait::async_trait;
-use quick_xml::{
-    Reader,
-    events::{BytesStart, Event},
-    name::QName,
-};
+use quick_xml::{Reader, events::Event};
+use tokio::fs::{self, File, OpenOptions};
 use zbus::{
     Connection,
     fdo::ObjectManagerProxy,
@@ -14,14 +11,34 @@ use zbus::{
 
 use crate::{error::NdError, wireless::WifiAdapter};
 
-pub struct Iwd {
+pub struct Iwd<'a> {
     path: String,
     service: String,
     conn: Connection,
+    networks: Option<Vec<Network<'a>>>,
 }
 
 #[async_trait]
-impl WifiAdapter for Iwd {
+impl<'a> WifiAdapter for Iwd<'a> {
+    async fn new(conn: Connection) -> Result<Self, NdError> {
+        let service = "net.connman.iwd".to_string();
+
+        match Self::find_adapter_path(&conn, &service).await {
+            Ok(Some(path)) => Ok(Self {
+                conn,
+                service,
+                path,
+                networks: None,
+            }),
+            Err(e) => Err(NdError::AdapterNotFound(format!(
+                "Could not find an adapter, is iwd installed?\n Error: {e}"
+            ))),
+            _ => Err(NdError::AdapterNotFound(
+                "Could not find an adapter, is iwd installed?".to_string(),
+            )),
+        }
+    }
+
     async fn connect_network(&self, ssid: &str, psk: &str) -> Result<(), NdError> {
         todo!()
     }
@@ -42,24 +59,8 @@ impl WifiAdapter for Iwd {
     }
 }
 
-impl Iwd {
-    pub async fn new(conn: zbus::Connection) -> Result<Self, NdError> {
-        let service = "net.connman.iwd".to_string();
-
-        match Self::find_adapter_path(&conn, &service).await {
-            Ok(Some(path)) => Ok(Self {
-                conn,
-                service,
-                path,
-            }),
-            Err(e) => Err(NdError::AdapterNotFound(format!(
-                "Log: {e}, Could not find an adapter, is iwd installed?"
-            ))),
-            _ => Err(NdError::AdapterNotFound(
-                "Could not find an adapter, is iwd installed?".to_string(),
-            )),
-        }
-    }
+// Networking related
+impl<'a> Iwd<'a> {
     /// Gets the object path of the iwd station
     async fn find_adapter_path(
         conn: &Connection,
@@ -77,10 +78,10 @@ impl Iwd {
 
     /// Returns the value of a property found under the `self.path` interfaces
     /// Trait bounds follow from `zbus` downcast
-    async fn get_prop<'a, T>(&self, subpath: &str, prop: &str) -> Result<T, NdError>
+    async fn get_prop<'b, T>(&self, subpath: &str, prop: &str) -> Result<T, NdError>
     where
-        T: TryFrom<Value<'a>>,
-        <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
+        T: TryFrom<Value<'b>>,
+        <T as TryFrom<Value<'b>>>::Error: Into<zbus::zvariant::Error>,
     {
         let mut interface_path = self.service.clone();
         interface_path.push_str(format!(".{}", subpath).as_str());
@@ -103,14 +104,17 @@ impl Iwd {
         }
     }
 
-    async fn get_prop_from_proxy<'a, T>(
+    /// Returns the value of a property found under the `self.path` interfaces
+    /// Proxy must be passed in, use this to reduce overhead
+    /// Trait bounds follow from `zbus` downcast
+    async fn get_prop_from_proxy<'b, T>(
         &self,
-        proxy: &zbus::Proxy<'a>,
+        proxy: &zbus::Proxy<'b>,
         prop: &str,
     ) -> Result<T, NdError>
     where
-        T: TryFrom<Value<'a>>,
-        <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
+        T: TryFrom<Value<'b>>,
+        <T as TryFrom<Value<'b>>>::Error: Into<zbus::zvariant::Error>,
     {
         match proxy.get_property(prop).await? {
             Some(val) => Ok(<zbus::zvariant::Value<'_> as Clone>::clone(&val)
@@ -124,6 +128,7 @@ impl Iwd {
         }
     }
 
+    /// Performs a scan with iwd which internally updates the dbus to include new networks
     pub async fn get_all_networks(&self) -> Result<Vec<Network>, NdError> {
         let proxy = zbus::Proxy::new(
             &self.conn,
@@ -204,7 +209,7 @@ impl Iwd {
 
         let name = self.get_prop_from_proxy::<String>(&proxy, "Name").await?;
 
-        let mut security: Security;
+        let security: Security;
         match self
             .get_prop_from_proxy::<String>(&proxy, "Type")
             .await?
@@ -229,6 +234,52 @@ impl Iwd {
     }
 }
 
+// Configuration related
+impl<'a> Iwd<'a> {
+    /// Returns either the location of main.conf if it has been created or a folder where it should
+    /// be created.
+    async fn get_conf() -> Result<PathBuf, NdError> {
+        let iwd_path = "/etc/iwd";
+        let env_var = "CONFIGURATION_DIRECTORY";
+        let dir = env::var(env_var);
+        match dir {
+            // found env
+            Ok(v) => {
+                let conf_path = format!("{}/main.conf", v);
+                println!("1");
+                // not found conf
+                if fs::metadata(v).await.is_err() {
+                    println!("2");
+                    let file = OpenOptions::new()
+                        .write(true)
+                        .read(true)
+                        .create(true)
+                        .open(&conf_path)
+                        .await?;
+                    println!("3");
+                }
+                return Ok(PathBuf::from(conf_path));
+            }
+            // no env
+            Err(e) => {
+                println!("4");
+                let conf_path = format!("{}/main.conf", iwd_path);
+                if fs::metadata(&conf_path).await.is_err() {
+                    // /etc/iwd could possibly not exist
+                    fs::create_dir_all(iwd_path).await?;
+                    OpenOptions::new()
+                        .write(true)
+                        .read(true)
+                        .create(true)
+                        .open(&conf_path)
+                        .await?;
+                }
+                return Ok(PathBuf::from(conf_path));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 #[cfg(iwd_installed)]
 mod tests {
@@ -236,13 +287,14 @@ mod tests {
 
     use super::*;
 
-    async fn setup() -> Result<Iwd, NdError> {
+    // Networking tests
+    async fn setup<'a>() -> Result<Iwd<'a>, NdError> {
         let conn = zbus::Connection::system().await?;
         Ok(Iwd::new(conn).await?)
     }
 
     #[tokio::test]
-    async fn test_get_station_networks() -> Result<(), NdError> {
+    async fn test_get_connected_network() -> Result<(), NdError> {
         let iwd = setup().await?;
         iwd.get_prop::<ObjectPath>("Station", "ConnectedNetwork")
             .await?;
@@ -259,7 +311,14 @@ mod tests {
     #[tokio::test]
     async fn test_network_info() -> Result<(), NdError> {
         let iwd = setup().await?;
-        let networks = iwd.get_all_networks().await?;
+        let _ = iwd.get_all_networks().await?;
+        Ok(())
+    }
+
+    // configuration tests
+    #[tokio::test]
+    async fn test_get_conf_path() -> Result<(), NdError> {
+        let path = Iwd::get_conf().await?;
         Ok(())
     }
 }

@@ -5,7 +5,7 @@ use crate::{
 };
 use zbus::Connection;
 
-struct Controller {
+pub struct Controller {
     // Wireless Daemons
     wifi: Option<Box<dyn WifiAdapter + Send + Sync>>,
     /// Used for ethernet and wireless information iwd/wpa don't provide
@@ -45,26 +45,31 @@ impl Controller {
     }
 }
 
-#[tokio::test]
-async fn new() -> Result<(), NdError> {
-    let controller = Controller::new().await;
-    match controller {
-        Ok(val) => Ok(()),
-        Err(e) => Err(NdError::OperationFailed("Test".to_string())),
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[cfg(iwd_installed)]
-#[tokio::test]
-async fn connect_iwd() -> Result<(), NdError> {
-    let mut controller = Controller::new().await;
-    match controller {
-        Ok(mut cont) => match cont.connect_iwd().await {
-            Ok(iwd) => Ok(()),
-            Err(e) => Err(NdError::OperationFailed("iwd not found".to_string())),
-        },
-        Err(e) => Err(NdError::OperationFailed(
-            "Controller could not be initalised".to_string(),
-        )),
+    #[tokio::test]
+    async fn test_new() -> Result<(), NdError> {
+        let controller = Controller::new().await;
+        match controller {
+            Ok(val) => Ok(()),
+            Err(e) => Err(NdError::OperationFailed("Test".to_string())),
+        }
+    }
+
+    #[cfg(iwd_installed)]
+    #[tokio::test]
+    async fn test_connect_iwd() -> Result<(), NdError> {
+        let mut controller = Controller::new().await;
+        match controller {
+            Ok(mut cont) => match cont.connect_iwd().await {
+                Ok(iwd) => Ok(()),
+                Err(e) => Err(NdError::OperationFailed("iwd not found".to_string())),
+            },
+            Err(e) => Err(NdError::OperationFailed(
+                "Controller could not be initalised".to_string(),
+            )),
+        }
     }
 }

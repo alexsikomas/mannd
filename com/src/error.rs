@@ -31,6 +31,12 @@ pub enum NdError {
     #[error("Security type is invalid!")]
     InvalidSecurityType,
 
+    #[error("File not found: {0}")]
+    FileNotFound(String),
+    // io errors
+    #[error("IO Error: {0}")]
+    IoError(#[from] std::io::Error),
+
     // zbus errors
     #[error("Zbus Error: {0}")]
     Zbus(#[from] zbus::Error),
