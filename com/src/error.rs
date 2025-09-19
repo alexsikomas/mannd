@@ -1,8 +1,9 @@
+use quick_xml::events::attributes::AttrError;
 use std::fmt::Debug;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum NdError {
+pub enum ComError {
     #[error("Netlink Message Error: {0}")]
     NeliMsgError(#[from] neli::err::MsgError),
     #[error("Netlink Deserialisation Error: {0}")]
@@ -42,29 +43,39 @@ pub enum NdError {
     Zbus(#[from] zbus::Error),
     #[error("Freedesktop Error from Zbus: {0}")]
     ZbusFreedesktop(#[from] zbus::fdo::Error),
+    #[error("Zbus zvariant Error: {0}")]
+    Zvariant(#[from] zbus::zvariant::Error),
+
+    // xml parsing
+    #[error("XML Attribute Error: {0}")]
+    XmlAttr(#[from] AttrError),
+    #[error("XML Error: {0}")]
+    Xml(#[from] quick_xml::Error),
+    #[error("XML Buffer Read Error: {0}")]
+    XmlRead(String),
 }
 
-impl<T, P> From<neli::err::RouterError<T, P>> for NdError
+impl<T, P> From<neli::err::RouterError<T, P>> for ComError
 where
     T: Debug + Send + Sync + 'static,
     P: Debug + Send + Sync + 'static,
 {
     fn from(err: neli::err::RouterError<T, P>) -> Self {
-        NdError::NeliRouterError(Box::new(err))
+        ComError::NeliRouterError(Box::new(err))
     }
 }
 
-impl<M> From<neli::err::Nlmsgerr<M>> for NdError
+impl<M> From<neli::err::Nlmsgerr<M>> for ComError
 where
     M: Debug + Send + Sync + 'static,
 {
     fn from(err: neli::err::Nlmsgerr<M>) -> Self {
-        NdError::NeliPacketError(Box::new(err))
+        ComError::NeliPacketError(Box::new(err))
     }
 }
 
 pub trait NeliError {
-    fn to_wifi_error(&self, msg: &str) -> NdError;
+    fn to_wifi_error(&self, msg: &str) -> ComError;
 }
 
 pub trait ThreadSafeError: std::error::Error + Send + Sync + 'static {}

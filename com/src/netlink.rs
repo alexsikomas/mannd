@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::{
-    error::NdError,
+    error::ComError,
     ethtool::{ETHTOOL_GENL_NAME, EthtoolCmds},
     wireless::defs::{
         NL_80211_GENL_NAME, NL_80211_GENL_VERSION,
@@ -39,7 +39,7 @@ pub struct WirelessNetlink {
 }
 
 impl WiredNetlink {
-    pub async fn connect() -> Result<Self, NdError> {
+    pub async fn connect() -> Result<Self, ComError> {
         let (mut router, mut handle) =
             NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
         let family_id = router.resolve_genl_family(ETHTOOL_GENL_NAME).await?;
@@ -56,7 +56,7 @@ impl WiredNetlink {
     //     &mut self,
     //     interface_index: Option<i32>,
     //     cmd: EthtoolCmds,
-    // ) -> Result<Vec<T>, NdError>
+    // ) -> Result<Vec<T>, ComError>
     // where
     //     T: for<'a> TryFrom<Attrs<'a, Nl80211Attr>, Error = DeError>,
     // {
@@ -102,7 +102,7 @@ impl WiredNetlink {
     //         match response.nl_type() {
     //             Nlmsg::Noop => (),
     //             Nlmsg::Error => {
-    //                 return Err(NdError::NeliMsgError(MsgError::new(
+    //                 return Err(ComError::NeliMsgError(MsgError::new(
     //                     "Parsing response.nl_type in get_info_vec",
     //                 )));
     //             }
@@ -127,7 +127,7 @@ impl WiredNetlink {
 }
 
 impl WirelessNetlink {
-    pub async fn connect() -> Result<Self, NdError> {
+    pub async fn connect() -> Result<Self, ComError> {
         let (mut router, mut handle) =
             NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
         let family_id = router.resolve_genl_family(NL_80211_GENL_NAME).await?;
@@ -153,7 +153,7 @@ impl WirelessNetlink {
         &mut self,
         interface_index: Option<i32>,
         cmd: Nl80211Cmd,
-    ) -> Result<Vec<T>, NdError>
+    ) -> Result<Vec<T>, ComError>
     where
         T: for<'a> TryFrom<Attrs<'a, Nl80211Attr>, Error = DeError>,
     {
@@ -200,7 +200,7 @@ impl WirelessNetlink {
             match response.nl_type() {
                 Nlmsg::Noop => (),
                 Nlmsg::Error => {
-                    return Err(NdError::NeliMsgError(MsgError::new(
+                    return Err(ComError::NeliMsgError(MsgError::new(
                         "Parsing response.nl_type in get_info_vec",
                     )));
                 }
@@ -224,7 +224,7 @@ impl WirelessNetlink {
         &mut self,
         interface_index: Option<i32>,
         cmd: Nl80211Cmd,
-    ) -> Result<NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>>, NdError> {
+    ) -> Result<NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>>, ComError> {
         let msghdr = GenlmsghdrBuilder::<Nl80211Cmd, Nl80211Attr>::default()
             .cmd(cmd)
             .attrs({
@@ -262,7 +262,7 @@ impl WirelessNetlink {
     }
 
     /// Returns vector of interfaces.
-    pub async fn get_interfaces(&mut self) -> Result<Vec<Interface>, NdError> {
+    pub async fn get_interfaces(&mut self) -> Result<Vec<Interface>, ComError> {
         Ok(self.nl_info(None, Nl80211Cmd::CmdGetInterface).await?)
     }
 
@@ -270,14 +270,14 @@ impl WirelessNetlink {
     pub async fn get_station(
         &mut self,
         interface_index: Option<i32>,
-    ) -> Result<Vec<Station>, NdError> {
+    ) -> Result<Vec<Station>, ComError> {
         Ok(self
             .nl_info(interface_index, Nl80211Cmd::CmdGetStation)
             .await?)
     }
 
     /// Returns all the available wireless networks
-    pub async fn get_bss(&mut self, interface_index: Option<i32>) -> Result<Vec<Bss>, NdError> {
+    pub async fn get_bss(&mut self, interface_index: Option<i32>) -> Result<Vec<Bss>, ComError> {
         self.nl_action(interface_index, Nl80211Cmd::CmdTriggerScan)
             .await?;
 
@@ -298,7 +298,7 @@ impl WirelessNetlink {
                     None => {}
                 },
                 Some(Err(e)) => {
-                    return Err(NdError::NeliRouterError(Box::new(e)));
+                    return Err(ComError::NeliRouterError(Box::new(e)));
                 }
                 _ => {}
             }

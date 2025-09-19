@@ -1,11 +1,11 @@
 use zbus::Connection;
 use zbus_systemd::systemd1::UnitProxy;
 
-struct Ctl {
+struct Systemctl {
     conn: Connection,
 }
 
-impl Ctl {
+impl Systemctl {
     async fn new(conn: zbus::Connection) -> Self {
         Self { conn }
     }

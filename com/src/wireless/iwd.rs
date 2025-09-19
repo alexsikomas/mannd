@@ -1,15 +1,15 @@
-use std::{env, fmt::format, path::PathBuf};
+use std::{env, net, path::PathBuf};
 
 use async_trait::async_trait;
 use quick_xml::{Reader, events::Event};
-use tokio::fs::{self, File, OpenOptions};
+use tokio::fs::{self, OpenOptions};
 use zbus::{
     Connection,
     fdo::ObjectManagerProxy,
-    zvariant::{ObjectPath, OwnedObjectPath, Value},
+    zvariant::{OwnedObjectPath, Value},
 };
 
-use crate::{error::NdError, wireless::WifiAdapter};
+use crate::{error::ComError, wireless::WifiAdapter};
 
 pub struct Iwd {
     path: String,
@@ -23,7 +23,7 @@ impl WifiAdapter for Iwd {
     /// Creates a new instance of the `Iwd` struct. Takes in a `zbus::Connection` to minimise the
     /// number of connections that need to be created, allowing one to be shared by the
     /// `Controller` between processes.
-    async fn new(conn: Connection) -> Result<Self, NdError> {
+    async fn new(conn: Connection) -> Result<Self, ComError> {
         let service = "net.connman.iwd".to_string();
 
         match Self::find_adapter_path(&conn, &service).await {
@@ -33,10 +33,10 @@ impl WifiAdapter for Iwd {
                 path,
                 networks: None,
             }),
-            Err(e) => Err(NdError::AdapterNotFound(format!(
+            Err(e) => Err(ComError::AdapterNotFound(format!(
                 "Could not find an adapter, is iwd installed?\n Error: {e}"
             ))),
-            _ => Err(NdError::AdapterNotFound(
+            _ => Err(ComError::AdapterNotFound(
                 "Could not find an adapter, is iwd installed?".to_string(),
             )),
         }
@@ -45,35 +45,35 @@ impl WifiAdapter for Iwd {
     /// Connects to a network provided an SSID and passphrase.
     ///
     /// Since iwd does not allow connecting via BSSID the connection band is determined by signal
-    /// strength internally by iwd, this can be tweaked in the `main.conf` iwd configuration file
-    async fn connect_network(&self, ssid: &str, psk: &str) -> Result<(), NdError> {
+    /// strength internally by iwd, this can be tweaked in the iwd configuration file
+    async fn connect_network(&self, ssid: &str, psk: &str) -> Result<(), ComError> {
         todo!()
     }
 
     /// Disconnects from the current WiFi network, does not remove the network
-    async fn disconnect(&self) -> Result<(), NdError> {
+    async fn disconnect(&self) -> Result<(), ComError> {
         todo!()
     }
 
     /// Returns the current status of the connected WiFi network
-    async fn status(&self) -> Result<String, NdError> {
+    async fn status(&self) -> Result<String, ComError> {
         todo!()
     }
 
     /// Lists all networks which are available to be connected to including networks that are out
     /// of range
-    async fn list_configured_networks(&self) -> Result<Vec<String>, NdError> {
+    async fn list_configured_networks(&self) -> Result<Vec<String>, ComError> {
         todo!()
     }
 
     /// Adds a network but does not connect to it; used by `connect_network` before it connects to
     /// a network
-    async fn add_network(&self, ssid: &str, psk: &str) -> Result<(), NdError> {
+    async fn add_network(&self, ssid: &str, psk: &str) -> Result<(), ComError> {
         todo!()
     }
 
     /// Removes a network from the configured networks
-    async fn remove_network(&self, ssid: &str) -> Result<(), NdError> {
+    async fn remove_network(&self, ssid: &str) -> Result<(), ComError> {
         todo!()
     }
 }
@@ -84,7 +84,7 @@ impl Iwd {
     async fn find_adapter_path(
         conn: &Connection,
         service: &String,
-    ) -> Result<Option<String>, NdError> {
+    ) -> Result<Option<String>, ComError> {
         let proxy = ObjectManagerProxy::new(conn, service.clone(), "/").await?;
         for (path, interface) in proxy.get_managed_objects().await? {
             // BUG: if multiple adapters will just return first one
@@ -97,13 +97,12 @@ impl Iwd {
 
     /// Returns the value of a property found under the `self.path` interfaces
     /// Trait bounds follow from `zbus` downcast
-    async fn get_prop<'b, T>(&self, subpath: &str, prop: &str) -> Result<T, NdError>
+    async fn get_prop<'b, T>(&self, subpath: &str, prop: &str) -> Result<T, ComError>
     where
         T: TryFrom<Value<'b>>,
         <T as TryFrom<Value<'b>>>::Error: Into<zbus::zvariant::Error>,
     {
-        let mut interface_path = self.service.clone();
-        interface_path.push_str(format!(".{}", subpath).as_str());
+        let interface_path = format!("{}.{}", self.service, subpath);
         let proxy = zbus::Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -113,10 +112,8 @@ impl Iwd {
         .await?;
 
         match proxy.get_property(prop).await? {
-            Some(val) => Ok(<zbus::zvariant::Value<'_> as Clone>::clone(&val)
-                .downcast::<T>()
-                .unwrap()),
-            None => Err(NdError::PropertyNotFound(format!(
+            Some(val) => Ok(<zbus::zvariant::Value<'_> as Clone>::clone(&val).downcast::<T>()?),
+            None => Err(ComError::PropertyNotFound(format!(
                 "Could not find given property {} at {}",
                 prop, interface_path
             ))),
@@ -130,16 +127,14 @@ impl Iwd {
         &self,
         proxy: &zbus::Proxy<'b>,
         prop: &str,
-    ) -> Result<T, NdError>
+    ) -> Result<T, ComError>
     where
         T: TryFrom<Value<'b>>,
         <T as TryFrom<Value<'b>>>::Error: Into<zbus::zvariant::Error>,
     {
         match proxy.get_property(prop).await? {
-            Some(val) => Ok(<zbus::zvariant::Value<'_> as Clone>::clone(&val)
-                .downcast::<T>()
-                .unwrap()),
-            None => Err(NdError::PropertyNotFound(format!(
+            Some(val) => Ok(<zbus::zvariant::Value<'_> as Clone>::clone(&val).downcast::<T>()?),
+            None => Err(ComError::PropertyNotFound(format!(
                 "Could not find given property {} at {}",
                 prop,
                 proxy.path()
@@ -148,7 +143,7 @@ impl Iwd {
     }
 
     /// Performs a scan with iwd which internally updates the dbus to include new networks
-    pub async fn get_all_networks(&mut self) -> Result<(), NdError> {
+    pub async fn update_networks(&mut self) -> Result<(), ComError> {
         let proxy = zbus::Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -169,19 +164,23 @@ impl Iwd {
                 Ok(Event::Empty(ref e)) => {
                     if e.name().as_ref() == b"node" {
                         for attribute in e.attributes() {
-                            let attr = attribute.unwrap();
+                            let attr = attribute?;
                             if attr.key.as_ref() == b"name" {
                                 network_paths.push(
-                                    attr.decode_and_unescape_value(xml.decoder())
-                                        .unwrap()
-                                        .to_string(),
+                                    attr.decode_and_unescape_value(xml.decoder())?.to_string(),
                                 );
                             }
                         }
                     }
                 }
                 Ok(Event::Eof) => break,
-                Err(e) => panic!("Error at position {}: {:?}", xml.buffer_position(), e),
+                Err(e) => {
+                    return Err(ComError::XmlRead(format!(
+                        "Error at position {}: {:?}",
+                        xml.buffer_position(),
+                        e
+                    )));
+                }
                 _ => (),
             }
         }
@@ -195,7 +194,7 @@ impl Iwd {
         Ok(())
     }
 
-    pub async fn get_network_info(&self, network: String) -> Result<Network, NdError> {
+    pub async fn get_network_info(&self, network: String) -> Result<Network, ComError> {
         let proxy = zbus::Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -239,7 +238,7 @@ impl Iwd {
             "open" => security = Security::Open,
             "8021x" => security = Security::Ieee8021x,
             _ => {
-                return Err(NdError::InvalidSecurityType);
+                return Err(ComError::InvalidSecurityType);
             }
         }
 
@@ -252,6 +251,31 @@ impl Iwd {
             security,
         })
     }
+
+    /// Debug purposes
+    async fn print_networks(&self) -> Result<(), ComError> {
+        if self.networks.is_none() {
+            println!("Networks have not been initalised.");
+            return Ok(());
+        }l
+
+        let networks = self.networks.as_ref().unwrap();
+
+        if networks.is_empty() {
+            println!("No networks were found nearby!");
+            return Ok(());
+        }
+
+        println!("Found {} network(s):", networks.len());
+        println!("--------------------------------------------------");
+
+        for network in networks {
+            println!("{network}");
+
+            println!("--------------------------------------------------");
+        }
+        Ok(())
+    }
 }
 
 // Configuration related
@@ -263,14 +287,16 @@ impl Iwd {
     /// If the env variable does not exist then checks if /etc/iwd exists if so creates/finds
     /// main.conf
     /// If /etc/iwd does not exist then creates the directory and main.conf
-    async fn get_conf() -> Result<PathBuf, NdError> {
+    async fn get_conf() -> Result<PathBuf, ComError> {
         let iwd_path = "/etc/iwd";
         let env_var = "CONFIGURATION_DIRECTORY";
         let dir = env::var(env_var);
         match dir {
             // found env
             Ok(v) => {
-                let conf_path = format!("{}/main.conf", v);
+                let mut conf_path = PathBuf::from(v.clone());
+                conf_path.push("main.conf");
+
                 // not found conf
                 if fs::metadata(v).await.is_err() {
                     let file = OpenOptions::new()
@@ -284,7 +310,8 @@ impl Iwd {
             }
             // no env
             Err(e) => {
-                let conf_path = format!("{}/main.conf", iwd_path);
+                let mut conf_path = PathBuf::from(iwd_path);
+                conf_path.push("main.conf");
                 if fs::metadata(&conf_path).await.is_err() {
                     // /etc/iwd could possibly not exist
                     fs::create_dir_all(iwd_path).await?;
@@ -309,41 +336,36 @@ mod tests {
     use super::*;
 
     // Networking tests
-    async fn setup() -> Result<Iwd, NdError> {
+    async fn setup() -> Result<Iwd, ComError> {
         let conn = zbus::Connection::system().await?;
         Ok(Iwd::new(conn).await?)
     }
 
     #[tokio::test]
-    async fn test_get_connected_network() -> Result<(), NdError> {
+    async fn test_get_connected_network() -> Result<(), ComError> {
         let iwd = setup().await?;
-        iwd.get_prop::<ObjectPath>("Station", "ConnectedNetwork")
+        iwd.get_prop::<OwnedObjectPath>("Station", "ConnectedNetwork")
             .await?;
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_get_networks() -> Result<(), NdError> {
+    async fn test_get_networks() -> Result<(), ComError> {
         let mut iwd = setup().await?;
-        iwd.get_all_networks().await?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_network_info() -> Result<(), NdError> {
-        let mut iwd = setup().await?;
-        let _ = iwd.get_all_networks().await?;
+        iwd.update_networks().await?;
+        iwd.print_networks().await;
         Ok(())
     }
 
     // configuration tests
     #[tokio::test]
-    async fn test_get_conf_path() -> Result<(), NdError> {
+    async fn test_get_conf_path() -> Result<(), ComError> {
         let path = Iwd::get_conf().await?;
         Ok(())
     }
 }
 
+#[derive(Debug)]
 pub struct Network {
     ess: Vec<OwnedObjectPath>,
     connected: bool,
@@ -353,10 +375,32 @@ pub struct Network {
     security: Security,
 }
 
+impl std::fmt::Display for Network {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Name: {}\n", self.name);
+        write!(f, "Connected: {}\n", self.connected);
+        write!(f, "Security: {}\n", self.security);
+        write!(f, "Device: {:?}\n", self.device);
+        write!(f, "Known Network: {:?}\n", self.known_network);
+        write!(f, "Ess: {:?}", self.ess)
+    }
+}
+
+#[derive(Debug)]
 enum Security {
     Open,
     Psk,
     Ieee8021x,
+}
+
+impl std::fmt::Display for Security {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Security::Open => write!(f, "Open"),
+            Security::Psk => write!(f, "Passphrase"),
+            Security::Ieee8021x => write!(f, "802.1X"),
+        }
+    }
 }
 
 enum IwdConfigGroup {
