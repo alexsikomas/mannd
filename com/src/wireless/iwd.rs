@@ -6,20 +6,23 @@ use tokio::fs::{self, File, OpenOptions};
 use zbus::{
     Connection,
     fdo::ObjectManagerProxy,
-    zvariant::{ObjectPath, Value},
+    zvariant::{ObjectPath, OwnedObjectPath, Value},
 };
 
 use crate::{error::NdError, wireless::WifiAdapter};
 
-pub struct Iwd<'a> {
+pub struct Iwd {
     path: String,
     service: String,
     conn: Connection,
-    networks: Option<Vec<Network<'a>>>,
+    networks: Option<Vec<Network>>,
 }
 
 #[async_trait]
-impl<'a> WifiAdapter for Iwd<'a> {
+impl WifiAdapter for Iwd {
+    /// Creates a new instance of the `Iwd` struct. Takes in a `zbus::Connection` to minimise the
+    /// number of connections that need to be created, allowing one to be shared by the
+    /// `Controller` between processes.
     async fn new(conn: Connection) -> Result<Self, NdError> {
         let service = "net.connman.iwd".to_string();
 
@@ -39,29 +42,45 @@ impl<'a> WifiAdapter for Iwd<'a> {
         }
     }
 
+    /// Connects to a network provided an SSID and passphrase.
+    ///
+    /// Since iwd does not allow connecting via BSSID the connection band is determined by signal
+    /// strength internally by iwd, this can be tweaked in the `main.conf` iwd configuration file
     async fn connect_network(&self, ssid: &str, psk: &str) -> Result<(), NdError> {
         todo!()
     }
+
+    /// Disconnects from the current WiFi network, does not remove the network
     async fn disconnect(&self) -> Result<(), NdError> {
         todo!()
     }
+
+    /// Returns the current status of the connected WiFi network
     async fn status(&self) -> Result<String, NdError> {
         todo!()
     }
+
+    /// Lists all networks which are available to be connected to including networks that are out
+    /// of range
     async fn list_configured_networks(&self) -> Result<Vec<String>, NdError> {
         todo!()
     }
+
+    /// Adds a network but does not connect to it; used by `connect_network` before it connects to
+    /// a network
     async fn add_network(&self, ssid: &str, psk: &str) -> Result<(), NdError> {
         todo!()
     }
+
+    /// Removes a network from the configured networks
     async fn remove_network(&self, ssid: &str) -> Result<(), NdError> {
         todo!()
     }
 }
 
 // Networking related
-impl<'a> Iwd<'a> {
-    /// Gets the object path of the iwd station
+impl Iwd {
+    /// Returns the object path of the iwd station, currently only returns the first station
     async fn find_adapter_path(
         conn: &Connection,
         service: &String,
@@ -129,7 +148,7 @@ impl<'a> Iwd<'a> {
     }
 
     /// Performs a scan with iwd which internally updates the dbus to include new networks
-    pub async fn get_all_networks(&self) -> Result<Vec<Network>, NdError> {
+    pub async fn get_all_networks(&mut self) -> Result<(), NdError> {
         let proxy = zbus::Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -172,7 +191,8 @@ impl<'a> Iwd<'a> {
             let network = self.get_network_info(path).await?;
             networks.push(network);
         }
-        Ok(networks)
+        self.networks = Some(networks);
+        Ok(())
     }
 
     pub async fn get_network_info(&self, network: String) -> Result<Network, NdError> {
@@ -185,7 +205,7 @@ impl<'a> Iwd<'a> {
         .await?;
 
         let ess = self
-            .get_prop_from_proxy::<Vec<ObjectPath>>(&proxy, "ExtendedServiceSet")
+            .get_prop_from_proxy::<Vec<OwnedObjectPath>>(&proxy, "ExtendedServiceSet")
             .await?;
 
         let connected = self
@@ -193,12 +213,12 @@ impl<'a> Iwd<'a> {
             .await?;
 
         let device = self
-            .get_prop_from_proxy::<ObjectPath>(&proxy, "Device")
+            .get_prop_from_proxy::<OwnedObjectPath>(&proxy, "Device")
             .await?;
 
-        let known_network: Option<ObjectPath>;
+        let known_network: Option<OwnedObjectPath>;
         match self
-            .get_prop_from_proxy::<ObjectPath>(&proxy, "KnownNetwork")
+            .get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork")
             .await
         {
             Ok(known) => {
@@ -235,9 +255,14 @@ impl<'a> Iwd<'a> {
 }
 
 // Configuration related
-impl<'a> Iwd<'a> {
+impl Iwd {
     /// Returns either the location of main.conf if it has been created or a folder where it should
     /// be created.
+    ///
+    /// First, checks if `$CONFIGURATION_DIRECTORY` exists if so creates/finds main.conf
+    /// If the env variable does not exist then checks if /etc/iwd exists if so creates/finds
+    /// main.conf
+    /// If /etc/iwd does not exist then creates the directory and main.conf
     async fn get_conf() -> Result<PathBuf, NdError> {
         let iwd_path = "/etc/iwd";
         let env_var = "CONFIGURATION_DIRECTORY";
@@ -284,7 +309,7 @@ mod tests {
     use super::*;
 
     // Networking tests
-    async fn setup<'a>() -> Result<Iwd<'a>, NdError> {
+    async fn setup() -> Result<Iwd, NdError> {
         let conn = zbus::Connection::system().await?;
         Ok(Iwd::new(conn).await?)
     }
@@ -299,14 +324,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_networks() -> Result<(), NdError> {
-        let iwd = setup().await?;
+        let mut iwd = setup().await?;
         iwd.get_all_networks().await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn test_network_info() -> Result<(), NdError> {
-        let iwd = setup().await?;
+        let mut iwd = setup().await?;
         let _ = iwd.get_all_networks().await?;
         Ok(())
     }
@@ -319,11 +344,11 @@ mod tests {
     }
 }
 
-pub struct Network<'a> {
-    ess: Vec<ObjectPath<'a>>,
+pub struct Network {
+    ess: Vec<OwnedObjectPath>,
     connected: bool,
-    device: ObjectPath<'a>,
-    known_network: Option<ObjectPath<'a>>,
+    device: OwnedObjectPath,
+    known_network: Option<OwnedObjectPath>,
     name: String,
     security: Security,
 }
