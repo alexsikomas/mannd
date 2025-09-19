@@ -246,23 +246,19 @@ impl<'a> Iwd<'a> {
             // found env
             Ok(v) => {
                 let conf_path = format!("{}/main.conf", v);
-                println!("1");
                 // not found conf
                 if fs::metadata(v).await.is_err() {
-                    println!("2");
                     let file = OpenOptions::new()
                         .write(true)
                         .read(true)
                         .create(true)
                         .open(&conf_path)
                         .await?;
-                    println!("3");
                 }
                 return Ok(PathBuf::from(conf_path));
             }
             // no env
             Err(e) => {
-                println!("4");
                 let conf_path = format!("{}/main.conf", iwd_path);
                 if fs::metadata(&conf_path).await.is_err() {
                     // /etc/iwd could possibly not exist
@@ -336,4 +332,85 @@ enum Security {
     Open,
     Psk,
     Ieee8021x,
+}
+
+enum IwdConfigGroup {
+    General,
+    Network,
+    Blacklist,
+    Rank,
+    Scan,
+}
+
+enum GeneralSettings {
+    EnableNetworkConfiguration(bool),
+    AddressRandomization(AddrRandOpts),
+    AddressRandomizationRange(AddrRandRangeOpts),
+    // -100 to 1; default: -70
+    RoamThreshold(i8),
+    // default: -76
+    RoamThreshold5G(i8),
+    // default -80
+    CriticalRoamThreshold(i8),
+    // default: -82
+    CriticalRoamThreshold5G(i8),
+    RoamRetryInterval(u16),
+    ManagementFrameProtection(ManagementFrameProtectionOpts),
+}
+
+enum AddrRandOpts {
+    Disabled,
+    Once,
+    Network,
+}
+
+enum AddrRandRangeOpts {
+    Full,
+    Nic,
+}
+
+enum ManagementFrameProtectionOpts {
+    Optional,
+    Required,
+    Disabled,
+}
+
+enum NetworkSettings {
+    EnableIpv6(bool),
+    NameResolvingService(NameResolver),
+    // default: 300
+    RoutePriorityOffset(u32),
+}
+
+enum NameResolver {
+    Resolveconf,
+    Systemd,
+    None,
+}
+
+enum BlacklistSettings {
+    // default: 60
+    InitialTimeout(u32),
+    // default: 30
+    InitialAccessPointBusyTimeout(u32),
+    // default: 30
+    Multiplier(u32),
+    // default: 86400
+    MaximumTimeout(u32),
+}
+
+enum RankSettings {
+    // band modif. default: 1.0
+    BandModifier2_4Ghz(f32),
+    BandModifier5Ghz(f32),
+    BandModifier6Ghz(f32),
+}
+
+enum ScanSettings {
+    DisablePeriodicScan(bool),
+    // default: 10
+    InitialPeriodicScanInterval(u32),
+    // default: 300
+    MaximumPeriodicScanInterval(u32),
+    DisableRoamingScan(bool),
 }
