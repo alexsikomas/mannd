@@ -16,6 +16,7 @@ pub trait WifiAdapter {
     async fn remove_network(&self, ssid: &str) -> Result<(), ComError>;
 }
 
+pub mod common;
 pub mod defs;
 pub mod iwd;
 pub mod wpa_supplicant;

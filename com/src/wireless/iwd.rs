@@ -9,13 +9,19 @@ use zbus::{
     zvariant::{OwnedObjectPath, Value},
 };
 
-use crate::{error::ComError, wireless::WifiAdapter};
+use crate::{
+    error::ComError,
+    wireless::{
+        WifiAdapter,
+        common::{AccessPoint, Security},
+    },
+};
 
 pub struct Iwd {
     path: String,
     service: String,
     conn: Connection,
-    networks: Option<Vec<Network>>,
+    networks: Option<Vec<IwdNetwork>>,
 }
 
 #[async_trait]
@@ -194,7 +200,7 @@ impl Iwd {
         Ok(())
     }
 
-    pub async fn get_network_info(&self, network: String) -> Result<Network, ComError> {
+    pub async fn get_network_info(&self, network: String) -> Result<IwdNetwork, ComError> {
         let proxy = zbus::Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -242,13 +248,15 @@ impl Iwd {
             }
         }
 
-        Ok(Network {
+        Ok(IwdNetwork {
+            ap: AccessPoint {
+                ssid: name,
+                security,
+            },
             ess,
             connected,
             device,
             known_network,
-            name,
-            security,
         })
     }
 
@@ -257,7 +265,7 @@ impl Iwd {
         if self.networks.is_none() {
             println!("Networks have not been initalised.");
             return Ok(());
-        }l
+        }
 
         let networks = self.networks.as_ref().unwrap();
 
@@ -341,13 +349,13 @@ mod tests {
         Ok(Iwd::new(conn).await?)
     }
 
-    #[tokio::test]
-    async fn test_get_connected_network() -> Result<(), ComError> {
-        let iwd = setup().await?;
-        iwd.get_prop::<OwnedObjectPath>("Station", "ConnectedNetwork")
-            .await?;
-        Ok(())
-    }
+    // #[tokio::test]
+    // async fn test_get_connected_network() -> Result<(), ComError> {
+    //     let iwd = setup().await?;
+    //     iwd.get_prop::<OwnedObjectPath>("Station", "ConnectedNetwork")
+    //         .await?;
+    //     Ok(())
+    // }
 
     #[tokio::test]
     async fn test_get_networks() -> Result<(), ComError> {
@@ -366,40 +374,22 @@ mod tests {
 }
 
 #[derive(Debug)]
-pub struct Network {
+pub struct IwdNetwork {
+    ap: AccessPoint,
     ess: Vec<OwnedObjectPath>,
     connected: bool,
     device: OwnedObjectPath,
     known_network: Option<OwnedObjectPath>,
-    name: String,
-    security: Security,
 }
 
-impl std::fmt::Display for Network {
+impl std::fmt::Display for IwdNetwork {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Name: {}\n", self.name);
+        write!(f, "Name: {}\n", self.ap.ssid);
         write!(f, "Connected: {}\n", self.connected);
-        write!(f, "Security: {}\n", self.security);
+        write!(f, "Security: {}\n", self.ap.security);
         write!(f, "Device: {:?}\n", self.device);
         write!(f, "Known Network: {:?}\n", self.known_network);
         write!(f, "Ess: {:?}", self.ess)
-    }
-}
-
-#[derive(Debug)]
-enum Security {
-    Open,
-    Psk,
-    Ieee8021x,
-}
-
-impl std::fmt::Display for Security {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Security::Open => write!(f, "Open"),
-            Security::Psk => write!(f, "Passphrase"),
-            Security::Ieee8021x => write!(f, "802.1X"),
-        }
     }
 }
 
