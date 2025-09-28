@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Margin, Rect},
@@ -5,26 +7,47 @@ use ratatui::{
     text::Line,
     widgets::{Block, Borders, Paragraph},
 };
+use serde::Deserialize;
+use toml::Value;
+use tracing::{info, instrument};
 
-struct UiState {
-    pub theme: Box<dyn ColorScheme>,
+pub struct UiState {
+    pub theme: Theme,
 }
 
-pub fn ui(frame: &mut Frame) {
-    let state = UiState {
-        theme: Box::new(Theme::Dark),
-    };
+impl UiState {
+    #[instrument]
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let config = std::fs::read_to_string("tui/example_config.toml")?;
+        let toml_value: Value = toml::from_str(&config)?;
+        let selected_theme = toml_value["theme"]["selected"].as_str().unwrap();
 
+        info!("Selected Theme: {selected_theme}");
+
+        let theme_table = toml_value["theme"][selected_theme].as_table().unwrap();
+
+        let theme: Theme = theme_table.clone().try_into()?;
+        info!("Theme Table: {:?}", theme);
+
+        Ok(Self { theme })
+    }
+}
+
+pub fn ui<'a>(frame: &mut Frame<'a>, ui_state: &UiState) {
     let outer_area = frame.size();
 
     let title_block = Block::new()
         .borders(Borders::all())
-        .style(state.theme.foreground())
+        .style(
+            Style::new()
+                .fg((&ui_state.theme.foreground).into())
+                .bg((&ui_state.theme.background).into()),
+        )
         .title(
             Line::from(" mannd ")
                 .style(
                     Style::new()
-                        .fg(state.theme.focused())
+                        .fg((&ui_state.theme.background).into())
                         .add_modifier(Modifier::BOLD),
                 )
                 .centered(),
@@ -35,8 +58,8 @@ pub fn ui(frame: &mut Frame) {
     frame.render_widget(
         Block::new().style(
             Style::new()
-                .fg(state.theme.active())
-                .bg(state.theme.active()),
+                .fg((&ui_state.theme.background).into())
+                .bg((&ui_state.theme.background).into()),
         ),
         inner_area,
     );
@@ -55,103 +78,36 @@ fn calculate_layout(area: Rect) -> (Rect, Rect) {
     (outer_area, inner_area)
 }
 
-enum Theme {
-    Light,
-    Dark,
+#[derive(Deserialize, Debug)]
+struct Config {
+    selected: String,
 }
 
-pub trait ColorScheme {
-    fn background(&self) -> Color;
-    fn foreground(&self) -> Color;
+#[derive(Deserialize, Debug)]
+struct ThemeColor(String);
 
-    fn primary_accent(&self) -> Color;
-    fn secondary_accent(&self) -> Color;
-
-    fn active(&self) -> Color;
-    fn inactive(&self) -> Color;
-    fn focused(&self) -> Color;
-    fn unfocused(&self) -> Color;
-
-    fn success(&self) -> Color;
-    fn warning(&self) -> Color;
-    fn error(&self) -> Color;
+#[derive(Deserialize, Debug)]
+struct Theme {
+    background: ThemeColor,
+    foreground: ThemeColor,
+    muted: ThemeColor,
+    error: ThemeColor,
+    warning: ThemeColor,
+    success: ThemeColor,
+    info: ThemeColor,
+    primary: ThemeColor,
+    secondary: ThemeColor,
+    tertiary: ThemeColor,
+    accent: ThemeColor,
 }
 
-impl ColorScheme for Theme {
-    fn background(&self) -> Color {
-        match self {
-            Theme::Light => Color::Rgb(0, 0, 0),
-            Theme::Dark => Color::Rgb(40, 40, 40),
-        }
-    }
-
-    fn foreground(&self) -> Color {
-        match self {
-            Theme::Light => Color::Rgb(0, 0, 0),
-            Theme::Dark => Color::Rgb(235, 219, 178),
-        }
-    }
-
-    fn primary_accent(&self) -> Color {
-        match self {
-            Theme::Light => Color::Rgb(0, 0, 0),
-            Theme::Dark => Color::Rgb(60, 56, 54),
-        }
-    }
-
-    fn secondary_accent(&self) -> Color {
-        match self {
-            Theme::Light => Color::Rgb(0, 0, 0),
-            Theme::Dark => Color::Rgb(80, 73, 69),
-        }
-    }
-
-    fn active(&self) -> Color {
-        match self {
-            Theme::Light => Color::Rgb(0, 0, 0),
-            Theme::Dark => Color::Rgb(131, 165, 152),
-        }
-    }
-
-    fn inactive(&self) -> Color {
-        match self {
-            Theme::Light => Color::Rgb(0, 0, 0),
-            Theme::Dark => Color::Rgb(146, 131, 116),
-        }
-    }
-
-    fn focused(&self) -> Color {
-        match self {
-            Theme::Light => Color::Rgb(0, 0, 0),
-            Theme::Dark => Color::Rgb(142, 192, 124),
-        }
-    }
-
-    fn unfocused(&self) -> Color {
-        match self {
-            Theme::Light => Color::Rgb(0, 0, 0),
-            Theme::Dark => Color::Rgb(124, 111, 100),
-        }
-    }
-
-    fn success(&self) -> Color {
-        match self {
-            Theme::Light => Color::Rgb(0, 0, 0),
-            Theme::Dark => Color::Rgb(184, 187, 38),
-        }
-    }
-
-    fn warning(&self) -> Color {
-        match self {
-            Theme::Light => Color::Rgb(0, 0, 0),
-            Theme::Dark => Color::Rgb(250, 189, 47),
-        }
-    }
-
-    fn error(&self) -> Color {
-        match self {
-            Theme::Light => Color::Rgb(0, 0, 0),
-            Theme::Dark => Color::Rgb(251, 73, 52),
-        }
+impl Into<Color> for &ThemeColor {
+    fn into(self) -> Color {
+        // ignore # in theme color
+        Color::Rgb(
+            u8::from_str_radix(&self.0[1..=2], 16).unwrap(),
+            u8::from_str_radix(&self.0[3..=4], 16).unwrap(),
+            u8::from_str_radix(&self.0[5..=6], 16).unwrap(),
+        )
     }
 }

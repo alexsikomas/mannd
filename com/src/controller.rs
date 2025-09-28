@@ -3,8 +3,10 @@ use crate::{
     netlink::{WiredNetlink, WirelessNetlink},
     wireless::{WifiAdapter, iwd::Iwd, wpa_supplicant::WpaSupplicant},
 };
+use tracing::{info, instrument};
 use zbus::Connection;
 
+#[derive(Debug)]
 pub struct Controller {
     // Wireless Daemons
     wifi: Option<Box<dyn WifiAdapter + Send + Sync>>,
@@ -15,9 +17,13 @@ pub struct Controller {
 }
 
 impl Controller {
+    #[instrument]
     async fn new() -> Result<Self, ComError> {
+        info!("Creating controller");
         let conn = zbus::Connection::system().await?;
+        info!("Zbus connection successful");
         let nl_wifi = WirelessNetlink::connect().await?;
+        info!("Netlink connection successful");
         // let mut nl_wired = WiredNetlink::connect().await?;
 
         // Init wifi later
@@ -29,7 +35,9 @@ impl Controller {
         })
     }
 
+    #[instrument]
     async fn connect_iwd(&mut self) -> Result<(), ComError> {
+        info!("Attempting to setup iwd connection in controller");
         let conn = self.connection.clone();
         match Iwd::new(conn).await {
             Ok(iwd) => {

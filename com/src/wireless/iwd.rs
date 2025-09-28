@@ -3,6 +3,7 @@ use std::{env, net, path::PathBuf};
 use async_trait::async_trait;
 use quick_xml::{Reader, events::Event};
 use tokio::fs::{self, OpenOptions};
+use tracing::{info, instrument};
 use zbus::{
     Connection,
     fdo::ObjectManagerProxy,
@@ -17,6 +18,7 @@ use crate::{
     },
 };
 
+#[derive(Debug)]
 pub struct Iwd {
     path: String,
     service: String,
@@ -29,7 +31,9 @@ impl WifiAdapter for Iwd {
     /// Creates a new instance of the `Iwd` struct. Takes in a `zbus::Connection` to minimise the
     /// number of connections that need to be created, allowing one to be shared by the
     /// `Controller` between processes.
+    #[instrument]
     async fn new(conn: Connection) -> Result<Self, ComError> {
+        info!("Attempting to create iwd dbus connection");
         let service = "net.connman.iwd".to_string();
 
         match Self::find_adapter_path(&conn, &service).await {

@@ -3,6 +3,7 @@ use zbus::Connection;
 
 use crate::{error::ComError, wireless::WifiAdapter};
 
+#[derive(Debug)]
 pub struct WpaSupplicant {}
 
 #[async_trait]

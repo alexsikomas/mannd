@@ -10,6 +10,7 @@ neli-proc-macros = "0.2.1"
 quick-xml = { version = "0.38.3", features = ["async-tokio"] }
 thiserror = "2.0.16"
 tokio = { version = "1.47.1", features = ["full"] }
+tracing = "0.1.41"
 zbus = { version = "5.10.0", features = ["tokio"] }
 zbus_systemd = { version = "0.25701.0", features = [
   "network1",

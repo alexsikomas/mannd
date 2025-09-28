@@ -2,3 +2,4 @@
 /target
 **/*.rs.bk
 /gui/node_modules
+/.logs/*

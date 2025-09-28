@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt::Debug};
 
 use crate::{
     error::ComError,
@@ -24,11 +24,20 @@ use neli::{
     types::GenlBuffer,
     utils::Groups,
 };
+use tracing::{info, instrument};
 
 pub struct WiredNetlink {
     router: NlRouter,
     handle: NlRouterReceiverHandle<u16, Genlmsghdr<u8, u16, NoUserHeader>>,
     family_id: u16,
+}
+
+impl Debug for WiredNetlink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WiredNetlink")
+            .field("family_id", &self.family_id)
+            .finish()
+    }
 }
 
 pub struct WirelessNetlink {
@@ -38,11 +47,22 @@ pub struct WirelessNetlink {
     mcast: Multicast,
 }
 
+impl Debug for WirelessNetlink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WirelessNetlink")
+            .field("family_id", &self.family_id)
+            .finish()
+    }
+}
+
 impl WiredNetlink {
+    #[instrument]
     pub async fn connect() -> Result<Self, ComError> {
+        info!("Creating wired netlink connection");
         let (mut router, mut handle) =
             NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
         let family_id = router.resolve_genl_family(ETHTOOL_GENL_NAME).await?;
+        info!("Successfully created wired netlink connection");
 
         Ok(Self {
             router,
@@ -127,7 +147,9 @@ impl WiredNetlink {
 }
 
 impl WirelessNetlink {
+    #[instrument]
     pub async fn connect() -> Result<Self, ComError> {
+        info!("Creating wireless netlink connection");
         let (mut router, mut handle) =
             NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
         let family_id = router.resolve_genl_family(NL_80211_GENL_NAME).await?;
@@ -138,6 +160,7 @@ impl WirelessNetlink {
         let (mcast_sock, mut mcast_recv) =
             NlRouter::connect(NlFamily::Generic, None, Groups::new_groups(&[scan_group])).await?;
 
+        info!("Successfully created wireless netlink connection");
         Ok(Self {
             router,
             handle,
@@ -149,6 +172,7 @@ impl WirelessNetlink {
         })
     }
 
+    #[instrument]
     async fn nl_info<T>(
         &mut self,
         interface_index: Option<i32>,
@@ -157,6 +181,7 @@ impl WirelessNetlink {
     where
         T: for<'a> TryFrom<Attrs<'a, Nl80211Attr>, Error = DeError>,
     {
+        info!("Attempting to retireve information from netlink");
         let msghdr = GenlmsghdrBuilder::<Nl80211Cmd, Nl80211Attr>::default()
             .cmd(cmd)
             .attrs({
@@ -181,6 +206,7 @@ impl WirelessNetlink {
             .build()
             .unwrap();
 
+        info!("Built netlink message header");
         let mut recv: NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>> = self
             .router
             .send(
@@ -200,9 +226,9 @@ impl WirelessNetlink {
             match response.nl_type() {
                 Nlmsg::Noop => (),
                 Nlmsg::Error => {
-                    return Err(ComError::NeliMsgError(MsgError::new(
-                        "Parsing response.nl_type in get_info_vec",
-                    )));
+                    let err = "Parsing response.nl_type in get_info_vec";
+                    tracing::error!(err);
+                    return Err(ComError::NeliMsgError(MsgError::new(err)));
                 }
                 Nlmsg::Done => return Ok(retval),
                 _ => retval.push(
@@ -220,11 +246,13 @@ impl WirelessNetlink {
     }
 
     /// Used to send commands
+    #[instrument]
     async fn nl_action(
         &mut self,
         interface_index: Option<i32>,
         cmd: Nl80211Cmd,
     ) -> Result<NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>>, ComError> {
+        info!("Prepearing to perform netlink action");
         let msghdr = GenlmsghdrBuilder::<Nl80211Cmd, Nl80211Attr>::default()
             .cmd(cmd)
             .attrs({
@@ -249,6 +277,7 @@ impl WirelessNetlink {
             .build()
             .unwrap();
 
+        info!("Created netlink message header");
         let mut recv: NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>> = self
             .router
             .send(
