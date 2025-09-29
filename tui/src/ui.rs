@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, sync::OnceLock};
 
 use ratatui::{
     Frame,
@@ -11,13 +11,13 @@ use serde::Deserialize;
 use toml::Value;
 use tracing::{info, instrument};
 
-pub struct UiState {
-    pub theme: Theme,
-}
+use crate::components::menu::Menu;
 
-impl UiState {
+pub static THEME: OnceLock<Theme> = OnceLock::new();
+
+impl Theme {
     #[instrument]
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new() -> Result<(), Box<dyn std::error::Error>> {
         let config = std::fs::read_to_string("tui/example_config.toml")?;
         let toml_value: Value = toml::from_str(&config)?;
         let selected_theme = toml_value["theme"]["selected"].as_str().unwrap();
@@ -27,27 +27,40 @@ impl UiState {
         let theme_table = toml_value["theme"][selected_theme].as_table().unwrap();
 
         let theme: Theme = theme_table.clone().try_into()?;
-        info!("Theme Table: {:?}", theme);
-
-        Ok(Self { theme })
+        match THEME.set(theme) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                tracing::info!("Theme has already been initalised.");
+                Ok(())
+            }
+        }
     }
 }
 
-pub fn ui<'a>(frame: &mut Frame<'a>, ui_state: &UiState) {
+pub fn ui<'a>(frame: &mut Frame<'a>) {
     let outer_area = frame.size();
+    let theme: &Theme;
+    match THEME.get() {
+        Some(t) => {
+            theme = t;
+        }
+        None => {
+            return;
+        }
+    }
 
     let title_block = Block::new()
         .borders(Borders::all())
         .style(
             Style::new()
-                .fg((&ui_state.theme.foreground).into())
-                .bg((&ui_state.theme.background).into()),
+                .fg((&theme.foreground).into())
+                .bg((&theme.background).into()),
         )
         .title(
             Line::from(" mannd ")
                 .style(
                     Style::new()
-                        .fg((&ui_state.theme.background).into())
+                        .fg((&theme.primary).into())
                         .add_modifier(Modifier::BOLD),
                 )
                 .centered(),
@@ -58,11 +71,14 @@ pub fn ui<'a>(frame: &mut Frame<'a>, ui_state: &UiState) {
     frame.render_widget(
         Block::new().style(
             Style::new()
-                .fg((&ui_state.theme.background).into())
-                .bg((&ui_state.theme.background).into()),
+                .fg((&theme.background).into())
+                .bg((&theme.background).into()),
         ),
         inner_area,
     );
+
+    let menu = Menu::default();
+    frame.render_widget(menu, inner_area);
 }
 
 fn main_menu(frame: &mut Frame) {}
@@ -87,7 +103,7 @@ struct Config {
 struct ThemeColor(String);
 
 #[derive(Deserialize, Debug)]
-struct Theme {
+pub struct Theme {
     background: ThemeColor,
     foreground: ThemeColor,
     muted: ThemeColor,
@@ -101,13 +117,13 @@ struct Theme {
     accent: ThemeColor,
 }
 
-impl Into<Color> for &ThemeColor {
-    fn into(self) -> Color {
+impl<'a> From<&'a ThemeColor> for Color {
+    fn from(theme_color: &'a ThemeColor) -> Self {
         // ignore # in theme color
         Color::Rgb(
-            u8::from_str_radix(&self.0[1..=2], 16).unwrap(),
-            u8::from_str_radix(&self.0[3..=4], 16).unwrap(),
-            u8::from_str_radix(&self.0[5..=6], 16).unwrap(),
+            u8::from_str_radix(&theme_color.0[1..=2], 16).unwrap(),
+            u8::from_str_radix(&theme_color.0[3..=4], 16).unwrap(),
+            u8::from_str_radix(&theme_color.0[5..=6], 16).unwrap(),
         )
     }
 }

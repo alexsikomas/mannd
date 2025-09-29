@@ -9,7 +9,7 @@ use toml::Value;
 use tracing::{Level, instrument::WithSubscriber};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{FmtSubscriber, Registry, layer::SubscriberExt};
-use tui::ui::{UiState, ui};
+use tui::ui::{Theme, ui};
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -35,21 +35,15 @@ fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber)
         .expect("Setting default subscriber failed!");
 
-    if let Ok(ui_state) = UiState::new() {
-        let result = run(terminal, &ui_state);
-        ratatui::restore();
-        result
-    } else {
-        ratatui::restore();
-        let ui_k = UiState::new().err();
-        println!("{:?}", ui_k);
-        Ok(())
-    }
+    Theme::new();
+    let result = run(terminal);
+    ratatui::restore();
+    result
 }
 
-fn run(mut terminal: DefaultTerminal, ui_state: &UiState) -> Result<()> {
+fn run(mut terminal: DefaultTerminal) -> Result<()> {
     loop {
-        terminal.draw(|f| ui(f, ui_state))?;
+        terminal.draw(|f| ui(f))?;
         if matches!(event::read()?, Event::Key(_)) {
             break Ok(());
         }
