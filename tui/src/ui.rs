@@ -100,30 +100,57 @@ struct Config {
 }
 
 #[derive(Deserialize, Debug)]
-struct ThemeColor(String);
+pub struct ThemeColor(String);
 
 #[derive(Deserialize, Debug)]
 pub struct Theme {
-    background: ThemeColor,
-    foreground: ThemeColor,
-    muted: ThemeColor,
-    error: ThemeColor,
-    warning: ThemeColor,
-    success: ThemeColor,
-    info: ThemeColor,
-    primary: ThemeColor,
-    secondary: ThemeColor,
-    tertiary: ThemeColor,
-    accent: ThemeColor,
+    pub background: ThemeColor,
+    pub foreground: ThemeColor,
+    pub muted: ThemeColor,
+    pub error: ThemeColor,
+    pub warning: ThemeColor,
+    pub success: ThemeColor,
+    pub info: ThemeColor,
+    pub primary: ThemeColor,
+    pub secondary: ThemeColor,
+    pub tertiary: ThemeColor,
+    pub accent: ThemeColor,
 }
 
 impl<'a> From<&'a ThemeColor> for Color {
     fn from(theme_color: &'a ThemeColor) -> Self {
+        let col: Vec<u8> = theme_color.into();
+        Color::Rgb(col[0], col[1], col[2])
+    }
+}
+
+impl Into<Vec<u8>> for &ThemeColor {
+    fn into(self) -> Vec<u8> {
         // ignore # in theme color
-        Color::Rgb(
-            u8::from_str_radix(&theme_color.0[1..=2], 16).unwrap(),
-            u8::from_str_radix(&theme_color.0[3..=4], 16).unwrap(),
-            u8::from_str_radix(&theme_color.0[5..=6], 16).unwrap(),
-        )
+        vec![
+            u8::from_str_radix(&self.0[1..=2], 16).unwrap(),
+            u8::from_str_radix(&self.0[3..=4], 16).unwrap(),
+            u8::from_str_radix(&self.0[5..=6], 16).unwrap(),
+        ]
+    }
+}
+
+impl ThemeColor {
+    pub fn shift(&self, percent: i8) -> Color {
+        let percent = (percent as f32).clamp(-100.0, 100.0) / 100.0;
+        let col: Vec<u8> = self.into();
+        let mut new_col: Vec<u8> = vec![];
+
+        for c in col {
+            let res: u8;
+            if percent > 0.0 {
+                res = (c as f32 + (255.0 - c as f32) * percent).round() as u8;
+            } else {
+                res = (c as f32 * (1.0 + percent)).round() as u8;
+            }
+            new_col.push(res);
+        }
+
+        Color::Rgb(new_col[0], new_col[1], new_col[2])
     }
 }

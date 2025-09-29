@@ -32,10 +32,17 @@ fn main() -> Result<()> {
 
     let subscriber = subscriber.with(ErrorLayer::default());
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Setting default subscriber failed!");
+    match tracing::subscriber::set_global_default(subscriber) {
+        Err(e) => {
+            tracing::error!(
+                "Could not set the default subscriber! Continuing without proper logging"
+            )
+        }
+        _ => {}
+    }
 
-    Theme::new();
+    let _ = Theme::new();
+
     let result = run(terminal);
     ratatui::restore();
     result

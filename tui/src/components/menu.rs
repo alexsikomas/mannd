@@ -5,6 +5,9 @@ use ratatui::{
     text::Line,
     widgets::{Block, Widget},
 };
+use tracing::info;
+
+use crate::ui::{THEME, Theme};
 
 pub struct Menu {
     current: MenuType,
@@ -46,9 +49,21 @@ impl Widget for Menu {
     where
         Self: Sized,
     {
+        let theme: &Theme;
+        match THEME.get() {
+            Some(t) => {
+                theme = t;
+            }
+            None => {
+                return;
+            }
+        }
+
+        info!("Color before shift: {:?}", theme.primary);
+        info!("Color after shift: {}", theme.primary.shift(10));
         let select = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .style(Style::new().fg(ratatui::style::Color::Red))
+            .style(Style::new().fg(theme.primary.shift(100)))
             .title_top("Select");
 
         select.render(area, buf);
