@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style, Styled, Stylize},
     text::Line,
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, BorderType, Borders, Paragraph},
 };
 use serde::Deserialize;
 use toml::Value;
@@ -50,17 +50,18 @@ pub fn ui<'a>(frame: &mut Frame<'a>) {
     }
 
     let title_block = Block::new()
+        .border_type(BorderType::Rounded)
         .borders(Borders::all())
         .style(
             Style::new()
-                .fg((&theme.foreground).into())
-                .bg((&theme.background).into()),
+                .fg(theme.foreground.color())
+                .bg(theme.background.color()),
         )
         .title(
             Line::from(" mannd ")
                 .style(
                     Style::new()
-                        .fg((&theme.primary).into())
+                        .fg(theme.primary.color())
                         .add_modifier(Modifier::BOLD),
                 )
                 .centered(),
@@ -71,8 +72,8 @@ pub fn ui<'a>(frame: &mut Frame<'a>) {
     frame.render_widget(
         Block::new().style(
             Style::new()
-                .fg((&theme.background).into())
-                .bg((&theme.background).into()),
+                .fg(theme.background.color())
+                .bg(theme.background.color()),
         ),
         inner_area,
     );
@@ -152,5 +153,10 @@ impl ThemeColor {
         }
 
         Color::Rgb(new_col[0], new_col[1], new_col[2])
+    }
+
+    pub fn color(&self) -> Color {
+        let col: Color = self.into();
+        return col;
     }
 }

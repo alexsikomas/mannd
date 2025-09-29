@@ -1,9 +1,10 @@
+use color_eyre::owo_colors::OwoColorize;
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{self, Constraint, Layout, Rect},
     style::Style,
     text::Line,
-    widgets::{Block, Widget},
+    widgets::{Block, Borders, Padding, Paragraph, Widget},
 };
 use tracing::info;
 
@@ -59,13 +60,35 @@ impl Widget for Menu {
             }
         }
 
-        info!("Color before shift: {:?}", theme.primary);
-        info!("Color after shift: {}", theme.primary.shift(10));
         let select = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .style(Style::new().fg(theme.primary.shift(100)))
-            .title_top("Select");
+            .borders(Borders::all())
+            .style(Style::new().fg(theme.secondary.shift(-50)))
+            .padding(Padding::new(0, 0, 1, 0))
+            .title_top(
+                Line::from(" Select ")
+                    .centered()
+                    .style(Style::new().fg(theme.secondary.color())),
+            );
 
-        select.render(area, buf);
+        let paragraph = Paragraph::new("Connection")
+            .centered()
+            .style(Style::new().fg(theme.secondary.color()));
+
+        // TODO: add dynamic constraints based on res
+        let layout = Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([Constraint::Percentage(30)])
+            .flex(layout::Flex::Center)
+            .split(area);
+
+        let layout = Layout::default()
+            .direction(layout::Direction::Horizontal)
+            .constraints([Constraint::Percentage(25)])
+            .flex(layout::Flex::Center)
+            .split(layout[0]);
+
+        info!("{:?}", layout);
+        paragraph.block(select).render(layout[0], buf);
     }
 }
