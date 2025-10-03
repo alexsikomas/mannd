@@ -1,12 +1,12 @@
+use ratatui::crossterm::event::Event;
+use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 use tracing::info;
 
-pub mod app;
 pub mod components;
-pub mod event;
-pub mod tui;
 pub mod ui;
 
 // state
+#[derive(Clone)]
 pub struct App {
     pub views: SelectableList<&'static str>,
     pub main_menu: SelectableList<&'static str>,
@@ -22,6 +22,7 @@ impl Default for App {
     }
 }
 
+#[derive(Clone)]
 pub struct SelectableList<T> {
     pub items: Vec<T>,
     pub selected: usize,
@@ -39,7 +40,7 @@ impl SelectableList<&'static str> {
     // not something you select in the same way but works the same way
     pub fn views() -> Self {
         Self {
-            items: vec!["Connection", "VPN", "Config"],
+            items: vec!["Main Menu", "Connection", "VPN", "Config"],
             selected: 0,
         }
     }
@@ -48,7 +49,6 @@ impl SelectableList<&'static str> {
 // operations
 impl SelectableList<&'static str> {
     pub fn next(&mut self) {
-        info!("SELECTED: {}", self.selected);
         if self.items.len() > (self.selected + 1) {
             self.selected += 1;
             return;
@@ -63,4 +63,44 @@ impl SelectableList<&'static str> {
         }
         self.selected -= 1;
     }
+}
+
+// events
+impl App {
+    /// Handles queries and actions
+    pub async fn handle(mut self, mut rx: UnboundedReceiver<AppMessage>) {
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                AppMessage::Event(a) => {}
+                AppMessage::Query(q) => {
+                    self.query(q);
+                }
+            }
+        }
+    }
+
+    pub fn query(&mut self, query: Query) {
+        match query {
+            Query::GetView { res } => {
+                res.send(self.views.clone());
+            }
+            Query::GetMainMenu { res } => {
+                res.send(self.main_menu.clone());
+            }
+        }
+    }
+}
+
+pub enum AppMessage {
+    Event(Event),
+    Query(Query),
+}
+
+pub enum Query {
+    GetView {
+        res: oneshot::Sender<SelectableList<&'static str>>,
+    },
+    GetMainMenu {
+        res: oneshot::Sender<SelectableList<&'static str>>,
+    },
 }

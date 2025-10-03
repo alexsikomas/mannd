@@ -5,13 +5,17 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style, Styled, Stylize},
     text::Line,
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::{Block, BorderType, Borders, Paragraph, Widget},
 };
 use serde::Deserialize;
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use toml::Value;
 use tracing::{info, instrument};
 
-use crate::{App, components::menu};
+use crate::{
+    App, AppMessage, Query,
+    components::menu::{self, MainMenu},
+};
 
 pub static THEME: OnceLock<Theme> = OnceLock::new();
 
@@ -37,7 +41,7 @@ impl Theme {
     }
 }
 
-pub fn render<'a>(frame: &mut Frame<'a>, state: &mut App) {
+pub fn render<'a>(frame: &mut Frame<'a>, tx: UnboundedSender<AppMessage>) {
     let outer_area = frame.size();
     let theme: &Theme;
     match THEME.get() {
@@ -80,8 +84,23 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &mut App) {
 
     // conditional
 
-    let menu = menu::MainMenu::new(state);
-    frame.render_widget(menu, inner_area);
+    // will do this instead when rust stablises it
+    // let widget: impl Widget;
+    // frame.render_widget(widget, inner_area);
+    let (res, recv) = oneshot::channel();
+
+    let _ = tx.send(AppMessage::Query(Query::GetView { res: res }));
+    let view = tokio::task::block_in_place(|| recv.blocking_recv().unwrap());
+
+    match view.selected {
+        0 => {
+            let menu = MainMenu::new(tx.clone());
+            frame.render_widget(menu, inner_area);
+        }
+        _ => {
+            return;
+        }
+    }
 }
 
 fn calculate_layout(area: Rect) -> (Rect, Rect) {

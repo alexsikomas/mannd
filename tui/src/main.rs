@@ -1,24 +1,21 @@
-use std::fs::OpenOptions;
+use std::{fs::OpenOptions, time::Duration};
 
 use color_eyre::Result;
 use ratatui::{
     DefaultTerminal, Frame,
-    crossterm::event::{self, Event, KeyCode},
-    prelude::Backend,
+    crossterm::event::{self, Event},
 };
-use serde::Deserialize;
-use tokio::io;
-use toml::Value;
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tracing::{Level, instrument::WithSubscriber};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{FmtSubscriber, Registry, layer::SubscriberExt};
 use tui::{
-    App,
-    event::{Action, kbd_events},
+    App, AppMessage,
     ui::{Theme, render},
 };
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     color_eyre::install()?;
     let terminal = ratatui::init();
 
@@ -51,26 +48,22 @@ fn main() -> Result<()> {
     let _ = Theme::new();
 
     let mut state = App::default();
-    let result = run(&mut state, terminal);
+
+    let (tx, mut rx) = mpsc::unbounded_channel::<AppMessage>();
+    tokio::spawn(state.handle(rx));
+    let result = run(tx, terminal).await;
     ratatui::restore();
     result
 }
 
-fn run(state: &mut App, mut terminal: DefaultTerminal) -> Result<()> {
+async fn run(tx: UnboundedSender<AppMessage>, mut terminal: DefaultTerminal) -> Result<()> {
     loop {
-        terminal.draw(|f| render(f, state))?;
-        let key = event::read()?;
-        match kbd_events(key) {
-            Action::Increment => match state.views.selected {
-                0 => state.main_menu.next(),
-                _ => {}
-            },
-            Action::Decrement => match state.views.selected {
-                0 => state.main_menu.prev(),
-                _ => {}
-            },
-            Action::Quit => break Ok(()),
-            _ => (),
+        terminal.draw(|f| render(f, tx.clone()))?;
+        if let Ok(exp) = event::poll(Duration::from_millis(100)) {
+            if exp {
+                // this should exist might revist though
+                tx.send(AppMessage::Event(event::read().unwrap()));
+            }
         }
     }
 }

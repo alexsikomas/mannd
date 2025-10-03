@@ -6,24 +6,25 @@ use ratatui::{
     text::Line,
     widgets::{Block, Borders, Padding, Paragraph, Widget},
 };
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tracing::info;
 
 use crate::{
-    App, SelectableList,
+    App, AppMessage, Query, SelectableList,
     ui::{THEME, Theme},
 };
 
-pub struct MainMenu<'a> {
-    state: &'a App,
+pub struct MainMenu {
+    tx: UnboundedSender<AppMessage>,
 }
 
-impl<'a> MainMenu<'a> {
-    pub fn new(state: &'a App) -> Self {
-        Self { state }
+impl MainMenu {
+    pub fn new(tx: UnboundedSender<AppMessage>) -> Self {
+        Self { tx }
     }
 }
 
-impl<'a> Widget for MainMenu<'a> {
+impl Widget for MainMenu {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
@@ -70,9 +71,17 @@ impl<'a> Widget for MainMenu<'a> {
         .margin(2)
         .split(main_area);
 
-        for (i, &item) in self.state.main_menu.items.iter().enumerate() {
+        let (res, recv) = oneshot::channel();
+
+        let _ = self
+            .tx
+            .send(AppMessage::Query(Query::GetMainMenu { res: res }));
+
+        let main_menu = tokio::task::block_in_place(|| recv.blocking_recv().unwrap());
+
+        for (i, &item) in main_menu.items.iter().enumerate() {
             let colour: Color;
-            colour = if i == self.state.main_menu.selected {
+            colour = if i == main_menu.selected {
                 theme.secondary.shift(20)
             } else {
                 theme.secondary.color()
