@@ -75,7 +75,7 @@ impl Widget for MainMenu {
 
         let _ = self
             .tx
-            .send(AppMessage::Query(Query::GetMainMenu { res: res }));
+            .send(AppMessage::Query(Query::MainMenu { res: res }));
 
         let main_menu = tokio::task::block_in_place(|| recv.blocking_recv().unwrap());
 

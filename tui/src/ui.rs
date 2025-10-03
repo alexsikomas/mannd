@@ -89,7 +89,7 @@ pub fn render<'a>(frame: &mut Frame<'a>, tx: UnboundedSender<AppMessage>) {
     // frame.render_widget(widget, inner_area);
     let (res, recv) = oneshot::channel();
 
-    let _ = tx.send(AppMessage::Query(Query::GetView { res: res }));
+    let _ = tx.send(AppMessage::Query(Query::View { res: res }));
     let view = tokio::task::block_in_place(|| recv.blocking_recv().unwrap());
 
     match view.selected {

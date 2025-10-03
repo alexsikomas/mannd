@@ -3,7 +3,7 @@ use std::{fs::OpenOptions, time::Duration};
 use color_eyre::Result;
 use ratatui::{
     DefaultTerminal, Frame,
-    crossterm::event::{self, Event},
+    crossterm::event::{self, Event, KeyCode},
 };
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tracing::{Level, instrument::WithSubscriber};
@@ -62,7 +62,17 @@ async fn run(tx: UnboundedSender<AppMessage>, mut terminal: DefaultTerminal) -> 
         if let Ok(exp) = event::poll(Duration::from_millis(100)) {
             if exp {
                 // this should exist might revist though
-                tx.send(AppMessage::Event(event::read().unwrap()));
+                let evt = event::read().unwrap();
+                match evt {
+                    Event::Key(key) => {
+                        if key.code == KeyCode::Esc {
+                            break Ok(());
+                        }
+                    }
+                    _ => {}
+                }
+
+                tx.send(AppMessage::Event(evt));
             }
         }
     }

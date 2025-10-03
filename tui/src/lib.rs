@@ -1,13 +1,22 @@
-use ratatui::crossterm::event::Event;
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent};
 use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 use tracing::info;
 
 pub mod components;
 pub mod ui;
 
+#[derive(Clone)]
+pub enum ActiveView {
+    MainMenu,
+    Connection,
+    Vpn,
+    Config,
+}
+
 // state
 #[derive(Clone)]
 pub struct App {
+    pub active_view: ActiveView,
     pub views: SelectableList<&'static str>,
     pub main_menu: SelectableList<&'static str>,
 }
@@ -15,9 +24,9 @@ pub struct App {
 impl Default for App {
     fn default() -> Self {
         Self {
-            // index not value
-            views: SelectableList::views(),
-            main_menu: SelectableList::main_menu(),
+            active_view: ActiveView::MainMenu,
+            views: SelectableList::new(vec!["Connection", "VPN", "Config", "Exit"]),
+            main_menu: SelectableList::new(vec!["Main", "Connection", "VPN", "Config"]),
         }
     }
 }
@@ -28,26 +37,15 @@ pub struct SelectableList<T> {
     pub selected: usize,
 }
 
-// initialisations
-impl SelectableList<&'static str> {
-    pub fn main_menu() -> Self {
-        Self {
-            items: vec!["Connection", "VPN", "Config", "Exit"],
-            selected: 0,
-        }
-    }
-
-    // not something you select in the same way but works the same way
-    pub fn views() -> Self {
-        Self {
-            items: vec!["Main Menu", "Connection", "VPN", "Config"],
-            selected: 0,
-        }
-    }
-}
-
 // operations
 impl SelectableList<&'static str> {
+    pub fn new(v: Vec<&'static str>) -> Self {
+        Self {
+            items: v,
+            selected: 0,
+        }
+    }
+
     pub fn next(&mut self) {
         if self.items.len() > (self.selected + 1) {
             self.selected += 1;
@@ -71,7 +69,9 @@ impl App {
     pub async fn handle(mut self, mut rx: UnboundedReceiver<AppMessage>) {
         while let Some(msg) = rx.recv().await {
             match msg {
-                AppMessage::Event(a) => {}
+                AppMessage::Event(e) => {
+                    self.event(e);
+                }
                 AppMessage::Query(q) => {
                     self.query(q);
                 }
@@ -79,14 +79,43 @@ impl App {
         }
     }
 
-    pub fn query(&mut self, query: Query) {
+    fn query(&mut self, query: Query) {
         match query {
-            Query::GetView { res } => {
+            Query::View { res } => {
                 res.send(self.views.clone());
             }
-            Query::GetMainMenu { res } => {
+            Query::MainMenu { res } => {
                 res.send(self.main_menu.clone());
             }
+            _ => {}
+        }
+    }
+
+    fn event(&mut self, event: Event) {
+        match event {
+            Event::Key(key) => match key.code {
+                KeyCode::Up => match self.get_active_list() {
+                    Some(v) => {
+                        v.prev();
+                    }
+                    _ => {}
+                },
+                KeyCode::Down => match self.get_active_list() {
+                    Some(v) => {
+                        v.next();
+                    }
+                    _ => {}
+                },
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    fn get_active_list(&mut self) -> Option<&mut SelectableList<&'static str>> {
+        match self.active_view {
+            ActiveView::MainMenu => Some(&mut self.main_menu),
+            _ => None,
         }
     }
 }
@@ -97,10 +126,10 @@ pub enum AppMessage {
 }
 
 pub enum Query {
-    GetView {
+    View {
         res: oneshot::Sender<SelectableList<&'static str>>,
     },
-    GetMainMenu {
+    MainMenu {
         res: oneshot::Sender<SelectableList<&'static str>>,
     },
 }
