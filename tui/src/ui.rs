@@ -11,7 +11,7 @@ use serde::Deserialize;
 use toml::Value;
 use tracing::{info, instrument};
 
-use crate::components::menu::Menu;
+use crate::{App, components::menu};
 
 pub static THEME: OnceLock<Theme> = OnceLock::new();
 
@@ -37,7 +37,7 @@ impl Theme {
     }
 }
 
-pub fn ui<'a>(frame: &mut Frame<'a>) {
+pub fn render<'a>(frame: &mut Frame<'a>, state: &mut App) {
     let outer_area = frame.size();
     let theme: &Theme;
     match THEME.get() {
@@ -78,11 +78,11 @@ pub fn ui<'a>(frame: &mut Frame<'a>) {
         inner_area,
     );
 
-    let menu = Menu::default();
+    // conditional
+
+    let menu = menu::MainMenu::new(state);
     frame.render_widget(menu, inner_area);
 }
-
-fn main_menu(frame: &mut Frame) {}
 
 fn calculate_layout(area: Rect) -> (Rect, Rect) {
     let outer_area = area;

@@ -2,5 +2,8 @@
 resolver = "3"
 members = ["com", "gui", "tui"]
 
+[profile.dev]
+opt-level = 0
+
 [profile.release]
 opt-level = "z"

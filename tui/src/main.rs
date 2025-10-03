@@ -1,15 +1,22 @@
 use std::fs::OpenOptions;
 
 use color_eyre::Result;
-use crossterm::event::{self, Event};
-use ratatui::{DefaultTerminal, Frame, prelude::Backend};
+use ratatui::{
+    DefaultTerminal, Frame,
+    crossterm::event::{self, Event, KeyCode},
+    prelude::Backend,
+};
 use serde::Deserialize;
 use tokio::io;
 use toml::Value;
 use tracing::{Level, instrument::WithSubscriber};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{FmtSubscriber, Registry, layer::SubscriberExt};
-use tui::ui::{Theme, ui};
+use tui::{
+    App,
+    event::{Action, kbd_events},
+    ui::{Theme, render},
+};
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -43,16 +50,27 @@ fn main() -> Result<()> {
 
     let _ = Theme::new();
 
-    let result = run(terminal);
+    let mut state = App::default();
+    let result = run(&mut state, terminal);
     ratatui::restore();
     result
 }
 
-fn run(mut terminal: DefaultTerminal) -> Result<()> {
+fn run(state: &mut App, mut terminal: DefaultTerminal) -> Result<()> {
     loop {
-        terminal.draw(|f| ui(f))?;
-        if matches!(event::read()?, Event::Key(_)) {
-            break Ok(());
+        terminal.draw(|f| render(f, state))?;
+        let key = event::read()?;
+        match kbd_events(key) {
+            Action::Increment => match state.views.selected {
+                0 => state.main_menu.next(),
+                _ => {}
+            },
+            Action::Decrement => match state.views.selected {
+                0 => state.main_menu.prev(),
+                _ => {}
+            },
+            Action::Quit => break Ok(()),
+            _ => (),
         }
     }
 }

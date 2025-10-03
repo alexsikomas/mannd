@@ -1,51 +1,29 @@
 use color_eyre::owo_colors::OwoColorize;
 use ratatui::{
     buffer::Buffer,
-    layout::{self, Constraint, Layout, Rect},
-    style::Style,
+    layout::{self, Constraint, Flex, Layout, Rect},
+    style::{Color, Style},
     text::Line,
     widgets::{Block, Borders, Padding, Paragraph, Widget},
 };
 use tracing::info;
 
-use crate::ui::{THEME, Theme};
+use crate::{
+    App, SelectableList,
+    ui::{THEME, Theme},
+};
 
-pub struct Menu {
-    current: MenuType,
+pub struct MainMenu<'a> {
+    state: &'a App,
 }
 
-impl Default for Menu {
-    fn default() -> Self {
-        Self {
-            current: MenuType::Connection,
-        }
+impl<'a> MainMenu<'a> {
+    pub fn new(state: &'a App) -> Self {
+        Self { state }
     }
 }
 
-enum MenuType {
-    Connection,
-    Vpn,
-    Config,
-}
-
-impl Into<String> for MenuType {
-    fn into(self) -> String {
-        match self {
-            Self::Connection => "Connection".to_string(),
-            Self::Vpn => "VPN".to_string(),
-            Self::Config => "Config".to_string(),
-        }
-    }
-}
-
-impl<'a> Into<Line<'a>> for MenuType {
-    fn into(self) -> Line<'a> {
-        let s: String = self.into();
-        Line::from(s)
-    }
-}
-
-impl Widget for Menu {
+impl<'a> Widget for MainMenu<'a> {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
@@ -60,35 +38,51 @@ impl Widget for Menu {
             }
         }
 
+        let outer_area = Layout::vertical([Constraint::Percentage(30)])
+            .flex(Flex::Center)
+            .split(area)[0];
+
+        let main_area = Layout::horizontal([Constraint::Percentage(25)])
+            .flex(Flex::Center)
+            .split(outer_area)[0];
+
         let select = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .borders(Borders::all())
-            .style(Style::new().fg(theme.secondary.shift(-50)))
-            .padding(Padding::new(0, 0, 1, 0))
+            .style(Style::new().fg(theme.secondary.shift(30)))
             .title_top(
                 Line::from(" Select ")
                     .centered()
-                    .style(Style::new().fg(theme.secondary.color())),
+                    .style(Style::new().fg(theme.secondary.shift(10))),
             );
 
-        let paragraph = Paragraph::new("Connection")
-            .centered()
-            .style(Style::new().fg(theme.secondary.color()));
-
         // TODO: add dynamic constraints based on res
-        let layout = Layout::default()
-            .direction(ratatui::layout::Direction::Vertical)
-            .constraints([Constraint::Percentage(30)])
-            .flex(layout::Flex::Center)
-            .split(area);
 
-        let layout = Layout::default()
-            .direction(layout::Direction::Horizontal)
-            .constraints([Constraint::Percentage(25)])
-            .flex(layout::Flex::Center)
-            .split(layout[0]);
+        select.render(main_area, buf);
 
-        info!("{:?}", layout);
-        paragraph.block(select).render(layout[0], buf);
+        let inner_chunks = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .flex(Flex::Center)
+        .margin(2)
+        .split(main_area);
+
+        for (i, &item) in self.state.main_menu.items.iter().enumerate() {
+            let colour: Color;
+            colour = if i == self.state.main_menu.selected {
+                theme.secondary.shift(20)
+            } else {
+                theme.secondary.color()
+            };
+
+            let paragraph = Paragraph::new(item)
+                .centered()
+                .style(Style::new().fg(colour));
+
+            paragraph.render(inner_chunks[i], buf);
+        }
     }
 }
