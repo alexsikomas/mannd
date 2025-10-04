@@ -3,7 +3,7 @@ use tokio::sync::{
     mpsc::{Sender, UnboundedReceiver, UnboundedSender},
     oneshot,
 };
-use tracing::info;
+use tracing::{error, info};
 
 pub mod components;
 pub mod ui;
@@ -28,13 +28,12 @@ impl Default for App {
     fn default() -> Self {
         Self {
             active_view: ActiveView::MainMenu,
-            /*
-             * Would have prefered to use enums instead of hardcoded
-             * strs but this requires polymorphism, avoided in non
-             * io-blocking code. Might think of a simpler solution later
-             *
-             * we do not use index property for views instead active_view is used
-             */
+            // Would have prefered to use enums instead of hardcoded
+            // strs but this requires polymorphism, avoided in non
+            // io-blocking code. Might think of a simpler solution later.
+            // -----------------------------------------------------------
+            // we do not use index property for views instead active_view is used
+            // this is the only exception to this
             views: SelectableList::new(vec!["Main", "Connection", "VPN", "Config"]),
             main_menu: SelectableList::new(vec!["Connection", "VPN", "Config", "Exit"]),
         }
@@ -56,6 +55,8 @@ impl SelectableList<&'static str> {
         }
     }
 
+    /// Works like a saturating add for a range between 0 to
+    /// the length of the list
     pub fn next(&mut self) {
         if self.items.len() > (self.selected + 1) {
             self.selected += 1;
@@ -64,6 +65,8 @@ impl SelectableList<&'static str> {
         self.selected = 0;
     }
 
+    /// Works as a saturating sub for a range between 0 to
+    /// the length of the list
     pub fn prev(&mut self) {
         if self.selected == 0 {
             self.selected = self.items.len() - 1;
@@ -79,12 +82,9 @@ impl SelectableList<&'static str> {
 
 // events
 impl App {
-    pub async fn new() -> Self {
-        Self {
-            ..Default::default()
-        }
-    }
-    /// Handles queries and actions
+    /// Handles all message events, delagates work to `self.event()` and `self.query()`.
+    ///
+    /// Takes in an event reciever `rx`, and a quit sender `q_tx`
     pub async fn handle(mut self, mut rx: UnboundedReceiver<AppMessage>, q_tx: Sender<()>) {
         while let Some(msg) = rx.recv().await {
             match msg {
@@ -98,18 +98,25 @@ impl App {
         }
     }
 
-    fn query(&mut self, query: Query) {
+    /// Handles read requests for the state
+    fn query(&self, query: Query) {
+        let query_error = || {
+            tracing::error!("Could not send the data query.");
+        };
+
         match query {
             Query::View { res } => {
-                res.send(self.views.clone());
+                let _ = res.send(self.views.clone()).inspect_err(|_| query_error());
             }
             Query::MainMenu { res } => {
-                res.send(self.main_menu.clone());
+                let _ = res
+                    .send(self.main_menu.clone())
+                    .inspect_err(|_| query_error());
             }
-            _ => {}
         }
     }
 
+    /// Handles input events, mutates the values in the state
     fn event(&mut self, event: Event, q_tx: Sender<()>) {
         if let Event::Key(key) = event {
             match key.code {
@@ -144,6 +151,10 @@ impl App {
         }
     }
 
+    /// Handles the selection of items based on the current view.
+    ///
+    /// Takes in quit sender `q_tx` to be able to send messages
+    /// to main for exiting the application
     fn handle_selection(&mut self, selected: &'static str, q_tx: Sender<()>) {
         match self.active_view {
             ActiveView::MainMenu => match selected {
@@ -152,7 +163,9 @@ impl App {
                 "Config" => self.active_view = ActiveView::Config,
                 "Exit" => {
                     tokio::task::block_in_place(|| {
-                        q_tx.blocking_send(());
+                        let _ = q_tx
+                            .blocking_send(())
+                            .inspect_err(|e| tracing::error!("{e}\nCould not send quit request."));
                     });
                 }
                 _ => {}
@@ -162,6 +175,10 @@ impl App {
     }
 }
 
+/// Message type used for any messages travelling on the event
+/// mpsc channel. Messages are sent from external functions
+/// and are handled by either changing application state or
+/// returning a value through `oneshot`
 pub enum AppMessage {
     Event(Event),
     Query(Query),

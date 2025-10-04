@@ -1,27 +1,30 @@
-use std::{error::Error, sync::OnceLock};
+use std::sync::OnceLock;
 
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Layout, Margin, Rect},
-    style::{Color, Modifier, Style, Styled, Stylize},
+    style::{Color, Modifier, Style},
     text::Line,
-    widgets::{Block, BorderType, Borders, Paragraph, Widget},
+    widgets::{Block, BorderType, Borders},
 };
 use serde::Deserialize;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use toml::Value;
 use tracing::{info, instrument};
 
-use crate::{
-    App, AppMessage, Query,
-    components::menu::{self, MainMenu},
-};
+use crate::{AppMessage, Query, components::menu::MainMenu};
 
+/// Theme global state, used to bypass needing to
+/// send theme data to functions that require instead
+/// if a function needs it they can read it
 pub static THEME: OnceLock<Theme> = OnceLock::new();
 
 impl Theme {
     #[instrument]
+    /// Reads config toml from a predefined location and sets the
+    /// global value of `THEME`
     pub fn new() -> Result<(), Box<dyn std::error::Error>> {
+        // temporary, will be changed to more standard .config location
+        // as well as command-line option
         let config = std::fs::read_to_string("tui/example_config.toml")?;
         let toml_value: Value = toml::from_str(&config)?;
         let selected_theme = toml_value["theme"]["selected"].as_str().unwrap();
@@ -33,7 +36,7 @@ impl Theme {
         let theme: Theme = theme_table.clone().try_into()?;
         match THEME.set(theme) {
             Ok(_) => Ok(()),
-            Err(e) => {
+            Err(_) => {
                 tracing::info!("Theme has already been initalised.");
                 Ok(())
             }
@@ -41,8 +44,10 @@ impl Theme {
     }
 }
 
+/// Renders title, border and conditionally renders main content depending on
+/// state
 pub fn render<'a>(frame: &mut Frame<'a>, tx: UnboundedSender<AppMessage>) {
-    let outer_area = frame.size();
+    let outer_area = frame.area();
     let theme: &Theme;
     match THEME.get() {
         Some(t) => {
@@ -82,16 +87,14 @@ pub fn render<'a>(frame: &mut Frame<'a>, tx: UnboundedSender<AppMessage>) {
         inner_area,
     );
 
-    // conditional
-
-    // will do this instead when rust stablises it
-    // let widget: impl Widget;
-    // frame.render_widget(widget, inner_area);
     let (res, recv) = oneshot::channel();
 
     let _ = tx.send(AppMessage::Query(Query::View { res: res }));
     let view = tokio::task::block_in_place(|| recv.blocking_recv().unwrap());
 
+    // will do this instead when rust stablises it
+    // let widget: impl Widget;
+    // frame.render_widget(widget, inner_area);
     match view.selected {
         0 => {
             let menu = MainMenu::new(tx.clone());
@@ -101,17 +104,6 @@ pub fn render<'a>(frame: &mut Frame<'a>, tx: UnboundedSender<AppMessage>) {
             return;
         }
     }
-}
-
-fn calculate_layout(area: Rect) -> (Rect, Rect) {
-    let outer_area = area;
-
-    let inner_layout = Layout::default()
-        .constraints([Constraint::Percentage(100)])
-        .margin(1);
-    let inner_area = inner_layout.split(outer_area)[0];
-
-    (outer_area, inner_area)
 }
 
 #[derive(Deserialize, Debug)]
@@ -156,6 +148,7 @@ impl Into<Vec<u8>> for &ThemeColor {
 }
 
 impl ThemeColor {
+    /// Tinting and shading alogrithm
     pub fn shift(&self, percent: i8) -> Color {
         let percent = (percent as f32).clamp(-100.0, 100.0) / 100.0;
         let col: Vec<u8> = self.into();

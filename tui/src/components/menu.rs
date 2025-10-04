@@ -1,16 +1,14 @@
-use color_eyre::owo_colors::OwoColorize;
 use ratatui::{
     buffer::Buffer,
-    layout::{self, Constraint, Flex, Layout, Rect},
+    layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Style},
     text::Line,
-    widgets::{Block, Borders, Padding, Paragraph, Widget},
+    widgets::{Block, Borders, Paragraph, Widget},
 };
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
-use tracing::info;
 
 use crate::{
-    App, AppMessage, Query, SelectableList,
+    App, AppMessage, Query,
     ui::{THEME, Theme},
 };
 
@@ -77,7 +75,9 @@ impl Widget for MainMenu {
             .tx
             .send(AppMessage::Query(Query::MainMenu { res: res }));
 
-        let main_menu = tokio::task::block_in_place(|| recv.blocking_recv().unwrap());
+        let main_menu = tokio::task::block_in_place(|| 
+            // TODO: propagate error
+            recv.blocking_recv().unwrap());
 
         for (i, &item) in main_menu.items.iter().enumerate() {
             let colour: Color;
