@@ -1,5 +1,8 @@
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent};
-use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
+use tokio::sync::{
+    mpsc::{Sender, UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 use tracing::info;
 
 pub mod components;
@@ -25,8 +28,15 @@ impl Default for App {
     fn default() -> Self {
         Self {
             active_view: ActiveView::MainMenu,
-            views: SelectableList::new(vec!["Connection", "VPN", "Config", "Exit"]),
-            main_menu: SelectableList::new(vec!["Main", "Connection", "VPN", "Config"]),
+            /*
+             * Would have prefered to use enums instead of hardcoded
+             * strs but this requires polymorphism, avoided in non
+             * io-blocking code. Might think of a simpler solution later
+             *
+             * we do not use index property for views instead active_view is used
+             */
+            views: SelectableList::new(vec!["Main", "Connection", "VPN", "Config"]),
+            main_menu: SelectableList::new(vec!["Connection", "VPN", "Config", "Exit"]),
         }
     }
 }
@@ -61,16 +71,25 @@ impl SelectableList<&'static str> {
         }
         self.selected -= 1;
     }
+
+    fn get_selected(&self) -> &'static str {
+        self.items[self.selected]
+    }
 }
 
 // events
 impl App {
+    pub async fn new() -> Self {
+        Self {
+            ..Default::default()
+        }
+    }
     /// Handles queries and actions
-    pub async fn handle(mut self, mut rx: UnboundedReceiver<AppMessage>) {
+    pub async fn handle(mut self, mut rx: UnboundedReceiver<AppMessage>, q_tx: Sender<()>) {
         while let Some(msg) = rx.recv().await {
             match msg {
                 AppMessage::Event(e) => {
-                    self.event(e);
+                    self.event(e, q_tx.clone());
                 }
                 AppMessage::Query(q) => {
                     self.query(q);
@@ -91,31 +110,54 @@ impl App {
         }
     }
 
-    fn event(&mut self, event: Event) {
-        match event {
-            Event::Key(key) => match key.code {
-                KeyCode::Up => match self.get_active_list() {
-                    Some(v) => {
-                        v.prev();
+    fn event(&mut self, event: Event, q_tx: Sender<()>) {
+        if let Event::Key(key) = event {
+            match key.code {
+                KeyCode::Up => {
+                    self.get_active_list_mut().map(|v| v.prev());
+                }
+                KeyCode::Down => {
+                    self.get_active_list_mut().map(|v| v.next());
+                }
+                KeyCode::Enter => {
+                    let selected = self.get_active_list().and_then(|v| Some(v.get_selected()));
+                    if let Some(v) = selected {
+                        self.handle_selection(v, q_tx.clone());
                     }
-                    _ => {}
-                },
-                KeyCode::Down => match self.get_active_list() {
-                    Some(v) => {
-                        v.next();
-                    }
-                    _ => {}
-                },
+                }
                 _ => {}
-            },
-            _ => {}
+            }
         }
     }
 
-    fn get_active_list(&mut self) -> Option<&mut SelectableList<&'static str>> {
+    fn get_active_list_mut(&mut self) -> Option<&mut SelectableList<&'static str>> {
         match self.active_view {
             ActiveView::MainMenu => Some(&mut self.main_menu),
             _ => None,
+        }
+    }
+
+    fn get_active_list(&self) -> Option<&SelectableList<&'static str>> {
+        match self.active_view {
+            ActiveView::MainMenu => Some(&self.main_menu),
+            _ => None,
+        }
+    }
+
+    fn handle_selection(&mut self, selected: &'static str, q_tx: Sender<()>) {
+        match self.active_view {
+            ActiveView::MainMenu => match selected {
+                "Connection" => self.active_view = ActiveView::Connection,
+                "VPN" => self.active_view = ActiveView::Vpn,
+                "Config" => self.active_view = ActiveView::Config,
+                "Exit" => {
+                    tokio::task::block_in_place(|| {
+                        q_tx.blocking_send(());
+                    });
+                }
+                _ => {}
+            },
+            _ => {}
         }
     }
 }
@@ -132,4 +174,8 @@ pub enum Query {
     MainMenu {
         res: oneshot::Sender<SelectableList<&'static str>>,
     },
+}
+
+pub enum ControlFlow {
+    Quit { res: oneshot::Sender<bool> },
 }

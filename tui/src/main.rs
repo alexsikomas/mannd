@@ -5,8 +5,11 @@ use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode},
 };
-use tokio::sync::mpsc::{self, UnboundedSender};
-use tracing::{Level, instrument::WithSubscriber};
+use tokio::sync::{
+    mpsc::{self, Receiver, UnboundedSender},
+    oneshot,
+};
+use tracing::{Level, info, instrument::WithSubscriber};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{FmtSubscriber, Registry, layer::SubscriberExt};
 use tui::{
@@ -49,14 +52,25 @@ async fn main() -> Result<()> {
 
     let mut state = App::default();
 
+    /*
+     * I'd prefer to use a oneshot here but it causes a problem
+     * with the borrow checker so we have two mpsc channels instead.
+     * first is for quitting second is for events to handle
+     */
+    let (q_tx, mut q_rx) = mpsc::channel::<()>(1);
     let (tx, mut rx) = mpsc::unbounded_channel::<AppMessage>();
-    tokio::spawn(state.handle(rx));
-    let result = run(tx, terminal).await;
+
+    tokio::spawn(state.handle(rx, q_tx));
+    let result = run(tx, q_rx, terminal).await;
     ratatui::restore();
     result
 }
 
-async fn run(tx: UnboundedSender<AppMessage>, mut terminal: DefaultTerminal) -> Result<()> {
+async fn run(
+    tx: UnboundedSender<AppMessage>,
+    mut q_rx: Receiver<()>,
+    mut terminal: DefaultTerminal,
+) -> Result<()> {
     loop {
         terminal.draw(|f| render(f, tx.clone()))?;
         if let Ok(exp) = event::poll(Duration::from_millis(100)) {
@@ -73,6 +87,14 @@ async fn run(tx: UnboundedSender<AppMessage>, mut terminal: DefaultTerminal) -> 
                 }
 
                 tx.send(AppMessage::Event(evt));
+            }
+
+            // outside quit events
+            match q_rx.try_recv() {
+                Ok(()) => {
+                    break Ok(());
+                }
+                _ => {}
             }
         }
     }
