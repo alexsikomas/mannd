@@ -1,8 +1,11 @@
 use std::{sync::Arc, time::Duration};
 
 use color_eyre::eyre::Result;
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent};
+use futures::{FutureExt, select, stream::StreamExt};
+use futures_timer::Delay;
 use ratatui::crossterm::{
-    event::{self, Event, KeyCode, KeyEvent},
+    event::{self},
     terminal,
 };
 use tokio::sync::{
@@ -180,18 +183,26 @@ impl App {
         let action_tx = tx.clone();
         let is_alive = true;
 
-        // tokio::spawn(state.handle(rx));
         let mut terminal = ratatui::init();
 
-        std::thread::spawn(move || -> Result<()> {
+        tokio::spawn(async move {
+            let mut reader = EventStream::new();
             loop {
-                if let evt = event::read()? {
-                    if action_tx.send(Action::Event(evt)).is_err() {
-                        break;
+                let mut delay = Delay::new(Duration::from_millis(1_000)).fuse();
+                let mut event = reader.next().fuse();
+                select! {
+                    _ = delay => {},
+                    m_evt = event => {
+                        match m_evt {
+                            Some(Ok(evt)) => {
+                                tx.send(Action::Event(evt));
+                            },
+                            Some(Err(e)) => {},
+                            None => break,
+                        }
                     }
-                }
+                };
             }
-            Ok(())
         });
 
         while state.is_running {

@@ -27,11 +27,23 @@ impl Theme {
         // as well as command-line option
         let config = std::fs::read_to_string("tui/example_config.toml")?;
         let toml_value: Value = toml::from_str(&config)?;
-        let selected_theme = toml_value["theme"]["selected"].as_str().unwrap();
+        let selected_theme = toml_value["theme"]["selected"].as_str().ok_or_else(|| {
+            return std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Selected value for theme not found.",
+            );
+        })?;
 
         info!("Selected Theme: {selected_theme}");
 
-        let theme_table = toml_value["theme"][selected_theme].as_table().unwrap();
+        let theme_table = toml_value["theme"][selected_theme]
+            .as_table()
+            .ok_or_else(|| {
+                return std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Could not find/parse the selected theme table",
+                );
+            })?;
 
         let theme: Theme = theme_table.clone().try_into()?;
         match THEME.set(theme) {
@@ -132,12 +144,15 @@ impl<'a> From<&'a ThemeColor> for Color {
 }
 
 impl Into<Vec<u8>> for &ThemeColor {
+    /// Turns `&ThemeColor` into a vector of `u8`, if any induvidual
+    /// part of the conversion encounters an error it will return 0
+    /// for that part.
     fn into(self) -> Vec<u8> {
         // ignore # in theme color
         vec![
-            u8::from_str_radix(&self.0[1..=2], 16).unwrap(),
-            u8::from_str_radix(&self.0[3..=4], 16).unwrap(),
-            u8::from_str_radix(&self.0[5..=6], 16).unwrap(),
+            u8::from_str_radix(&self.0[1..=2], 16).unwrap_or(0),
+            u8::from_str_radix(&self.0[3..=4], 16).unwrap_or(0),
+            u8::from_str_radix(&self.0[5..=6], 16).unwrap_or(0),
         ]
     }
 }
