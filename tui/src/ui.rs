@@ -11,7 +11,7 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use toml::Value;
 use tracing::{info, instrument};
 
-use crate::{AppMessage, Query, components::menu::MainMenu};
+use crate::{app::AppState, components::menu::MainMenu};
 
 /// Theme global state, used to bypass needing to
 /// send theme data to functions that require instead
@@ -46,7 +46,7 @@ impl Theme {
 
 /// Renders title, border and conditionally renders main content depending on
 /// state
-pub fn render<'a>(frame: &mut Frame<'a>, tx: UnboundedSender<AppMessage>) {
+pub fn render<'a>(frame: &mut Frame<'a>, state: &AppState) {
     let outer_area = frame.area();
     let theme: &Theme;
     match THEME.get() {
@@ -87,17 +87,12 @@ pub fn render<'a>(frame: &mut Frame<'a>, tx: UnboundedSender<AppMessage>) {
         inner_area,
     );
 
-    let (res, recv) = oneshot::channel();
-
-    let _ = tx.send(AppMessage::Query(Query::View { res: res }));
-    let view = tokio::task::block_in_place(|| recv.blocking_recv().unwrap());
-
     // will do this instead when rust stablises it
     // let widget: impl Widget;
     // frame.render_widget(widget, inner_area);
-    match view.selected {
+    match state.views.selected {
         0 => {
-            let menu = MainMenu::new(tx.clone());
+            let menu = MainMenu::new(state.main_menu.clone());
             frame.render_widget(menu, inner_area);
         }
         _ => {

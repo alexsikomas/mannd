@@ -8,17 +8,17 @@ use ratatui::{
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use crate::{
-    App, AppMessage, Query,
+    app::SelectableList,
     ui::{THEME, Theme},
 };
 
 pub struct MainMenu {
-    tx: UnboundedSender<AppMessage>,
+    list: SelectableList<&'static str>,
 }
 
 impl MainMenu {
-    pub fn new(tx: UnboundedSender<AppMessage>) -> Self {
-        Self { tx }
+    pub fn new(list: SelectableList<&'static str>) -> Self {
+        Self { list }
     }
 }
 
@@ -69,19 +69,9 @@ impl Widget for MainMenu {
         .margin(2)
         .split(main_area);
 
-        let (res, recv) = oneshot::channel();
-
-        let _ = self
-            .tx
-            .send(AppMessage::Query(Query::MainMenu { res: res }));
-
-        let main_menu = tokio::task::block_in_place(|| 
-            // TODO: propagate error
-            recv.blocking_recv().unwrap());
-
-        for (i, &item) in main_menu.items.iter().enumerate() {
+        for (i, &item) in self.list.items.iter().enumerate() {
             let colour: Color;
-            colour = if i == main_menu.selected {
+            colour = if i == self.list.selected {
                 theme.secondary.shift(20)
             } else {
                 theme.secondary.color()
