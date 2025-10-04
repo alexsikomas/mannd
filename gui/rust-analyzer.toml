@@ -1,2 +1,0 @@
-[rustfmt]
-overrideCommand = ["sh", "-c", "rustfmt --emit stdout | dx fmt -f -"]
