@@ -1,15 +1,10 @@
-use std::time::Duration;
-
 use crossterm::event::{Event, EventStream, KeyCode};
-use futures::{FutureExt, select, stream::StreamExt};
-use futures_timer::Delay;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use futures::stream::StreamExt;
+use tokio::sync::mpsc::{self};
 use tracing::info;
 
 use crate::ui::render;
 
-// state
-#[derive(Clone)]
 pub struct AppState {
     pub view: View,
     is_running: bool,
@@ -30,6 +25,7 @@ impl AppState {
             Selection::Exit => self.is_running = false,
             Selection::Connection => {
                 self.view.active = ViewId::Connection;
+                self.view.selections = View::connection();
             }
             Selection::Vpn => {
                 self.view.active = ViewId::Vpn;
@@ -59,6 +55,7 @@ fn event(event: Event) -> Action {
             KeyCode::Up => Action::SelectUp,
             KeyCode::Down => Action::SelectDown,
             KeyCode::Enter => Action::Enter,
+            KeyCode::Esc => Action::Exit,
             _ => Action::NoOp,
         }
     } else {
@@ -68,6 +65,7 @@ fn event(event: Event) -> Action {
 
 pub enum Action {
     NoOp,
+    Update,
     Event(Event),
 
     SelectUp,
@@ -84,7 +82,7 @@ pub struct App;
 impl App {
     pub async fn run() -> color_eyre::Result<()> {
         let mut state = AppState::default();
-        let (tx, mut rx) = mpsc::unbounded_channel::<Action>();
+        let (tx, mut rx) = mpsc::channel::<Action>(32);
 
         let mut terminal = ratatui::init();
 
@@ -92,14 +90,19 @@ impl App {
             let mut reader = EventStream::new();
             while let Some(Ok(evt)) = reader.next().await {
                 let action = event(evt);
-                tx.send(action);
+                if let Err(e) = tx.send(action).await {
+                    tracing::error!("{e}\n Error occured while trying to send event.");
+                    break;
+                }
             }
         });
 
-        while state.is_running {
-            terminal.draw(|f| render(f, &state))?;
+        terminal.draw(|f| render(f, &state))?;
 
+        let mut redraw_required: bool;
+        while state.is_running {
             if let Some(action) = rx.recv().await {
+                redraw_required = true;
                 match action {
                     Action::SelectUp => state.view.selections.change_selection(Action::SelectUp),
                     Action::SelectDown => {
@@ -108,7 +111,17 @@ impl App {
                     Action::Enter => {
                         state.on_select();
                     }
+                    Action::Exit => {
+                        state.is_running = false;
+                    }
+                    Action::NoOp => {
+                        redraw_required = false;
+                    }
                     _ => {}
+                }
+
+                if redraw_required {
+                    terminal.draw(|f| render(f, &state))?;
                 }
             }
         }
@@ -116,7 +129,6 @@ impl App {
     }
 }
 
-#[derive(Clone)]
 pub enum ViewId {
     MainMenu,
     Connection,
@@ -124,7 +136,6 @@ pub enum ViewId {
     Config,
 }
 
-#[derive(Clone)]
 pub struct View {
     pub active: ViewId,
     pub selections: SelectableList<Selection>,
