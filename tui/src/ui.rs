@@ -13,7 +13,7 @@ use tracing::{info, instrument};
 
 use crate::{
     app::{AppState, View, ViewId},
-    components::menu::MainMenu,
+    components::{connection::Connection, menu::MainMenu},
 };
 
 /// Theme global state, used to bypass needing to
@@ -114,7 +114,8 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &AppState) {
             frame.render_widget(menu, inner_area);
         }
         ViewId::Connection => {
-            info!("Rendering connection menu.");
+            let con = Connection::new(&state.view.selections);
+            frame.render_widget(con, inner_area);
         }
         _ => {
             return;
