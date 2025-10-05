@@ -11,7 +11,10 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use toml::Value;
 use tracing::{info, instrument};
 
-use crate::{app::AppState, components::menu::MainMenu};
+use crate::{
+    app::{AppState, View, ViewId},
+    components::menu::MainMenu,
+};
 
 /// Theme global state, used to bypass needing to
 /// send theme data to functions that require instead
@@ -102,10 +105,16 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &AppState) {
     // will do this instead when rust stablises it
     // let widget: impl Widget;
     // frame.render_widget(widget, inner_area);
-    match state.views.selected {
-        0 => {
-            let menu = MainMenu::new(state.main_menu.clone());
+
+    // we give the widget only the necessary selections to
+    // render
+    match state.view.active {
+        ViewId::MainMenu => {
+            let menu = MainMenu::new(&state.view.selections);
             frame.render_widget(menu, inner_area);
+        }
+        ViewId::Connection => {
+            info!("Rendering connection menu.");
         }
         _ => {
             return;

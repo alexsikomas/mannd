@@ -1,52 +1,188 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
-use color_eyre::eyre::Result;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent};
+use crossterm::event::{Event, EventStream, KeyCode};
 use futures::{FutureExt, select, stream::StreamExt};
 use futures_timer::Delay;
-use ratatui::crossterm::{
-    event::{self},
-    terminal,
-};
-use tokio::sync::{
-    RwLock,
-    mpsc::{self, Sender, UnboundedReceiver, UnboundedSender},
-    oneshot,
-};
-use tracing::{error, info};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tracing::info;
 
-use crate::{app, ui::render};
+use crate::ui::render;
+
+// state
+#[derive(Clone)]
+pub struct AppState {
+    pub view: View,
+    is_running: bool,
+}
+
+impl AppState {
+    // general select function that calls all other on_*_select functions
+    fn on_select(&mut self) {
+        let selection = self.view.selections.get_selected();
+        match self.view.active {
+            ViewId::MainMenu => self.on_main_menu_select(selection.clone()),
+            _ => {}
+        }
+    }
+
+    fn on_main_menu_select(&mut self, selection: Selection) {
+        match selection {
+            Selection::Exit => self.is_running = false,
+            Selection::Connection => {
+                self.view.active = ViewId::Connection;
+            }
+            Selection::Vpn => {
+                self.view.active = ViewId::Vpn;
+            }
+            Selection::Config => {
+                self.view.active = ViewId::Config;
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            view: View::new(),
+            is_running: true,
+        }
+    }
+}
+
+/// Handles input events, mutates the values in the state
+fn event(event: Event) -> Action {
+    info!("Event: {:?}", event);
+    if let Event::Key(key) = event {
+        match key.code {
+            KeyCode::Up => Action::SelectUp,
+            KeyCode::Down => Action::SelectDown,
+            KeyCode::Enter => Action::Enter,
+            _ => Action::NoOp,
+        }
+    } else {
+        Action::NoOp
+    }
+}
+
+pub enum Action {
+    NoOp,
+    Event(Event),
+
+    SelectUp,
+    SelectDown,
+    SelectLeft,
+    SelectRight,
+    Enter,
+
+    Exit,
+}
+
+pub struct App;
+
+impl App {
+    pub async fn run() -> color_eyre::Result<()> {
+        let mut state = AppState::default();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Action>();
+
+        let mut terminal = ratatui::init();
+
+        tokio::spawn(async move {
+            let mut reader = EventStream::new();
+            while let Some(Ok(evt)) = reader.next().await {
+                let action = event(evt);
+                tx.send(action);
+            }
+        });
+
+        while state.is_running {
+            terminal.draw(|f| render(f, &state))?;
+
+            if let Some(action) = rx.recv().await {
+                match action {
+                    Action::SelectUp => state.view.selections.change_selection(Action::SelectUp),
+                    Action::SelectDown => {
+                        state.view.selections.change_selection(Action::SelectDown)
+                    }
+                    Action::Enter => {
+                        state.on_select();
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone)]
-pub enum ActiveView {
+pub enum ViewId {
     MainMenu,
     Connection,
     Vpn,
     Config,
 }
 
-// state
 #[derive(Clone)]
-pub struct AppState {
-    pub active_view: ActiveView,
-    pub views: SelectableList<&'static str>,
-    pub main_menu: SelectableList<&'static str>,
-    is_running: bool,
+pub struct View {
+    pub active: ViewId,
+    pub selections: SelectableList<Selection>,
 }
 
-impl Default for AppState {
-    fn default() -> Self {
+impl View {
+    fn new() -> Self {
         Self {
-            active_view: ActiveView::MainMenu,
-            // Would have prefered to use enums instead of hardcoded
-            // strs but this requires polymorphism, avoided in non
-            // io-blocking code. Might think of a simpler solution later.
-            // -----------------------------------------------------------
-            // we do not use index property for views instead active_view is used
-            // this is the only exception to this
-            views: SelectableList::new(vec!["Main", "Connection", "VPN", "Config"]),
-            main_menu: SelectableList::new(vec!["Connection", "VPN", "Config", "Exit"]),
-            is_running: true,
+            active: ViewId::MainMenu,
+            selections: Self::main_menu(),
+        }
+    }
+
+    fn main_menu() -> SelectableList<Selection> {
+        SelectableList::new(vec![
+            Selection::Connection,
+            Selection::Vpn,
+            Selection::Config,
+            Selection::Exit,
+        ])
+    }
+
+    fn connection() -> SelectableList<Selection> {
+        SelectableList::new(vec![
+            Selection::Scan,
+            Selection::Connect,
+            Selection::Edit,
+            Selection::Remove,
+        ])
+    }
+}
+
+#[derive(Clone)]
+pub enum Selection {
+    // main menu
+    Connection,
+    Vpn,
+    Config,
+    Exit,
+
+    // connection
+    Scan,
+    Connect,
+    Edit,
+    Remove,
+}
+
+impl Selection {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Selection::Connection => "Connection",
+            Selection::Vpn => "VPN",
+            Selection::Config => "Config",
+            Selection::Exit => "Exit",
+            Selection::Scan => "Scan",
+            Selection::Connect => "Connect",
+            Selection::Edit => "Edit",
+            Selection::Remove => "Remove",
         }
     }
 }
@@ -57,171 +193,48 @@ pub struct SelectableList<T> {
     pub selected: usize,
 }
 
-// operations
-impl SelectableList<&'static str> {
-    pub fn new(v: Vec<&'static str>) -> Self {
+impl<T> SelectableList<T> {
+    pub fn new(v: Vec<T>) -> Self {
         Self {
             items: v,
             selected: 0,
         }
     }
-
-    /// Works like a saturating add for a range between 0 to
-    /// the length of the list
-    pub fn next(&mut self) {
-        if self.items.len() > (self.selected + 1) {
-            self.selected += 1;
-            return;
-        }
-        self.selected = 0;
-    }
-
-    /// Works as a saturating sub for a range between 0 to
-    /// the length of the list
-    pub fn prev(&mut self) {
-        if self.selected == 0 {
-            self.selected = self.items.len() - 1;
-            return;
-        }
-        self.selected -= 1;
-    }
-
-    fn get_selected(&self) -> &'static str {
-        self.items[self.selected]
-    }
 }
 
-impl AppState {
-    /// Handles all message events, delagates work to `self.event()` and `self.query()`.
-    ///
-    /// Takes in an event reciever `rx`, and a quit sender `q_tx`
-    pub async fn handle(mut self, mut rx: UnboundedReceiver<Action>) {
-        while let Some(msg) = rx.recv().await {
-            match msg {
-                Action::Event(e) => {
-                    self.event(e);
-                }
-                Action::GetState => {}
-                Action::Update => {}
+impl SelectableList<Selection> {
+    fn change_selection(&mut self, action: Action) {
+        match action {
+            Action::SelectUp => {
+                self.selected = self.prev();
             }
-        }
-    }
-
-    /// Handles input events, mutates the values in the state
-    fn event(&mut self, event: Event) {
-        if let Event::Key(key) = event {
-            match key.code {
-                KeyCode::Up => {
-                    self.get_active_list_mut().map(|v| v.prev());
-                }
-                KeyCode::Down => {
-                    self.get_active_list_mut().map(|v| v.next());
-                }
-                KeyCode::Enter => {
-                    let selected = self.get_active_list().and_then(|v| Some(v.get_selected()));
-                    if let Some(v) = selected {
-                        if v == "Exit" {
-                            self.is_running = false;
-                        }
-                    }
-                }
-                _ => {}
+            Action::SelectDown => {
+                self.selected = self.next();
             }
-        }
-    }
-
-    fn get_active_list_mut(&mut self) -> Option<&mut SelectableList<&'static str>> {
-        match self.active_view {
-            ActiveView::MainMenu => Some(&mut self.main_menu),
-            _ => None,
-        }
-    }
-
-    fn get_active_list(&self) -> Option<&SelectableList<&'static str>> {
-        match self.active_view {
-            ActiveView::MainMenu => Some(&self.main_menu),
-            _ => None,
-        }
-    }
-
-    /// Handles the selection of items based on the current view.
-    ///
-    /// Takes in quit sender `q_tx` to be able to send messages
-    /// to main for exiting the application
-    fn handle_selection(&mut self, selected: &'static str) {
-        match self.active_view {
-            ActiveView::MainMenu => match selected {
-                "Connection" => self.active_view = ActiveView::Connection,
-                "VPN" => self.active_view = ActiveView::Vpn,
-                "Config" => self.active_view = ActiveView::Config,
-                "Exit" => {
-                    self.is_running = false;
-                }
-                _ => {}
-            },
+            Action::SelectLeft => {}
+            Action::SelectRight => {}
+            // ignore unrealated action
             _ => {}
         }
     }
-}
 
-/// Message type used for any messages travelling on the event
-/// mpsc channel. Messages are sent from external functions
-/// and are handled by either changing application state or
-/// returning a value through `oneshot`
-pub enum Action {
-    Event(Event),
-    GetState,
-    Update,
-}
-
-pub struct App;
-
-impl App {
-    pub async fn run() -> color_eyre::Result<()> {
-        let mut state = AppState::default();
-        let (tx, mut rx) = mpsc::unbounded_channel::<Action>();
-        let action_tx = tx.clone();
-        let is_alive = true;
-
-        let mut terminal = ratatui::init();
-
-        tokio::spawn(async move {
-            let mut reader = EventStream::new();
-            loop {
-                let mut delay = Delay::new(Duration::from_millis(1_000)).fuse();
-                let mut event = reader.next().fuse();
-                select! {
-                    _ = delay => {},
-                    m_evt = event => {
-                        match m_evt {
-                            Some(Ok(evt)) => {
-                                tx.send(Action::Event(evt));
-                            },
-                            Some(Err(e)) => {},
-                            None => break,
-                        }
-                    }
-                };
-            }
-        });
-
-        while state.is_running {
-            terminal.draw(|f| render(f, &state))?;
-
-            if let Some(action) = rx.recv().await {
-                match action {
-                    Action::Event(evt) => {
-                        if let Event::Key(key) = evt {
-                            if key.code == KeyCode::Esc {
-                                state.is_running = false;
-                            }
-                        }
-                        state.event(evt);
-                    }
-                    _ => {}
-                }
-            }
+    fn next(&self) -> usize {
+        if self.items.len() > self.selected + 1 {
+            self.selected + 1
+        } else {
+            0
         }
-        Ok(())
+    }
+
+    fn prev(&self) -> usize {
+        if self.selected == 0 {
+            self.items.len() - 1
+        } else {
+            self.selected - 1
+        }
+    }
+
+    fn get_selected(&self) -> &Selection {
+        &self.items[self.selected]
     }
 }
