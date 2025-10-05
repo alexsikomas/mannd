@@ -8,21 +8,21 @@ use ratatui::{
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use crate::{
-    app::SelectableList,
+    app::{SelectableList, Selection},
     ui::{THEME, Theme},
 };
 
-pub struct MainMenu {
-    list: SelectableList<&'static str>,
+pub struct MainMenu<'a> {
+    list: &'a SelectableList<Selection>,
 }
 
-impl MainMenu {
-    pub fn new(list: SelectableList<&'static str>) -> Self {
+impl<'a> MainMenu<'a> {
+    pub fn new(list: &'a SelectableList<Selection>) -> Self {
         Self { list }
     }
 }
 
-impl Widget for MainMenu {
+impl<'a> Widget for MainMenu<'a> {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
@@ -69,7 +69,7 @@ impl Widget for MainMenu {
         .margin(2)
         .split(main_area);
 
-        for (i, &item) in self.list.items.iter().enumerate() {
+        for (i, item) in self.list.items.iter().enumerate() {
             let colour: Color;
             colour = if i == self.list.selected {
                 theme.secondary.shift(20)
@@ -77,7 +77,7 @@ impl Widget for MainMenu {
                 theme.secondary.color()
             };
 
-            let paragraph = Paragraph::new(item)
+            let paragraph = Paragraph::new(item.as_str())
                 .centered()
                 .style(Style::new().fg(colour));
 
