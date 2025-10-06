@@ -1,6 +1,5 @@
 use std::{fs::OpenOptions, time::Duration};
 
-use color_eyre::Result;
 use ratatui::{
     DefaultTerminal,
     crossterm::event::{self, Event, KeyCode},
@@ -11,13 +10,12 @@ use tracing_error::ErrorLayer;
 use tracing_subscriber::{FmtSubscriber, layer::SubscriberExt};
 use tui::{
     app::App,
+    error::TuiError,
     ui::{Theme, render},
 };
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    color_eyre::install()?;
-
+async fn main() -> Result<(), TuiError> {
     let subscriber = FmtSubscriber::builder()
         .compact()
         .with_file(true)
@@ -38,7 +36,7 @@ async fn main() -> Result<()> {
     match tracing::subscriber::set_global_default(subscriber) {
         Err(e) => {
             tracing::error!(
-                "{e}\nCould not set the default subscriber! Continuing without proper logging."
+                "{e}\nCould not set the default subscriber! Continuing without logging."
             )
         }
         _ => {}

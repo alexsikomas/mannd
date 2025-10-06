@@ -2,8 +2,27 @@
 resolver = "3"
 members = ["com", "tui"]
 
+[workspace.dependencies]
+serde = "1.0.226"
+thiserror = "2.0.17"
+tokio = { version = "1.47.1", features = [
+  "macros",
+  "net",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+] }
+toml = "0.9.7"
+tracing = "0.1.41"
+tracing-error = "0.2.1"
+tracing-subscriber = { version = "0.3.20", features = ["fmt"] }
+
 [profile.dev]
 opt-level = 0
 
 [profile.release]
 opt-level = "z"
+strip = true
+lto = "fat"
+panic = "abort"
+codegen-units = 1

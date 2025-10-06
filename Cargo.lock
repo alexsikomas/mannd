@@ -240,33 +240,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
-name = "color-eyre"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5920befb47832a6d61ee3a3a846565cfa39b331331e68a3b1d1116630f2f26d"
-dependencies = [
- "backtrace",
- "color-spantrace",
- "eyre",
- "indenter",
- "once_cell",
- "owo-colors",
- "tracing-error",
-]
-
-[[package]]
-name = "color-spantrace"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8b88ea9df13354b55bc7234ebcce36e6ef896aca2e42a15de9e10edce01b427"
-dependencies = [
- "once_cell",
- "owo-colors",
- "tracing-core",
- "tracing-error",
-]
-
-[[package]]
 name = "com"
 version = "0.1.0"
 dependencies = [
@@ -537,16 +510,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "eyre"
-version = "0.6.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cd915d99f24784cdc19fd37ef22b97e3ff0ae756c7e492e9fbfe897d61e2aec"
-dependencies = [
- "indenter",
- "once_cell",
-]
-
-[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -736,12 +699,6 @@ name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
-
-[[package]]
-name = "indenter"
-version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "964de6e86d545b246d84badc0fef527924ace5134f30641c203ef52ba83f58d5"
 
 [[package]]
 name = "indexmap"
@@ -965,12 +922,6 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
 ]
-
-[[package]]
-name = "owo-colors"
-version = "4.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48dd4f4a2c8405440fd0462561f0e5806bd0f77e86f51c761481bdd4018b545e"
 
 [[package]]
 name = "parking"
@@ -1360,18 +1311,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.16"
+version = "2.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3467d614147380f2e4e374161426ff399c91084acd2363eaf549172b3d5e60c0"
+checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.16"
+version = "2.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c5e1be1c48b9172ee610da68fd9cd2770e7a4056cb3fc98710ee6906f0c7960"
+checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1398,7 +1349,6 @@ dependencies = [
  "io-uring",
  "libc",
  "mio",
- "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "slab",
@@ -1546,13 +1496,13 @@ dependencies = [
 name = "tui"
 version = "0.1.0"
 dependencies = [
- "color-eyre",
  "com",
  "crossterm 0.29.0",
  "futures",
  "futures-timer",
  "ratatui",
  "serde",
+ "thiserror",
  "tokio",
  "toml",
  "tracing",
