@@ -7,18 +7,8 @@ run_tui_debug: build_tui_debug
 
 tui_release:
 	cargo build --release --package tui
-	sudo setcap cap_net_admin,cap_dac_override=ep ./target/debug/tui
-
-build_gui_debug:
-	cargo build --package gui
-	sudo setcap cap_net_admin,cap_dac_override=ep ./target/debug/gui
-
-run_gui_debug: build_gui_debug
-	./target/debug/gui
-
-gui_release:
-	cargo build --release --package gui
-	sudo setcap cap_net_admin,cap_dac_override=ep ./target/debug/gui
+	sudo setcap cap_net_admin,cap_dac_override=ep ./target/release/tui
+	upx --best --lzma ./target/release/tui
 
 test_lib:
 	$(eval LIB_TEST_BIN := $(shell cargo test -p com --no-run --message-format=json | \

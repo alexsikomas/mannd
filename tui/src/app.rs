@@ -3,7 +3,7 @@ use futures::stream::StreamExt;
 use tokio::sync::mpsc::{self};
 use tracing::info;
 
-use crate::ui::render;
+use crate::{error::TuiError, ui::render};
 
 pub struct AppState {
     pub view: View,
@@ -80,7 +80,7 @@ pub enum Action {
 pub struct App;
 
 impl App {
-    pub async fn run() -> color_eyre::Result<()> {
+    pub async fn run() -> Result<(), TuiError> {
         let mut state = AppState::default();
         let (tx, mut rx) = mpsc::channel::<Action>(32);
 
