@@ -3,13 +3,16 @@ use std::{borrow::Cow, fmt::Debug};
 use crate::{
     error::ComError,
     ethtool::{ETHTOOL_GENL_NAME, EthtoolCmds},
-    wireless::defs::{
-        NL_80211_GENL_NAME, NL_80211_GENL_VERSION,
-        attr::{Attrs, Nl80211Attr},
-        bss::Bss,
-        cmd::Nl80211Cmd,
-        interface::Interface,
-        station::Station,
+    wireless::{
+        WifiAdapter,
+        defs::{
+            NL_80211_GENL_NAME, NL_80211_GENL_VERSION,
+            attr::{Attrs, Nl80211Attr},
+            bss::Bss,
+            cmd::Nl80211Cmd,
+            interface::Interface,
+            station::Station,
+        },
     },
 };
 use neli::{

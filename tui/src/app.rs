@@ -3,7 +3,7 @@ use futures::stream::StreamExt;
 use tokio::sync::mpsc::{self};
 use tracing::info;
 
-use crate::{error::TuiError, ui::render};
+use crate::{error::TuiError, network, ui::render};
 
 pub struct AppState {
     pub view: View,
@@ -86,6 +86,7 @@ impl App {
 
         let mut terminal = ratatui::init();
 
+        // event thread
         tokio::spawn(async move {
             let mut reader = EventStream::new();
             while let Some(Ok(evt)) = reader.next().await {
@@ -95,6 +96,13 @@ impl App {
                     break;
                 }
             }
+        });
+
+        // networking thread
+        tokio::spawn(async move {
+            let mut network = network::NetworkState::new().await;
+            network.connect_wifi_adapter().await;
+            info!("{:?}", network.controller);
         });
 
         terminal.draw(|f| render(f, &state))?;
@@ -160,6 +168,7 @@ impl View {
 
     fn connection() -> SelectableList<Selection> {
         SelectableList::new(vec![
+            Selection::Network(1),
             Selection::Scan,
             Selection::Connect,
             Selection::Edit,
@@ -177,6 +186,9 @@ pub enum Selection {
     Exit,
 
     // connection
+    /// Network is selected if we are on a wifi network, u16 is for the index
+    /// once we exceed the amount of networks we go to the other options
+    Network(u16),
     Scan,
     Connect,
     Edit,
@@ -190,6 +202,7 @@ impl Selection {
             Selection::Vpn => "VPN",
             Selection::Config => "Config",
             Selection::Exit => "Exit",
+            Selection::Network(_) => "Networks",
             Selection::Scan => "Scan",
             Selection::Connect => "Connect",
             Selection::Edit => "Edit",

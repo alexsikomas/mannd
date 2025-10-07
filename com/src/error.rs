@@ -1,5 +1,6 @@
+use neli::err::RouterError;
 use quick_xml::events::attributes::AttrError;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use thiserror::Error;
 
 #[derive(Debug, Error)]

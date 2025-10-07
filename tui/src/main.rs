@@ -1,11 +1,11 @@
-use std::{fs::OpenOptions, time::Duration};
+use std::{env, fs::OpenOptions, time::Duration};
 
 use ratatui::{
     DefaultTerminal,
     crossterm::event::{self, Event, KeyCode},
 };
 use tokio::sync::mpsc::{self, Receiver, UnboundedSender};
-use tracing::Level;
+use tracing::{Level, info};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{FmtSubscriber, layer::SubscriberExt};
 use tui::{
@@ -16,6 +16,13 @@ use tui::{
 
 #[tokio::main]
 async fn main() -> Result<(), TuiError> {
+    let args: Vec<String> = env::args().collect();
+
+    let flag = handle_args(args);
+    if !flag {
+        return Ok(());
+    }
+
     let subscriber = FmtSubscriber::builder()
         .compact()
         .with_file(true)
@@ -28,7 +35,7 @@ async fn main() -> Result<(), TuiError> {
         )
         .with_ansi(true)
         .with_line_number(true)
-        .with_max_level(Level::TRACE)
+        .with_max_level(Level::INFO)
         .finish();
 
     let subscriber = subscriber.with(ErrorLayer::default());
@@ -47,4 +54,28 @@ async fn main() -> Result<(), TuiError> {
     let result = App::run().await;
     ratatui::restore();
     result
+}
+
+/// Returns true if the program should continue, false otherwise
+fn handle_args(args: Vec<String>) -> bool {
+    if args.len() <= 1 {
+        return true;
+    }
+
+    let mut i = 1;
+    match args[i].as_str() {
+        "-h" | "--help" => {
+            println!("Mannd Help:");
+            println!(
+                "--------------------------------------------------------------------------------------------------"
+            );
+            println!("  -l, --log-level   [trace, info]     changes the maximum log level");
+            println!("  -lf --log-file    <file_path>       changes where logs are written to");
+            return false;
+        }
+        _ => {
+            println!("Invalid argument");
+            return false;
+        }
+    }
 }

@@ -3,7 +3,7 @@ build_tui_debug:
 	sudo setcap cap_net_admin,cap_dac_override=ep ./target/debug/tui
 
 run_tui_debug: build_tui_debug
-	./target/debug/tui
+	./target/debug/tui 
 
 tui_release:
 	cargo build --release --package tui
