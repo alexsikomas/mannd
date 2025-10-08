@@ -18,12 +18,12 @@ use crate::{
     },
 };
 
-#[derive(debug)]
-pub struct iwd {
-    path: string,
-    service: string,
-    conn: connection,
-    networks: option<vec<iwdnetwork>>,
+#[derive(Debug)]
+pub struct Iwd {
+    path: String,
+    service: String,
+    conn: Connection,
+    networks: Option<Vec<IwdNetwork>>,
 }
 
 #[async_trait]
