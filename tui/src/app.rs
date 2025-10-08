@@ -1,16 +1,35 @@
-use crossterm::event::{Event, EventStream, KeyCode};
+use std::{sync::Arc, time::Duration};
+
+use crossterm::event::{self, Event, EventStream, KeyCode};
 use futures::stream::StreamExt;
-use tokio::sync::mpsc::{self};
+use ratatui::crossterm::event::poll;
+use tokio::sync::{
+    RwLock,
+    mpsc::{self},
+};
 use tracing::info;
 
-use crate::{error::TuiError, network, ui::render};
+use crate::{
+    error::TuiError,
+    network::{self, NetworkState},
+    ui::render,
+};
 
 pub struct AppState {
     pub view: View,
     is_running: bool,
+    network: Arc<RwLock<NetworkState>>,
 }
 
 impl AppState {
+    async fn new() -> Self {
+        Self {
+            view: View::new(),
+            is_running: true,
+            network: Arc::new(RwLock::new(NetworkState::new().await)),
+        }
+    }
+
     // general select function that calls all other on_*_select functions
     fn on_select(&mut self) {
         let selection = self.view.selections.get_selected();
@@ -34,15 +53,6 @@ impl AppState {
                 self.view.active = ViewId::Config;
             }
             _ => {}
-        }
-    }
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        Self {
-            view: View::new(),
-            is_running: true,
         }
     }
 }
@@ -81,37 +91,38 @@ pub struct App;
 
 impl App {
     pub async fn run() -> Result<(), TuiError> {
-        let mut state = AppState::default();
+        let mut state = AppState::new().await;
         let (tx, mut rx) = mpsc::channel::<Action>(32);
 
         let mut terminal = ratatui::init();
 
-        // event thread
-        tokio::spawn(async move {
-            let mut reader = EventStream::new();
-            while let Some(Ok(evt)) = reader.next().await {
-                let action = event(evt);
-                if let Err(e) = tx.send(action).await {
-                    tracing::error!("{e}\n Error occured while trying to send event.");
-                    break;
-                }
-            }
-        });
-
         // networking thread
+        let network_clone = state.network.clone();
         tokio::spawn(async move {
-            let mut network = network::NetworkState::new().await;
-            network.connect_wifi_adapter().await;
-            info!("{:?}", network.controller);
+            let mut writer = network_clone.write().await;
+            writer.connect_wifi_adapter().await;
+
+            info!("{:?}", writer.controller);
         });
 
         terminal.draw(|f| render(f, &state))?;
 
         let mut redraw_required: bool;
         while state.is_running {
-            if let Some(action) = rx.recv().await {
-                redraw_required = true;
-                match action {
+            match event::poll(Duration::from_millis(100)) {
+                Ok(v) => match v {
+                    false => {
+                        continue;
+                    }
+                    _ => {}
+                },
+                _ => {
+                    continue;
+                }
+            }
+
+            if let Ok(evt) = event::read() {
+                match event(evt) {
                     Action::SelectUp => state.view.selections.change_selection(Action::SelectUp),
                     Action::SelectDown => {
                         state.view.selections.change_selection(Action::SelectDown)
@@ -127,12 +138,10 @@ impl App {
                     }
                     _ => {}
                 }
-
-                if redraw_required {
-                    terminal.draw(|f| render(f, &state))?;
-                }
-            }
+            };
+            terminal.draw(|f| render(f, &state))?;
         }
+
         Ok(())
     }
 }
