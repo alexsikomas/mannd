@@ -2,7 +2,6 @@ use std::{borrow::Cow, fmt::Debug};
 
 use crate::{
     error::ComError,
-    ethtool::{ETHTOOL_GENL_NAME, EthtoolCmds},
     wireless::{
         WifiAdapter,
         defs::{
@@ -29,19 +28,19 @@ use neli::{
 };
 use tracing::{info, instrument};
 
-pub struct WiredNetlink {
-    router: NlRouter,
-    handle: NlRouterReceiverHandle<u16, Genlmsghdr<u8, u16, NoUserHeader>>,
-    family_id: u16,
-}
-
-impl Debug for WiredNetlink {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WiredNetlink")
-            .field("family_id", &self.family_id)
-            .finish()
-    }
-}
+// pub struct WiredNetlink {
+//     router: NlRouter,
+//     handle: NlRouterReceiverHandle<u16, Genlmsghdr<u8, u16, NoUserHeader>>,
+//     family_id: u16,
+// }
+//
+// impl Debug for WiredNetlink {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         f.debug_struct("WiredNetlink")
+//             .field("family_id", &self.family_id)
+//             .finish()
+//     }
+// }
 
 pub struct WirelessNetlink {
     router: NlRouter,
@@ -57,97 +56,97 @@ impl Debug for WirelessNetlink {
             .finish()
     }
 }
-
-impl WiredNetlink {
-    #[instrument]
-    pub async fn connect() -> Result<Self, ComError> {
-        info!("Creating wired netlink connection");
-        let (mut router, mut handle) =
-            NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
-        let family_id = router.resolve_genl_family(ETHTOOL_GENL_NAME).await?;
-        info!("Successfully created wired netlink connection");
-
-        Ok(Self {
-            router,
-            handle,
-            family_id,
-        })
-    }
-
-    // TODO: continue when I have access to device with ethernet
-    // async fn info<T>(
-    //     &mut self,
-    //     interface_index: Option<i32>,
-    //     cmd: EthtoolCmds,
-    // ) -> Result<Vec<T>, ComError>
-    // where
-    //     T: for<'a> TryFrom<Attrs<'a, Nl80211Attr>, Error = DeError>,
-    // {
-    //     let msghdr = GenlmsghdrBuilder::<EthtoolCmds, EthtoolAttr>::default()
-    //         .cmd(cmd)
-    //         .attrs({
-    //             let mut attrs = GenlBuffer::new();
-    //             if let Some(interface_index) = interface_index {
-    //                 attrs.push(
-    //                     NlattrBuilder::default()
-    //                         .nla_type(
-    //                             neli::genl::AttrTypeBuilder::default()
-    //                                 .nla_type(EthtoolAttr::Header)
-    //                                 .build()
-    //                                 .unwrap(),
-    //                         )
-    //                         .nla_payload(interface_index)
-    //                         .build()
-    //                         .unwrap(),
-    //                 );
-    //             }
-    //             attrs
-    //         })
-    //         .build()
-    //         .unwrap();
-    //
-    //     let mut recv: NlRouterReceiverHandle<Nlmsg, Genlmsghdr<EthtoolCmds, EthtoolAttr>> = self
-    //         .router
-    //         .send(
-    //             self.family_id,
-    //             NlmF::REQUEST | NlmF::DUMP,
-    //             NlPayload::Payload(msghdr),
-    //         )
-    //         .await?;
-    //
-    //     let mut retval = Vec::new();
-    //
-    //     while let Some(response) = recv
-    //         .next::<Nlmsg, Genlmsghdr<EthtoolCmds, EthtoolAttr>>()
-    //         .await
-    //     {
-    //         let response = response?;
-    //         match response.nl_type() {
-    //             Nlmsg::Noop => (),
-    //             Nlmsg::Error => {
-    //                 return Err(ComError::NeliMsgError(MsgError::new(
-    //                     "Parsing response.nl_type in get_info_vec",
-    //                 )));
-    //             }
-    //             Nlmsg::Done => return Ok(retval),
-    //             _ => retval.push(
-    //                 response
-    //                     .get_payload()
-    //                     .unwrap()
-    //                     .attrs()
-    //                     .get_attr_handle()
-    //                     .try_into()?,
-    //             ),
-    //         };
-    //     }
-    //
-    //     Ok(retval)
-    // }
-
-    async fn action() {
-        todo!();
-    }
-}
+//
+// impl WiredNetlink {
+//     #[instrument]
+//     pub async fn connect() -> Result<Self, ComError> {
+//         info!("Creating wired netlink connection");
+//         let (mut router, mut handle) =
+//             NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
+//         let family_id = router.resolve_genl_family(ETHTOOL_GENL_NAME).await?;
+//         info!("Successfully created wired netlink connection");
+//
+//         Ok(Self {
+//             router,
+//             handle,
+//             family_id,
+//         })
+//     }
+//
+//     TODO: continue when I have access to device with ethernet
+//     async fn info<T>(
+//         &mut self,
+//         interface_index: Option<i32>,
+//         cmd: EthtoolCmds,
+//     ) -> Result<Vec<T>, ComError>
+//     where
+//         T: for<'a> TryFrom<Attrs<'a, Nl80211Attr>, Error = DeError>,
+//     {
+//         let msghdr = GenlmsghdrBuilder::<EthtoolCmds, EthtoolAttr>::default()
+//             .cmd(cmd)
+//             .attrs({
+//                 let mut attrs = GenlBuffer::new();
+//                 if let Some(interface_index) = interface_index {
+//                     attrs.push(
+//                         NlattrBuilder::default()
+//                             .nla_type(
+//                                 neli::genl::AttrTypeBuilder::default()
+//                                     .nla_type(EthtoolAttr::Header)
+//                                     .build()
+//                                     .unwrap(),
+//                             )
+//                             .nla_payload(interface_index)
+//                             .build()
+//                             .unwrap(),
+//                     );
+//                 }
+//                 attrs
+//             })
+//             .build()
+//             .unwrap();
+//
+//         let mut recv: NlRouterReceiverHandle<Nlmsg, Genlmsghdr<EthtoolCmds, EthtoolAttr>> = self
+//             .router
+//             .send(
+//                 self.family_id,
+//                 NlmF::REQUEST | NlmF::DUMP,
+//                 NlPayload::Payload(msghdr),
+//             )
+//             .await?;
+//
+//         let mut retval = Vec::new();
+//
+//         while let Some(response) = recv
+//             .next::<Nlmsg, Genlmsghdr<EthtoolCmds, EthtoolAttr>>()
+//             .await
+//         {
+//             let response = response?;
+//             match response.nl_type() {
+//                 Nlmsg::Noop => (),
+//                 Nlmsg::Error => {
+//                     return Err(ComError::NeliMsgError(MsgError::new(
+//                         "Parsing response.nl_type in get_info_vec",
+//                     )));
+//                 }
+//                 Nlmsg::Done => return Ok(retval),
+//                 _ => retval.push(
+//                     response
+//                         .get_payload()
+//                         .unwrap()
+//                         .attrs()
+//                         .get_attr_handle()
+//                         .try_into()?,
+//                 ),
+//             };
+//         }
+//
+//         Ok(retval)
+//     }
+//
+//     async fn action() {
+//         todo!();
+//     }
+// }
 
 impl WirelessNetlink {
     #[instrument]

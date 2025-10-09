@@ -1,10 +1,10 @@
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AccessPoint {
     pub ssid: String, // name
     pub security: Security,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Security {
     Open,
     Psk,

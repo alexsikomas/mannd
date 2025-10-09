@@ -1,8 +1,8 @@
 use crate::{
     error::ComError,
-    netlink::{WiredNetlink, WirelessNetlink},
+    netlink::WirelessNetlink,
     systemd::systemctl,
-    wireless::{WifiAdapter, iwd::Iwd, wpa_supplicant::WpaSupplicant},
+    wireless::{WifiAdapter, common::AccessPoint, iwd::Iwd, wpa_supplicant::WpaSupplicant},
 };
 use tracing::{info, instrument};
 use zbus::Connection;
@@ -16,9 +16,9 @@ pub enum WirelessAdapter {
 
 #[derive(Debug)]
 pub struct Controller {
-    wifi: Option<WirelessAdapter>,
+    pub wifi: Option<WirelessAdapter>,
     /// Used for ethernet
-    wired: WiredNetlink,
+    // pub wired: WiredNetlink,
     connection: Connection,
 }
 
@@ -28,11 +28,10 @@ impl Controller {
         info!("Creating controller");
         let conn = zbus::Connection::system().await?;
         info!("Zbus connection successful");
-        let mut wired = WiredNetlink::connect().await?;
+        // let mut wired = WiredNetlink::connect().await?;
 
         Ok(Self {
             wifi: None,
-            wired,
             connection: conn,
         })
     }
@@ -100,14 +99,12 @@ impl Controller {
         }
     }
 
-    async fn scan(&mut self) -> Result<(), ComError> {
+    pub async fn scan(&mut self) -> Result<Vec<AccessPoint>, ComError> {
         match &mut self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => {
-                iwd.update_networks().await?;
-            }
-            _ => {}
+            Some(WirelessAdapter::Iwd(iwd)) => Ok(iwd.get_networks().await?),
+            _ => Err(ComError::NetworkNotFound),
         };
-        Ok(())
+        Err(ComError::NetworkNotFound)
     }
 
     async fn ssid_connect(&self, ssid: &str, psk: &str) -> Result<(), ComError> {
