@@ -1,9 +1,13 @@
+use std::sync::Arc;
+
 use ratatui::{
     layout::{self, Constraint, Flex, Layout},
     style::Style,
     text::Line,
     widgets::{Block, Borders, Paragraph, Widget, canvas::Label},
 };
+use tokio::sync::RwLock;
+use tracing::info;
 
 use crate::{
     app::{SelectableList, Selection},
@@ -12,11 +16,15 @@ use crate::{
 
 pub struct Connection<'a> {
     list: &'a SelectableList<Selection>,
+    network: Option<Arc<RwLock<NetworkState>>>,
 }
 
 impl<'a> Connection<'a> {
-    pub fn new(list: &'a SelectableList<Selection>) -> Self {
-        Self { list }
+    pub fn new(
+        list: &'a SelectableList<Selection>,
+        network: Option<Arc<RwLock<NetworkState>>>,
+    ) -> Self {
+        Self { list, network }
     }
 }
 
@@ -88,5 +96,7 @@ impl<'a> Widget for Connection<'a> {
         }
 
         label_block.render(label_area, buf);
+        let net = self.network.unwrap();
+        info!("{:?}", net.controller);
     }
 }

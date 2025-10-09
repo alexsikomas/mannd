@@ -1,5 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
+use com::{
+    controller::{self, Controller, WirelessAdapter},
+    wireless::common::AccessPoint,
+};
 use crossterm::event::{self, Event, EventStream, KeyCode};
 use futures::stream::StreamExt;
 use ratatui::crossterm::event::poll;
@@ -9,16 +13,12 @@ use tokio::sync::{
 };
 use tracing::info;
 
-use crate::{
-    error::TuiError,
-    network::{self, NetworkState},
-    ui::render,
-};
+use crate::{error::TuiError, ui::render};
 
 pub struct AppState {
     pub view: View,
     is_running: bool,
-    network: Arc<RwLock<NetworkState>>,
+    network: NetworkState,
 }
 
 impl AppState {
@@ -26,25 +26,30 @@ impl AppState {
         Self {
             view: View::new(),
             is_running: true,
-            network: Arc::new(RwLock::new(NetworkState::new().await)),
+            network: NetworkState {
+                selected: None,
+                aps: vec![],
+            },
         }
     }
 
     // general select function that calls all other on_*_select functions
-    fn on_select(&mut self) {
+    // Optionally returns a network action if one needs to be taken due to the input
+    fn on_select(&mut self) -> Option<NetworkAction> {
         let selection = self.view.selections.get_selected();
         match self.view.active {
             ViewId::MainMenu => self.on_main_menu_select(selection.clone()),
-            _ => {}
+            _ => None,
         }
     }
 
-    fn on_main_menu_select(&mut self, selection: Selection) {
+    fn on_main_menu_select(&mut self, selection: Selection) -> Option<NetworkAction> {
         match selection {
             Selection::Exit => self.is_running = false,
             Selection::Connection => {
                 self.view.active = ViewId::Connection;
                 self.view.selections = View::connection();
+                return Some(NetworkAction::Scan);
             }
             Selection::Vpn => {
                 self.view.active = ViewId::Vpn;
@@ -53,7 +58,8 @@ impl AppState {
                 self.view.active = ViewId::Config;
             }
             _ => {}
-        }
+        };
+        None
     }
 }
 
@@ -87,27 +93,46 @@ pub enum Action {
     Exit,
 }
 
+#[derive(Debug)]
+pub enum NetworkAction {
+    Scan,
+    ForceIwd,
+    ForceWpa,
+    ForceWifiNetlink,
+}
+
 pub struct App;
 
 impl App {
     pub async fn run() -> Result<(), TuiError> {
         let mut state = AppState::new().await;
-        let (tx, mut rx) = mpsc::channel::<Action>(32);
+        let (event_tx, mut event_rx) = mpsc::channel::<NetworkAction>(32);
+        let (net_state_tx, mut net_state_rx) = mpsc::channel::<NetworkUpdate>(32);
 
         let mut terminal = ratatui::init();
 
         // networking thread
-        let network_clone = state.network.clone();
         tokio::spawn(async move {
-            let mut writer = network_clone.write().await;
-            writer.connect_wifi_adapter().await;
-
-            info!("{:?}", writer.controller);
+            if let Ok(mut controller) = Controller::new().await {
+                controller.determine_adapter().await;
+                while let Some(action) = event_rx.recv().await {
+                    match action {
+                        NetworkAction::Scan => {
+                            if let Ok(aps) = controller.scan().await {
+                                net_state_tx.send(NetworkUpdate::UpdateAps(aps));
+                            }
+                        }
+                        NetworkAction::ForceIwd => {}
+                        NetworkAction::ForceWpa => {}
+                        NetworkAction::ForceWifiNetlink => {}
+                        _ => {}
+                    };
+                }
+            };
         });
 
         terminal.draw(|f| render(f, &state))?;
 
-        let mut redraw_required: bool;
         while state.is_running {
             match event::poll(Duration::from_millis(100)) {
                 Ok(v) => match v {
@@ -128,14 +153,15 @@ impl App {
                         state.view.selections.change_selection(Action::SelectDown)
                     }
                     Action::Enter => {
-                        state.on_select();
+                        if let Some(action) = state.on_select() {
+                            info!("{:?}", action);
+                            event_tx.send(action).await;
+                        }
                     }
                     Action::Exit => {
                         state.is_running = false;
                     }
-                    Action::NoOp => {
-                        redraw_required = false;
-                    }
+                    Action::NoOp => {}
                     _ => {}
                 }
             };
@@ -270,4 +296,15 @@ impl SelectableList<Selection> {
     fn get_selected(&self) -> &Selection {
         &self.items[self.selected]
     }
+}
+
+pub struct NetworkState {
+    selected: Option<usize>,
+    aps: Vec<AccessPoint>,
+}
+
+enum NetworkUpdate {
+    Select(usize),
+    Deselect,
+    UpdateAps(Vec<AccessPoint>),
 }

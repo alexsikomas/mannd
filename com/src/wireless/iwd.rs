@@ -1,4 +1,4 @@
-use std::{env, net, path::PathBuf};
+use std::{env, fmt::format, net, path::PathBuf};
 
 use async_trait::async_trait;
 use quick_xml::{Reader, events::Event};
@@ -23,7 +23,6 @@ pub struct Iwd {
     path: String,
     service: String,
     conn: Connection,
-    networks: Option<Vec<IwdNetwork>>,
 }
 
 #[async_trait]
@@ -41,7 +40,6 @@ impl WifiAdapter for Iwd {
                 conn,
                 service,
                 path,
-                networks: None,
             }),
             Err(e) => Err(ComError::AdapterNotFound(format!(
                 "Could not find an adapter, is iwd installed?\n Error: {e}"
@@ -152,8 +150,7 @@ impl Iwd {
         }
     }
 
-    /// Performs a scan with iwd which internally updates the dbus to include new networks
-    pub async fn update_networks(&mut self) -> Result<(), ComError> {
+    pub async fn get_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
         let proxy = zbus::Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -197,14 +194,13 @@ impl Iwd {
 
         let mut networks = vec![];
         for path in network_paths {
-            let network = self.get_network_info(path).await?;
+            let network = self.get_ap_info(path).await?;
             networks.push(network);
         }
-        self.networks = Some(networks);
-        Ok(())
+        Ok(networks)
     }
 
-    pub async fn get_network_info(&self, network: String) -> Result<IwdNetwork, ComError> {
+    pub async fn get_ap_info(&self, network: String) -> Result<AccessPoint, ComError> {
         let proxy = zbus::Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -213,31 +209,7 @@ impl Iwd {
         )
         .await?;
 
-        let ess = self
-            .get_prop_from_proxy::<Vec<OwnedObjectPath>>(&proxy, "ExtendedServiceSet")
-            .await?;
-
-        let connected = self
-            .get_prop_from_proxy::<bool>(&proxy, "Connected")
-            .await?;
-
-        let device = self
-            .get_prop_from_proxy::<OwnedObjectPath>(&proxy, "Device")
-            .await?;
-
-        let known_network: Option<OwnedObjectPath>;
-        match self
-            .get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork")
-            .await
-        {
-            Ok(known) => {
-                known_network = Some(known);
-            }
-            Err(_) => known_network = None,
-        }
-
-        let name = self.get_prop_from_proxy::<String>(&proxy, "Name").await?;
-
+        let ssid = self.get_prop_from_proxy::<String>(&proxy, "Name").await?;
         let security: Security;
         match self
             .get_prop_from_proxy::<String>(&proxy, "Type")
@@ -251,93 +223,100 @@ impl Iwd {
                 return Err(ComError::InvalidSecurityType);
             }
         }
-
-        Ok(IwdNetwork {
-            ap: AccessPoint {
-                ssid: name,
-                security,
-            },
-            ess,
-            connected,
-            device,
-            known_network,
-        })
+        Ok(AccessPoint { ssid, security })
     }
 
-    /// Debug purposes
-    async fn print_networks(&self) -> Result<(), ComError> {
-        if self.networks.is_none() {
-            println!("Networks have not been initalised.");
-            return Ok(());
-        }
+    // pub async fn get_network_info(&self, network: String) -> Result<IwdNetwork, ComError> {
+    //     let proxy = zbus::Proxy::new(
+    //         &self.conn,
+    //         self.service.clone(),
+    //         format!("{}/{}", self.path.clone(), network),
+    //         "net.connman.iwd.Network",
+    //     )
+    //     .await?;
+    //
+    //     let ess = self
+    //         .get_prop_from_proxy::<Vec<OwnedObjectPath>>(&proxy, "ExtendedServiceSet")
+    //         .await?;
+    //
+    //     let connected = self
+    //         .get_prop_from_proxy::<bool>(&proxy, "Connected")
+    //         .await?;
+    //
+    //     let device = self
+    //         .get_prop_from_proxy::<OwnedObjectPath>(&proxy, "Device")
+    //         .await?;
+    //
+    //     let known_network: Option<OwnedObjectPath>;
+    //     match self
+    //         .get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork")
+    //         .await
+    //     {
+    //         Ok(known) => {
+    //             known_network = Some(known);
+    //         }
+    //         Err(_) => known_network = None,
+    //     }
+    //
+    //     let name = self.get_prop_from_proxy::<String>(&proxy, "Name").await?;
+    //
+    //     let security: Security;
+    //     match self
+    //         .get_prop_from_proxy::<String>(&proxy, "Type")
+    //         .await?
+    //         .as_str()
+    //     {
+    //         "psk" => security = Security::Psk,
+    //         "open" => security = Security::Open,
+    //         "8021x" => security = Security::Ieee8021x,
+    //         _ => {
+    //             return Err(ComError::InvalidSecurityType);
+    //         }
+    //     }
+    //
+    //     Ok(IwdNetwork {
+    //         ap: AccessPoint {
+    //             ssid: name,
+    //             security,
+    //         },
+    //         ess,
+    //         connected,
+    //         device,
+    //         known_network,
+    //     })
+    // }
 
-        let networks = self.networks.as_ref().unwrap();
-
-        if networks.is_empty() {
-            println!("No networks were found nearby!");
-            return Ok(());
-        }
-
-        println!("Found {} network(s):", networks.len());
-        println!("--------------------------------------------------");
-
-        for network in networks {
-            println!("{network}");
-
-            println!("--------------------------------------------------");
-        }
-        Ok(())
-    }
-}
-
-// Configuration related
-impl Iwd {
-    /// Returns either the location of main.conf if it has been created or a folder where it should
-    /// be created.
-    ///
-    /// First, checks if `$CONFIGURATION_DIRECTORY` exists if so creates/finds main.conf
-    /// If the env variable does not exist then checks if /etc/iwd exists if so creates/finds
-    /// main.conf
-    /// If /etc/iwd does not exist then creates the directory and main.conf
-    async fn get_conf() -> Result<PathBuf, ComError> {
-        let iwd_path = "/etc/iwd";
-        let env_var = "CONFIGURATION_DIRECTORY";
-        let dir = env::var(env_var);
-        match dir {
-            // found env
-            Ok(v) => {
-                let mut conf_path = PathBuf::from(v.clone());
-                conf_path.push("main.conf");
-
-                // not found conf
-                if fs::metadata(v).await.is_err() {
-                    let file = OpenOptions::new()
-                        .write(true)
-                        .read(true)
-                        .create(true)
-                        .open(&conf_path)
-                        .await?;
-                }
-                return Ok(PathBuf::from(conf_path));
-            }
-            // no env
-            Err(e) => {
-                let mut conf_path = PathBuf::from(iwd_path);
-                conf_path.push("main.conf");
-                if fs::metadata(&conf_path).await.is_err() {
-                    // /etc/iwd could possibly not exist
-                    fs::create_dir_all(iwd_path).await?;
-                    OpenOptions::new()
-                        .write(true)
-                        .read(true)
-                        .create(true)
-                        .open(&conf_path)
-                        .await?;
-                }
-                return Ok(PathBuf::from(conf_path));
-            }
-        }
-    }
+    //     async fn print_networks(&self) -
+    //                         net_state_tx.send(NetworkUpdate::UpdateAps())
+    //                 // not found conf
+    //                 if fs::metadata(v).await.is_err() {
+    //                     let file = OpenOptions::new()
+    //                         .write(true)
+    //                         .read(true)
+    //                         .create(true)
+    //                         .open(&conf_path)
+    //                         .await?;
+    //                 }
+    //                 return Ok(PathBuf::from(conf_path));
+    //             }
+    //             // no env
+    //             Err(e) => {
+    //                 let mut conf_path = PathBuf::from(iwd_path);
+    //                 conf_path.push("main.conf");
+    //                 if fs::metadata(&conf_path).await.is_err() {
+    //                     // /etc/iwd could possibly not exist
+    //                     fs::create_dir_all(iwd_path).await?;
+    //                     OpenOptions::new()
+    //                         .write(true)
+    //                         .read(true)
+    //                         .create(true)
+    //                         .open(&conf_path)
+    //                         .await?;
+    //                 }
+    //                 return Ok(PathBuf::from(conf_path));
+    //             }
+    //         }
+    //     }
 }
 
 #[cfg(test)]
@@ -376,26 +355,27 @@ mod tests {
         Ok(())
     }
 }
+//
+// #[derive(Debug)]
+// pub struct IwdNetwork {
+//     pub ap: AccessPoint,
+//     ess: Vec<OwnedObjectPath>,
+//     connected: bool,
+//     device: OwnedObjectPath,
+//     known_network: Option<OwnedObjectPath>,
+// }
+//
 
-#[derive(Debug)]
-pub struct IwdNetwork {
-    ap: AccessPoint,
-    ess: Vec<OwnedObjectPath>,
-    connected: bool,
-    device: OwnedObjectPath,
-    known_network: Option<OwnedObjectPath>,
-}
-
-impl std::fmt::Display for IwdNetwork {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Name: {}\n", self.ap.ssid);
-        write!(f, "Connected: {}\n", self.connected);
-        write!(f, "Security: {}\n", self.ap.security);
-        write!(f, "Device: {:?}\n", self.device);
-        write!(f, "Known Network: {:?}\n", self.known_network);
-        write!(f, "Ess: {:?}", self.ess)
-    }
-}
+// impl std::fmt::Display for IwdNetwork {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         write!(f, "Name: {}\n", self.ap.ssid);
+//         write!(f, "Connected: {}\n", self.connected);
+//         write!(f, "Security: {}\n", self.ap.security);
+//         write!(f, "Device: {:?}\n", self.device);
+//         write!(f, "Known Network: {:?}\n", self.known_network);
+//         write!(f, "Ess: {:?}", self.ess)
+//     }
+// }
 
 enum IwdConfigGroup {
     General,
