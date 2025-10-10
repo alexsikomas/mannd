@@ -103,8 +103,7 @@ impl Controller {
         match &mut self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => Ok(iwd.get_networks().await?),
             _ => Err(ComError::NetworkNotFound),
-        };
-        Err(ComError::NetworkNotFound)
+        }
     }
 
     async fn ssid_connect(&self, ssid: &str, psk: &str) -> Result<(), ComError> {

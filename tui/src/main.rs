@@ -8,11 +8,7 @@ use tokio::sync::mpsc::{self, Receiver, UnboundedSender};
 use tracing::{Level, info};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{FmtSubscriber, layer::SubscriberExt};
-use tui::{
-    app::App,
-    error::TuiError,
-    ui::{Theme, render},
-};
+use tui::{app::App, error::TuiError, ui::Theme};
 
 #[tokio::main]
 async fn main() -> Result<(), TuiError> {
