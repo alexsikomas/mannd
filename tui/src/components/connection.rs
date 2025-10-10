@@ -10,20 +10,17 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::{
-    app::{SelectableList, Selection},
+    app::{NetworkState, SelectableList, Selection},
     ui::{THEME, Theme},
 };
 
 pub struct Connection<'a> {
     list: &'a SelectableList<Selection>,
-    network: Option<Arc<RwLock<NetworkState>>>,
+    network: &'a NetworkState,
 }
 
 impl<'a> Connection<'a> {
-    pub fn new(
-        list: &'a SelectableList<Selection>,
-        network: Option<Arc<RwLock<NetworkState>>>,
-    ) -> Self {
+    pub fn new(list: &'a SelectableList<Selection>, network: &'a NetworkState) -> Self {
         Self { list, network }
     }
 }
@@ -96,7 +93,6 @@ impl<'a> Widget for Connection<'a> {
         }
 
         label_block.render(label_area, buf);
-        let net = self.network.unwrap();
-        info!("{:?}", net.controller);
+        info!("{:?}", self.network.aps);
     }
 }

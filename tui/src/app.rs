@@ -18,7 +18,7 @@ use crate::{error::TuiError, ui::render};
 pub struct AppState {
     pub view: View,
     is_running: bool,
-    network: NetworkState,
+    pub network: NetworkState,
 }
 
 impl AppState {
@@ -115,10 +115,12 @@ impl App {
         tokio::spawn(async move {
             if let Ok(mut controller) = Controller::new().await {
                 controller.determine_adapter().await;
+                info!("Start");
                 while let Some(action) = event_rx.recv().await {
                     match action {
                         NetworkAction::Scan => {
                             if let Ok(aps) = controller.scan().await {
+                                info!("{:?}", aps);
                                 net_state_tx.send(NetworkUpdate::UpdateAps(aps));
                             }
                         }
@@ -128,7 +130,7 @@ impl App {
                         _ => {}
                     };
                 }
-            };
+            }
         });
 
         terminal.draw(|f| render(f, &state))?;
@@ -154,7 +156,6 @@ impl App {
                     }
                     Action::Enter => {
                         if let Some(action) = state.on_select() {
-                            info!("{:?}", action);
                             event_tx.send(action).await;
                         }
                     }
@@ -163,6 +164,20 @@ impl App {
                     }
                     Action::NoOp => {}
                     _ => {}
+                }
+            };
+
+            if let Ok(msg) = net_state_rx.try_recv() {
+                match msg {
+                    NetworkUpdate::Select(i) => {
+                        state.network.selected = Some(i);
+                    }
+                    NetworkUpdate::Deselect => {
+                        state.network.selected = None;
+                    }
+                    NetworkUpdate::UpdateAps(aps) => {
+                        state.network.aps = aps;
+                    }
                 }
             };
             terminal.draw(|f| render(f, &state))?;
@@ -299,8 +314,8 @@ impl SelectableList<Selection> {
 }
 
 pub struct NetworkState {
-    selected: Option<usize>,
-    aps: Vec<AccessPoint>,
+    pub selected: Option<usize>,
+    pub aps: Vec<AccessPoint>,
 }
 
 enum NetworkUpdate {

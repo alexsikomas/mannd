@@ -12,7 +12,7 @@ use toml::Value;
 use tracing::{info, instrument};
 
 use crate::{
-    app::{AppState, View, ViewId},
+    app::{AppState, NetworkState, View, ViewId},
     components::{connection::Connection, menu::MainMenu},
 };
 
@@ -114,7 +114,7 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &AppState) {
             frame.render_widget(menu, inner_area);
         }
         ViewId::Connection => {
-            let con = Connection::new(&state.view.selections);
+            let con = Connection::new(&state.view.selections, &state.network);
             frame.render_widget(con, inner_area);
         }
         _ => {
