@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use ratatui::{
-    layout::{self, Constraint, Flex, Layout},
-    style::Style,
-    text::Line,
-    widgets::{Block, Borders, Paragraph, Widget, canvas::Label},
+    buffer::Buffer,
+    layout::{self, Constraint, Direction, Flex, Layout, Rect},
+    style::{Style, Stylize},
+    text::{Line, Text},
+    widgets::{Block, Borders, Paragraph, Widget},
 };
 use tokio::sync::RwLock;
-use tracing::info;
 
 use crate::{
     app::{NetworkState, SelectableList, Selection},
@@ -26,73 +26,89 @@ impl<'a> Connection<'a> {
 }
 
 impl<'a> Widget for Connection<'a> {
-    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
+    fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
     {
-        let theme: &Theme;
-        match THEME.get() {
-            Some(t) => {
-                theme = t;
-            }
-            None => {
-                return;
-            }
-        }
+        let theme: &Theme = match THEME.get() {
+            Some(t) => t,
+            None => return,
+        };
 
-        // 80% horizontal, 70% vertical and centered
-        let outer_area = Layout::horizontal([Constraint::Percentage(80)])
-            .flex(Flex::Center)
-            .areas::<1>(
-                Layout::vertical([Constraint::Percentage(70)])
-                    .flex(Flex::Center)
-                    .areas::<1>(area)[0],
-            )[0];
+        let main_chunks =
+            Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)])
+                .split(area);
 
-        let outer_block = Block::new()
+        let network_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .borders(Borders::all())
-            .style(Style::new().fg(theme.secondary.shift(30)))
+            .borders(Borders::ALL)
+            .style(Style::new().fg(theme.primary.color()))
             .title_top(
-                Line::from(" Networks ")
+                Line::from(" Network Status ")
                     .centered()
-                    .style(Style::new().fg(theme.secondary.shift(10))),
+                    .style(Style::new().fg(theme.accent.color())),
             );
-        outer_block.render(outer_area, buf);
 
-        let label_area = Layout::horizontal([Constraint::Percentage(30)])
-            .flex(Flex::End)
-            .margin(2)
-            .areas::<1>(
-                Layout::vertical([Constraint::Percentage(100)])
-                    .flex(Flex::Center)
-                    .areas::<1>(outer_area)[0],
-            )[0];
+        let network_details =
+            Text::from(vec![Line::from(""), Line::from("      Available APs: ...")])
+                .style(Style::new().fg(theme.info.color()));
 
-        let label_block = Block::new()
+        let network_paragraph = Paragraph::new(network_details);
+
+        let network_area = network_block.inner(main_chunks[0]);
+        network_block.render(main_chunks[0], buf);
+        network_paragraph.render(network_area, buf);
+
+        let selection_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .borders(Borders::all())
-            .style(Style::new().fg(theme.secondary.shift(50)));
+            .borders(Borders::ALL)
+            .style(Style::new().fg(theme.primary.color()))
+            .title_top(
+                Line::from(" Options ")
+                    .centered()
+                    .style(Style::new().fg(theme.accent.color())),
+            );
 
-        // labels
+        let selection_area = selection_block.inner(main_chunks[1]);
+        selection_block.render(main_chunks[1], buf);
 
-        let constraints: Vec<Constraint> = std::iter::repeat(Constraint::Length(1))
-            .take(self.list.items.len())
-            .collect();
+        let selection_chunks = Layout::vertical(
+            self.list
+                .items
+                .iter()
+                .map(|_| Constraint::Length(1))
+                .collect::<Vec<_>>(),
+        )
+        .flex(Flex::Center)
+        .split(selection_area);
 
-        let label_chunks = Layout::default()
-            .direction(layout::Direction::Vertical)
-            .margin(2)
-            .constraints(constraints)
-            .split(label_area);
+        for (i, item) in self.list.items.iter().enumerate() {
+            if i >= selection_chunks.len() {
+                break;
+            }
 
-        for (index, item) in self.list.items.iter().enumerate() {
-            if index == self.list.selected {}
-            let label = Paragraph::new(item.as_str()).style(theme.info.color());
-            label.render(label_chunks[index], buf);
+            let (fg_col, bg_col) = if i == self.list.selected {
+                (theme.background.color(), theme.secondary.color())
+            } else {
+                (theme.foreground.color(), theme.background.color())
+            };
+
+            let paragraph = Paragraph::new(item.as_str())
+                .centered()
+                .style(Style::new().fg(fg_col).bold());
+
+            if i == self.list.selected {
+                let highlight_area = Layout::horizontal([Constraint::Percentage(95)])
+                    .flex(Flex::Center)
+                    .split(selection_chunks[i])[0];
+
+                Block::default()
+                    .style(Style::new().bg(bg_col))
+                    .render(highlight_area, buf);
+            }
+
+            paragraph.render(selection_chunks[i], buf);
         }
-
-        label_block.render(label_area, buf);
-        info!("{:?}", self.network.aps);
     }
 }
+
