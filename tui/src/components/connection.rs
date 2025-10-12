@@ -5,9 +5,10 @@ use ratatui::{
     layout::{self, Constraint, Direction, Flex, Layout, Rect},
     style::{Style, Stylize},
     text::{Line, Text},
-    widgets::{Block, Borders, Paragraph, Widget},
+    widgets::{Block, Borders, Paragraph, Scrollbar, StatefulWidget, Widget},
 };
 use tokio::sync::RwLock;
+use tracing::info;
 
 use crate::{
     app::{NetworkState, SelectableList, Selection},
@@ -49,15 +50,24 @@ impl<'a> Widget for Connection<'a> {
                     .style(Style::new().fg(theme.accent.color())),
             );
 
-        let network_details =
-            Text::from(vec![Line::from(""), Line::from("      Available APs: ...")])
-                .style(Style::new().fg(theme.info.color()));
-
-        let network_paragraph = Paragraph::new(network_details);
-
         let network_area = network_block.inner(main_chunks[0]);
+        let network_chunks = Layout::new(
+            Direction::Vertical,
+            self.network
+                .aps
+                .iter()
+                .map(|_| Constraint::Length(1))
+                .collect::<Vec<_>>(),
+        )
+        .split(network_area);
+
+        info!("{:?}", self.network.aps);
+        for (i, network) in self.network.aps.iter().enumerate() {
+            info!("{:?}", network);
+            Paragraph::new(network.ssid.clone()).render(network_chunks[i], buf);
+        }
+
         network_block.render(main_chunks[0], buf);
-        network_paragraph.render(network_area, buf);
 
         let selection_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
@@ -82,7 +92,8 @@ impl<'a> Widget for Connection<'a> {
         .flex(Flex::Center)
         .split(selection_area);
 
-        for (i, item) in self.list.items.iter().enumerate() {
+        // skip first value as it's for knowing if we are in the left menu
+        for (i, item) in self.list.items.iter().skip(1).enumerate() {
             if i >= selection_chunks.len() {
                 break;
             }
@@ -111,4 +122,3 @@ impl<'a> Widget for Connection<'a> {
         }
     }
 }
-
