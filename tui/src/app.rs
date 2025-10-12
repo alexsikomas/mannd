@@ -120,8 +120,7 @@ impl App {
                     match action {
                         NetworkAction::Scan => {
                             if let Ok(aps) = controller.scan().await {
-                                info!("{:?}", aps);
-                                net_state_tx.send(NetworkUpdate::UpdateAps(aps));
+                                net_state_tx.send(NetworkUpdate::UpdateAps(aps)).await;
                             }
                         }
                         NetworkAction::ForceIwd => {}
@@ -160,7 +159,12 @@ impl App {
                         }
                     }
                     Action::Exit => {
-                        state.is_running = false;
+                        if state.view.active == ViewId::MainMenu {
+                            state.is_running = false;
+                        } else {
+                            state.view.active = ViewId::MainMenu;
+                            state.view.selections = View::main_menu();
+                        }
                     }
                     Action::NoOp => {}
                     _ => {}
@@ -187,6 +191,7 @@ impl App {
     }
 }
 
+#[derive(PartialEq, Eq)]
 pub enum ViewId {
     MainMenu,
     Connection,
