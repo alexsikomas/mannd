@@ -48,7 +48,14 @@ impl AppState {
             Selection::Exit => self.is_running = false,
             Selection::Connection => {
                 self.view.active = ViewId::Connection;
-                self.view.selections = View::connection();
+                // aps not init yet so has to be done once scan is finished,
+                // still need this as we need the values
+                self.view.selections = View::connection(0);
+                info!(
+                    "Updated selections (conn): {:?}, {:?}",
+                    self.view.selections,
+                    self.network.aps.len()
+                );
                 return Some(NetworkAction::Scan);
             }
             Selection::Vpn => {
@@ -70,6 +77,8 @@ fn event(event: Event) -> Action {
         match key.code {
             KeyCode::Up => Action::SelectUp,
             KeyCode::Down => Action::SelectDown,
+            KeyCode::Right => Action::SelectRight,
+            KeyCode::Left => Action::SelectLeft,
             KeyCode::Enter => Action::Enter,
             KeyCode::Esc => Action::Exit,
             _ => Action::NoOp,
@@ -153,6 +162,12 @@ impl App {
                     Action::SelectDown => {
                         state.view.selections.change_selection(Action::SelectDown)
                     }
+                    Action::SelectRight => {
+                        state.view.selections.change_selection(Action::SelectRight);
+                    }
+                    Action::SelectLeft => {
+                        state.view.selections.change_selection(Action::SelectLeft);
+                    }
                     Action::Enter => {
                         if let Some(action) = state.on_select() {
                             event_tx.send(action).await;
@@ -181,6 +196,9 @@ impl App {
                     }
                     NetworkUpdate::UpdateAps(aps) => {
                         state.network.aps = aps;
+                        let selected = state.view.selections.selected.clone();
+                        state.view.selections = View::connection(state.network.aps.len());
+                        state.view.selections.selected = selected;
                     }
                 }
             };
@@ -221,9 +239,9 @@ impl View {
         ])
     }
 
-    fn connection() -> SelectableList<Selection> {
+    fn connection(max: usize) -> SelectableList<Selection> {
         SelectableList::new(vec![
-            Selection::Network(1),
+            Selection::Network([0, max]),
             Selection::Scan,
             Selection::Connect,
             Selection::Edit,
@@ -232,7 +250,7 @@ impl View {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Selection {
     // main menu
     Connection,
@@ -241,9 +259,9 @@ pub enum Selection {
     Exit,
 
     // connection
-    /// Network is selected if we are on a wifi network, u16 is for the index
-    /// once we exceed the amount of networks we go to the other options
-    Network(u16),
+    // first index is for current value, second is for max value.
+    // this represents the number of networks we have
+    Network([usize; 2]),
     Scan,
     Connect,
     Edit,
@@ -266,7 +284,7 @@ impl Selection {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SelectableList<T> {
     pub items: Vec<T>,
     pub selected: usize,
@@ -285,36 +303,74 @@ impl SelectableList<Selection> {
     fn change_selection(&mut self, action: Action) {
         match action {
             Action::SelectUp => {
-                self.selected = self.prev();
+                // check if selection is Network
+                match self.get_selected_mut() {
+                    Selection::Network(arr) => {
+                        if arr[1] == 0 {
+                            return;
+                        }
+
+                        if arr[0] == 0 {
+                            arr[0] = arr[1] - 1;
+                        } else {
+                            arr[0] -= 1;
+                        }
+                        return;
+                    }
+                    _ => {}
+                };
+
+                if self.selected == 0 {
+                    self.selected = self.items.len() - 1;
+                } else {
+                    self.selected -= 1;
+                }
             }
             Action::SelectDown => {
-                self.selected = self.next();
+                match self.get_selected_mut() {
+                    Selection::Network(arr) => {
+                        if arr[1] > arr[0] + 1 {
+                            arr[0] += 1;
+                        } else {
+                            arr[0] = 0;
+                        }
+                        return;
+                    }
+                    _ => {}
+                };
+
+                if self.items.len() > self.selected + 1 {
+                    self.selected += 1;
+                } else {
+                    self.selected = 0
+                }
             }
-            Action::SelectLeft => {}
-            Action::SelectRight => {}
+            Action::SelectLeft => match self.get_selected() {
+                Selection::Scan | Selection::Connect | Selection::Edit | Selection::Remove => {
+                    self.selected = 0;
+                }
+                _ => {}
+            },
+            Action::SelectRight => {
+                // check if network
+                match self.get_selected() {
+                    Selection::Network(_) => {
+                        self.selected += 1;
+                    }
+                    _ => {}
+                }
+            }
             // ignore unrealated action
             _ => {}
         }
     }
 
-    fn next(&self) -> usize {
-        if self.items.len() > self.selected + 1 {
-            self.selected + 1
-        } else {
-            0
-        }
-    }
-
-    fn prev(&self) -> usize {
-        if self.selected == 0 {
-            self.items.len() - 1
-        } else {
-            self.selected - 1
-        }
-    }
-
     fn get_selected(&self) -> &Selection {
         &self.items[self.selected]
+    }
+
+    fn get_selected_mut(&mut self) -> &mut Selection {
+        &mut self.items[self.selected]
     }
 }
 

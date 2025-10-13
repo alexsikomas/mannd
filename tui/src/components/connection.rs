@@ -59,15 +59,23 @@ impl<'a> Widget for Connection<'a> {
                 .map(|_| Constraint::Length(1))
                 .collect::<Vec<_>>(),
         )
+        .margin(1)
         .split(network_area);
+
+        network_block.render(main_chunks[0], buf);
 
         info!("{:?}", self.network.aps);
         for (i, network) in self.network.aps.iter().enumerate() {
-            info!("{:?}", network);
-            Paragraph::new(network.ssid.clone()).render(network_chunks[i], buf);
+            let mut fg_col = theme.foreground.color();
+            if let Selection::Network(val) = self.list.items[self.list.selected] {
+                if i == val[0] {
+                    fg_col = theme.accent.color();
+                }
+            }
+            Paragraph::new(network.ssid.clone())
+                .style(Style::new().fg(fg_col).bold())
+                .render(network_chunks[i], buf);
         }
-
-        network_block.render(main_chunks[0], buf);
 
         let selection_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
@@ -92,13 +100,14 @@ impl<'a> Widget for Connection<'a> {
         .flex(Flex::Center)
         .split(selection_area);
 
+        info!("{:?}", self.list.items);
         // skip first value as it's for knowing if we are in the left menu
         for (i, item) in self.list.items.iter().skip(1).enumerate() {
             if i >= selection_chunks.len() {
                 break;
             }
 
-            let (fg_col, bg_col) = if i == self.list.selected {
+            let (fg_col, bg_col) = if (i + 1) == self.list.selected {
                 (theme.background.color(), theme.secondary.color())
             } else {
                 (theme.foreground.color(), theme.background.color())
@@ -108,7 +117,7 @@ impl<'a> Widget for Connection<'a> {
                 .centered()
                 .style(Style::new().fg(fg_col).bold());
 
-            if i == self.list.selected {
+            if i + 1 == self.list.selected {
                 let highlight_area = Layout::horizontal([Constraint::Percentage(95)])
                     .flex(Flex::Center)
                     .split(selection_chunks[i])[0];
