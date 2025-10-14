@@ -7,11 +7,11 @@ use crate::{
 use tracing::{info, instrument};
 use zbus::Connection;
 
+// Netlink not used here as I'm not implementing WPA authentication
 #[derive(Debug)]
 pub enum WirelessAdapter {
     Iwd(Iwd),
     Wpa(WpaSupplicant),
-    Netlink(WirelessNetlink),
 }
 
 #[derive(Debug)]
@@ -58,7 +58,6 @@ impl Controller {
             }
             _ => {}
         }
-        self.connect_wirless_netlink().await;
     }
 
     #[instrument]
@@ -87,18 +86,6 @@ impl Controller {
         }
     }
 
-    #[instrument]
-    async fn connect_wirless_netlink(&mut self) -> Result<(), ComError> {
-        info!("Attempting to setup wireless netlink connection");
-        match WirelessNetlink::connect().await {
-            Ok(net) => {
-                self.wifi = Some(WirelessAdapter::Netlink(net));
-                Ok(())
-            }
-            Err(e) => Err(e),
-        }
-    }
-
     pub async fn scan(&mut self) -> Result<Vec<AccessPoint>, ComError> {
         match &mut self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => Ok(iwd.get_networks().await?),
@@ -114,7 +101,6 @@ impl Controller {
             Some(WirelessAdapter::Wpa(wpa)) => {
                 wpa.connect_network(ssid, psk).await?;
             }
-            Some(WirelessAdapter::Netlink(netlink)) => {}
             None => {
                 info!("Tried to connect to network without an initalised adapter?");
             }

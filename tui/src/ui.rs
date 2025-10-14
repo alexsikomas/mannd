@@ -7,12 +7,11 @@ use ratatui::{
     widgets::{Block, BorderType, Borders},
 };
 use serde::Deserialize;
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use toml::Value;
 use tracing::{info, instrument};
 
 use crate::{
-    app::{AppState, NetworkState, View, ViewId},
+    app::{AppState, ViewId},
     components::{connection::Connection, menu::MainMenu},
 };
 
