@@ -1,11 +1,10 @@
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Flex, Layout, Rect},
-    style::{Color, Style, Stylize},
+    style::{Style, Stylize},
     text::Line,
     widgets::{Block, Borders, Paragraph, Widget},
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 use crate::{
     app::{SelectableList, Selection},
