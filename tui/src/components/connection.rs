@@ -1,13 +1,10 @@
-use std::sync::Arc;
-
 use ratatui::{
     buffer::Buffer,
-    layout::{self, Constraint, Direction, Flex, Layout, Rect},
+    layout::{Constraint, Direction, Flex, Layout, Rect},
     style::{Style, Stylize},
-    text::{Line, Text},
-    widgets::{Block, Borders, Paragraph, Scrollbar, StatefulWidget, Widget},
+    text::Line,
+    widgets::{Block, Borders, Paragraph, Widget},
 };
-use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::{

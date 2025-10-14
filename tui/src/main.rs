@@ -1,11 +1,6 @@
-use std::{env, fs::OpenOptions, time::Duration};
+use std::{env, fs::OpenOptions};
 
-use ratatui::{
-    DefaultTerminal,
-    crossterm::event::{self, Event, KeyCode},
-};
-use tokio::sync::mpsc::{self, Receiver, UnboundedSender};
-use tracing::{Level, info};
+use tracing::Level;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{FmtSubscriber, layer::SubscriberExt};
 use tui::{app::App, error::TuiError, ui::Theme};

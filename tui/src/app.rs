@@ -15,8 +15,9 @@ use crate::{
 pub struct App;
 
 pub struct AppState {
-    pub view: View,
     is_running: bool,
+    redraw: bool,
+    pub view: View,
     pub network: NetworkState,
 }
 
@@ -25,6 +26,7 @@ impl AppState {
         Self {
             view: View::new(),
             is_running: true,
+            redraw: false,
             network: NetworkState {
                 selected: None,
                 aps: vec![],
@@ -92,50 +94,47 @@ impl App {
         terminal.draw(|f| render(f, &state))?;
 
         while state.is_running {
-            match event::poll(Duration::from_millis(100)) {
-                Ok(v) => match v {
-                    false => {
-                        continue;
+            handle_net_state_msg(&mut state, &mut net_state_rx);
+
+            if event::poll(Duration::from_millis(100))? {
+                if let Ok(evt) = event::read() {
+                    match event(evt) {
+                        Action::SelectUp => {
+                            state.view.selections.change_selection(Action::SelectUp)
+                        }
+                        Action::SelectDown => {
+                            state.view.selections.change_selection(Action::SelectDown)
+                        }
+                        Action::SelectRight => {
+                            state.view.selections.change_selection(Action::SelectRight);
+                        }
+                        Action::SelectLeft => {
+                            state.view.selections.change_selection(Action::SelectLeft);
+                        }
+                        Action::Enter => {
+                            if let Some(action) = state.on_select() {
+                                let _ = event_tx.send(action).await;
+                            }
+                        }
+                        Action::Exit => {
+                            if state.view.active == ViewId::MainMenu {
+                                state.is_running = false;
+                            } else {
+                                state.view.active = ViewId::MainMenu;
+                                state.view.selections = View::main_menu();
+                            }
+                        }
+                        Action::NoOp => {}
+                        _ => {}
                     }
-                    _ => {}
-                },
-                _ => {
-                    continue;
-                }
+                    state.redraw = true;
+                };
             }
 
-            if let Ok(evt) = event::read() {
-                match event(evt) {
-                    Action::SelectUp => state.view.selections.change_selection(Action::SelectUp),
-                    Action::SelectDown => {
-                        state.view.selections.change_selection(Action::SelectDown)
-                    }
-                    Action::SelectRight => {
-                        state.view.selections.change_selection(Action::SelectRight);
-                    }
-                    Action::SelectLeft => {
-                        state.view.selections.change_selection(Action::SelectLeft);
-                    }
-                    Action::Enter => {
-                        if let Some(action) = state.on_select() {
-                            event_tx.send(action).await;
-                        }
-                    }
-                    Action::Exit => {
-                        if state.view.active == ViewId::MainMenu {
-                            state.is_running = false;
-                        } else {
-                            state.view.active = ViewId::MainMenu;
-                            state.view.selections = View::main_menu();
-                        }
-                    }
-                    Action::NoOp => {}
-                    _ => {}
-                }
-            };
-
-            handle_net_state_msg(&mut state, &mut net_state_rx);
-            terminal.draw(|f| render(f, &state))?;
+            if state.redraw {
+                terminal.draw(|f| render(f, &state))?;
+                state.redraw = false;
+            }
         }
 
         Ok(())
@@ -148,12 +147,11 @@ async fn network_handle(
 ) {
     if let Ok(mut controller) = Controller::new().await {
         controller.determine_adapter().await;
-        info!("Start");
         while let Some(action) = event_rx.recv().await {
             match action {
                 NetworkAction::Scan => {
                     if let Ok(aps) = controller.scan().await {
-                        net_state_tx.send(NetworkUpdate::UpdateAps(aps)).await;
+                        let _ = net_state_tx.send(NetworkUpdate::UpdateAps(aps)).await;
                     }
                 }
                 NetworkAction::ForceIwd => {}
@@ -180,6 +178,7 @@ fn handle_net_state_msg(state: &mut AppState, net_state_rx: &mut Receiver<Networ
                 state.view.selections.selected = selected;
             }
         }
+        state.redraw = true;
     };
 }
 
