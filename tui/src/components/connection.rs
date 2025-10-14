@@ -11,7 +11,8 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::{
-    app::{NetworkState, SelectableList, Selection},
+    app::{SelectableList, Selection},
+    network::NetworkState,
     ui::{THEME, Theme},
 };
 

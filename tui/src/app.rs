@@ -1,19 +1,18 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
-use com::{
-    controller::{self, Controller, WirelessAdapter},
-    wireless::common::AccessPoint,
-};
-use crossterm::event::{self, Event, EventStream, KeyCode};
-use futures::stream::StreamExt;
-use ratatui::crossterm::event::poll;
-use tokio::sync::{
-    RwLock,
-    mpsc::{self},
-};
+use com::controller::Controller;
+use crossterm::event::{self};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::info;
 
-use crate::{error::TuiError, ui::render};
+use crate::{
+    error::TuiError,
+    event::{Action, event},
+    network::{NetworkAction, NetworkState, NetworkUpdate},
+    ui::render,
+};
+
+pub struct App;
 
 pub struct AppState {
     pub view: View,
@@ -45,7 +44,14 @@ impl AppState {
 
     fn on_main_menu_select(&mut self, selection: Selection) -> Option<NetworkAction> {
         match selection {
-            Selection::Exit => self.is_running = false,
+            Selection::Exit => {
+                if self.view.active == ViewId::MainMenu {
+                    self.is_running = false
+                } else {
+                    self.view.active = ViewId::MainMenu;
+                    self.view.selections = View::main_menu();
+                }
+            }
             Selection::Connection => {
                 self.view.active = ViewId::Connection;
                 // aps not init yet so has to be done once scan is finished,
@@ -70,48 +76,6 @@ impl AppState {
     }
 }
 
-/// Handles input events, mutates the values in the state
-fn event(event: Event) -> Action {
-    info!("Event: {:?}", event);
-    if let Event::Key(key) = event {
-        match key.code {
-            KeyCode::Up => Action::SelectUp,
-            KeyCode::Down => Action::SelectDown,
-            KeyCode::Right => Action::SelectRight,
-            KeyCode::Left => Action::SelectLeft,
-            KeyCode::Enter => Action::Enter,
-            KeyCode::Esc => Action::Exit,
-            _ => Action::NoOp,
-        }
-    } else {
-        Action::NoOp
-    }
-}
-
-pub enum Action {
-    NoOp,
-    Update,
-    Event(Event),
-
-    SelectUp,
-    SelectDown,
-    SelectLeft,
-    SelectRight,
-    Enter,
-
-    Exit,
-}
-
-#[derive(Debug)]
-pub enum NetworkAction {
-    Scan,
-    ForceIwd,
-    ForceWpa,
-    ForceWifiNetlink,
-}
-
-pub struct App;
-
 impl App {
     pub async fn run() -> Result<(), TuiError> {
         let mut state = AppState::new().await;
@@ -122,23 +86,7 @@ impl App {
 
         // networking thread
         tokio::spawn(async move {
-            if let Ok(mut controller) = Controller::new().await {
-                controller.determine_adapter().await;
-                info!("Start");
-                while let Some(action) = event_rx.recv().await {
-                    match action {
-                        NetworkAction::Scan => {
-                            if let Ok(aps) = controller.scan().await {
-                                net_state_tx.send(NetworkUpdate::UpdateAps(aps)).await;
-                            }
-                        }
-                        NetworkAction::ForceIwd => {}
-                        NetworkAction::ForceWpa => {}
-                        NetworkAction::ForceWifiNetlink => {}
-                        _ => {}
-                    };
-                }
-            }
+            network_handle(&mut event_rx, net_state_tx).await;
         });
 
         terminal.draw(|f| render(f, &state))?;
@@ -186,28 +134,58 @@ impl App {
                 }
             };
 
-            if let Ok(msg) = net_state_rx.try_recv() {
-                match msg {
-                    NetworkUpdate::Select(i) => {
-                        state.network.selected = Some(i);
-                    }
-                    NetworkUpdate::Deselect => {
-                        state.network.selected = None;
-                    }
-                    NetworkUpdate::UpdateAps(aps) => {
-                        state.network.aps = aps;
-                        let selected = state.view.selections.selected.clone();
-                        state.view.selections = View::connection(state.network.aps.len());
-                        state.view.selections.selected = selected;
-                    }
-                }
-            };
+            handle_net_state_msg(&mut state, &mut net_state_rx);
             terminal.draw(|f| render(f, &state))?;
         }
 
         Ok(())
     }
 }
+
+async fn network_handle(
+    event_rx: &mut Receiver<NetworkAction>,
+    net_state_tx: Sender<NetworkUpdate>,
+) {
+    if let Ok(mut controller) = Controller::new().await {
+        controller.determine_adapter().await;
+        info!("Start");
+        while let Some(action) = event_rx.recv().await {
+            match action {
+                NetworkAction::Scan => {
+                    if let Ok(aps) = controller.scan().await {
+                        net_state_tx.send(NetworkUpdate::UpdateAps(aps)).await;
+                    }
+                }
+                NetworkAction::ForceIwd => {}
+                NetworkAction::ForceWpa => {}
+                _ => {}
+            };
+        }
+    }
+}
+
+fn handle_net_state_msg(state: &mut AppState, net_state_rx: &mut Receiver<NetworkUpdate>) {
+    if let Ok(msg) = net_state_rx.try_recv() {
+        match msg {
+            NetworkUpdate::Select(i) => {
+                state.network.selected = Some(i);
+            }
+            NetworkUpdate::Deselect => {
+                state.network.selected = None;
+            }
+            NetworkUpdate::UpdateAps(aps) => {
+                state.network.aps = aps;
+                let selected = state.view.selections.selected.clone();
+                state.view.selections = View::connection(state.network.aps.len());
+                state.view.selections.selected = selected;
+            }
+        }
+    };
+}
+
+/*
+* View/ViewId/Selection Functionality below
+*/
 
 #[derive(PartialEq, Eq)]
 pub enum ViewId {
@@ -372,15 +350,4 @@ impl SelectableList<Selection> {
     fn get_selected_mut(&mut self) -> &mut Selection {
         &mut self.items[self.selected]
     }
-}
-
-pub struct NetworkState {
-    pub selected: Option<usize>,
-    pub aps: Vec<AccessPoint>,
-}
-
-enum NetworkUpdate {
-    Select(usize),
-    Deselect,
-    UpdateAps(Vec<AccessPoint>),
 }
