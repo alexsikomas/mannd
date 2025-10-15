@@ -62,14 +62,26 @@ impl<'a> Widget for Connection<'a> {
 
         network_block.render(main_chunks[0], buf);
 
-        info!("{:?}", self.network.aps);
         for (i, network) in self.network.aps.iter().enumerate() {
             let mut fg_col = theme.foreground.color();
+            // active hover
             if let Selection::Network(val) = self.list.items[self.list.selected] {
                 if i == val[0] {
                     fg_col = theme.accent.color();
                 }
+            } else {
+                // option hover for actions like connect
+                match self.list.items[0] {
+                    Selection::Network(arr) => {
+                        if arr[0] == i {
+                            fg_col = theme.info.color();
+                        }
+                    }
+                    _ => {}
+                }
             }
+
+            // select hover for options like connect
             Paragraph::new(network.ssid.clone())
                 .style(Style::new().fg(fg_col).bold())
                 .render(network_chunks[i], buf);

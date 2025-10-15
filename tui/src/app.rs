@@ -1,14 +1,13 @@
 use std::time::Duration;
 
 use com::controller::Controller;
-use crossterm::event::{self};
+use crossterm::event::{self, Event, KeyCode};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::info;
 
 use crate::{
     error::TuiError,
-    event::{Action, event},
-    network::{NetworkAction, NetworkState, NetworkUpdate},
+    network::{NetworkAction, NetworkState, NetworkUpdate, network_handle},
     ui::render,
 };
 
@@ -40,6 +39,15 @@ impl AppState {
         let selection = self.view.selections.get_selected();
         match self.view.active {
             ViewId::MainMenu => self.on_main_menu_select(selection.clone()),
+            ViewId::Connection => match self.view.selections.get_selected() {
+                Selection::Network(arr) => {
+                    // pressing enter just selecting and going to the 'actions' sidebar
+                    // the same as just pressing right arrow
+                    self.view.selections.change_selection(KeyCode::Right);
+                    None
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -97,26 +105,22 @@ impl App {
             handle_net_state_msg(&mut state, &mut net_state_rx);
 
             if event::poll(Duration::from_millis(100))? {
-                if let Ok(evt) = event::read() {
-                    match event(evt) {
-                        Action::SelectUp => {
-                            state.view.selections.change_selection(Action::SelectUp)
+                if let Ok(Event::Key(key)) = event::read() {
+                    match key.code {
+                        KeyCode::Up => state.view.selections.change_selection(key.code),
+                        KeyCode::Down => state.view.selections.change_selection(key.code),
+                        KeyCode::Right => {
+                            state.view.selections.change_selection(key.code);
                         }
-                        Action::SelectDown => {
-                            state.view.selections.change_selection(Action::SelectDown)
+                        KeyCode::Left => {
+                            state.view.selections.change_selection(key.code);
                         }
-                        Action::SelectRight => {
-                            state.view.selections.change_selection(Action::SelectRight);
-                        }
-                        Action::SelectLeft => {
-                            state.view.selections.change_selection(Action::SelectLeft);
-                        }
-                        Action::Enter => {
+                        KeyCode::Enter => {
                             if let Some(action) = state.on_select() {
                                 let _ = event_tx.send(action).await;
                             }
                         }
-                        Action::Exit => {
+                        KeyCode::Esc => {
                             if state.view.active == ViewId::MainMenu {
                                 state.is_running = false;
                             } else {
@@ -124,7 +128,6 @@ impl App {
                                 state.view.selections = View::main_menu();
                             }
                         }
-                        Action::NoOp => {}
                         _ => {}
                     }
                     state.redraw = true;
@@ -138,27 +141,6 @@ impl App {
         }
 
         Ok(())
-    }
-}
-
-async fn network_handle(
-    event_rx: &mut Receiver<NetworkAction>,
-    net_state_tx: Sender<NetworkUpdate>,
-) {
-    if let Ok(mut controller) = Controller::new().await {
-        controller.determine_adapter().await;
-        while let Some(action) = event_rx.recv().await {
-            match action {
-                NetworkAction::Scan => {
-                    if let Ok(aps) = controller.scan().await {
-                        let _ = net_state_tx.send(NetworkUpdate::UpdateAps(aps)).await;
-                    }
-                }
-                NetworkAction::ForceIwd => {}
-                NetworkAction::ForceWpa => {}
-                _ => {}
-            };
-        }
     }
 }
 
@@ -277,9 +259,9 @@ impl<T> SelectableList<T> {
 }
 
 impl SelectableList<Selection> {
-    fn change_selection(&mut self, action: Action) {
-        match action {
-            Action::SelectUp => {
+    fn change_selection(&mut self, key: KeyCode) {
+        match key {
+            KeyCode::Up => {
                 // check if selection is Network
                 match self.get_selected_mut() {
                     Selection::Network(arr) => {
@@ -303,7 +285,7 @@ impl SelectableList<Selection> {
                     self.selected -= 1;
                 }
             }
-            Action::SelectDown => {
+            KeyCode::Down => {
                 match self.get_selected_mut() {
                     Selection::Network(arr) => {
                         if arr[1] > arr[0] + 1 {
@@ -322,13 +304,13 @@ impl SelectableList<Selection> {
                     self.selected = 0
                 }
             }
-            Action::SelectLeft => match self.get_selected() {
+            KeyCode::Left => match self.get_selected() {
                 Selection::Scan | Selection::Connect | Selection::Edit | Selection::Remove => {
                     self.selected = 0;
                 }
                 _ => {}
             },
-            Action::SelectRight => {
+            KeyCode::Right => {
                 // check if network
                 match self.get_selected() {
                     Selection::Network(_) => {
