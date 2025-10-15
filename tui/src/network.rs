@@ -32,8 +32,10 @@ pub async fn network_handle(
         while let Some(action) = net_action_rx.recv().await {
             match action {
                 NetworkAction::Scan => {
-                    if let Ok(aps) = controller.scan().await {
-                        let _ = net_update_tx.send(NetworkUpdate::UpdateAps(aps)).await;
+                    if let Ok(()) = controller.scan().await {
+                        if let Ok(aps) = controller.get_networks().await {
+                            let _ = net_update_tx.send(NetworkUpdate::UpdateAps(aps)).await;
+                        }
                     }
                 }
                 NetworkAction::ForceIwd => {}

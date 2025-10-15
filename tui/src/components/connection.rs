@@ -44,6 +44,11 @@ impl<'a> Widget for Connection<'a> {
             None => return,
         };
 
+        let mut select_heading_style = Style::new().fg(theme.accent.color());
+        if *self.focused == FocusedConnection::Networks {
+            select_heading_style = Style::new().fg(theme.accent.color()).bold();
+        }
+
         let main_chunks =
             Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)])
                 .split(area);
@@ -61,7 +66,7 @@ impl<'a> Widget for Connection<'a> {
             .title_top(
                 Line::from(" Network Status ")
                     .centered()
-                    .style(Style::new().fg(theme.accent.color())),
+                    .style(select_heading_style),
             );
 
         let network_area = network_block.inner(main_chunks[0]);
@@ -112,6 +117,11 @@ impl<'a> Widget for Connection<'a> {
                 .render(network_chunks[i], buf);
         }
 
+        select_heading_style = Style::new().fg(theme.accent.color());
+        if *self.focused == FocusedConnection::Actions {
+            select_heading_style = Style::new().fg(theme.accent.color()).bold();
+        }
+
         let selection_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .borders(Borders::ALL)
@@ -125,7 +135,7 @@ impl<'a> Widget for Connection<'a> {
             .title_top(
                 Line::from(" Options ")
                     .centered()
-                    .style(Style::new().fg(theme.accent.color())),
+                    .style(select_heading_style),
             );
 
         let selection_area = selection_block.inner(main_chunks[1]);
@@ -148,7 +158,7 @@ impl<'a> Widget for Connection<'a> {
 
             let (mut fg_col, mut bg_col) = (theme.foreground.color(), theme.background.color());
 
-            if i == self.actions.selected {
+            if i == self.actions.selected && *self.focused == FocusedConnection::Actions {
                 fg_col = theme.background.color();
                 bg_col = theme.secondary.color();
             }
@@ -157,7 +167,7 @@ impl<'a> Widget for Connection<'a> {
                 .centered()
                 .style(Style::new().fg(fg_col).bold());
 
-            if i == self.actions.selected {
+            if i == self.actions.selected && *self.focused == FocusedConnection::Actions {
                 let highlight_area = Layout::horizontal([Constraint::Percentage(95)])
                     .flex(Flex::Center)
                     .split(selection_chunks[i])[0];
