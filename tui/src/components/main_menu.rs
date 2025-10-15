@@ -7,16 +7,16 @@ use ratatui::{
 };
 
 use crate::{
-    app::{SelectableList, Selection},
+    state::{MainMenuSelection, SelectableList},
     ui::{THEME, Theme},
 };
 
 pub struct MainMenu<'a> {
-    list: &'a SelectableList<Selection>,
+    list: &'a SelectableList<MainMenuSelection>,
 }
 
 impl<'a> MainMenu<'a> {
-    pub fn new(list: &'a SelectableList<Selection>) -> Self {
+    pub fn new(list: &'a SelectableList<MainMenuSelection>) -> Self {
         Self { list }
     }
 }

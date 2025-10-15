@@ -1,3 +1,4 @@
+use com::wireless::common::{AccessPoint, Security};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Flex, Layout, Rect},
@@ -8,19 +9,28 @@ use ratatui::{
 use tracing::info;
 
 use crate::{
-    app::{SelectableList, Selection},
     network::NetworkState,
+    state::{ConnectionAction, FocusedConnection, SelectableList},
     ui::{THEME, Theme, ThemeColor},
 };
 
 pub struct Connection<'a> {
-    list: &'a SelectableList<Selection>,
-    network: &'a NetworkState,
+    networks: &'a SelectableList<AccessPoint>,
+    actions: &'a SelectableList<ConnectionAction>,
+    focused: &'a FocusedConnection,
 }
 
 impl<'a> Connection<'a> {
-    pub fn new(list: &'a SelectableList<Selection>, network: &'a NetworkState) -> Self {
-        Self { list, network }
+    pub fn new(
+        networks: &'a SelectableList<AccessPoint>,
+        actions: &'a SelectableList<ConnectionAction>,
+        focused: &'a FocusedConnection,
+    ) -> Self {
+        Self {
+            networks,
+            actions,
+            focused,
+        }
     }
 }
 
@@ -51,8 +61,8 @@ impl<'a> Widget for Connection<'a> {
         let network_area = network_block.inner(main_chunks[0]);
         let network_chunks = Layout::new(
             Direction::Vertical,
-            self.network
-                .aps
+            self.networks
+                .items
                 .iter()
                 .map(|_| Constraint::Length(1))
                 .collect::<Vec<_>>(),
@@ -62,31 +72,26 @@ impl<'a> Widget for Connection<'a> {
 
         network_block.render(main_chunks[0], buf);
 
-        for (i, network) in self.network.aps.iter().enumerate() {
-            let mut fg_col = theme.foreground.color();
-            // active hover
-            if let Selection::Network(net_state) = &self.list.items[self.list.selected] {
-                if net_state.selected.is_some() {
-                    if i == net_state.selected.unwrap() {
-                        fg_col = theme.accent.color();
-                    }
-                }
-            } else {
-                // option hover for actions like connect
-                match &self.list.items[0] {
-                    Selection::Network(net_state) => {
-                        if net_state.selected.is_some() {
-                            if i == net_state.selected.unwrap() {
-                                fg_col = theme.info.color();
-                            }
-                        }
-                    }
-                    _ => {}
+        info!("{:?}", self.networks);
+        for (i, network) in self.networks.items.iter().enumerate() {
+            let mut text = network.ssid.clone();
+            let (mut fg_col, bg_col) = (theme.foreground.color(), theme.background.color());
+            if self.networks.selected == i {
+                if *self.focused == FocusedConnection::Networks {
+                    fg_col = theme.accent.color();
+                } else {
+                    fg_col = theme.info.color();
                 }
             }
 
+            match network.security {
+                Security::Psk => {
+                    text.push_str(" ");
+                }
+                _ => {}
+            }
             // select hover for options like connect
-            Paragraph::new(network.ssid.clone())
+            Paragraph::new(text)
                 .style(Style::new().fg(fg_col).bold())
                 .render(network_chunks[i], buf);
         }
@@ -105,7 +110,7 @@ impl<'a> Widget for Connection<'a> {
         selection_block.render(main_chunks[1], buf);
 
         let selection_chunks = Layout::vertical(
-            self.list
+            self.actions
                 .items
                 .iter()
                 .map(|_| Constraint::Length(1))
@@ -114,25 +119,14 @@ impl<'a> Widget for Connection<'a> {
         .flex(Flex::Center)
         .split(selection_area);
 
-        // skip first value as it's for knowing if we are in the left menu
-        for (i, item) in self.list.items.iter().skip(1).enumerate() {
+        for (i, item) in self.actions.items.iter().enumerate() {
             if i >= selection_chunks.len() {
                 break;
             }
 
-            let (mut fg_col, mut bg_col) = (theme.muted.color(), theme.muted.color());
-            // check if a network is actually selected
-            match &self.list.items[0] {
-                Selection::Network(net_state) => {
-                    if net_state.selected.is_some() || self.list.items[i + 1] == Selection::Scan {
-                        fg_col = theme.foreground.color();
-                        bg_col = theme.background.color();
-                    }
-                }
-                _ => {}
-            };
+            let (mut fg_col, mut bg_col) = (theme.foreground.color(), theme.background.color());
 
-            if (i + 1) == self.list.selected {
+            if i == self.actions.selected {
                 fg_col = theme.background.color();
                 bg_col = theme.secondary.color();
             }
@@ -141,7 +135,7 @@ impl<'a> Widget for Connection<'a> {
                 .centered()
                 .style(Style::new().fg(fg_col).bold());
 
-            if i + 1 == self.list.selected {
+            if i == self.actions.selected {
                 let highlight_area = Layout::horizontal([Constraint::Percentage(95)])
                     .flex(Flex::Center)
                     .split(selection_chunks[i])[0];

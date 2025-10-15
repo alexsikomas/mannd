@@ -24,16 +24,16 @@ pub struct NetworkState {
 }
 
 pub async fn network_handle(
-    event_rx: &mut Receiver<NetworkAction>,
-    net_state_tx: Sender<NetworkUpdate>,
+    net_action_rx: &mut Receiver<NetworkAction>,
+    net_update_tx: Sender<NetworkUpdate>,
 ) {
     if let Ok(mut controller) = Controller::new().await {
         controller.determine_adapter().await;
-        while let Some(action) = event_rx.recv().await {
+        while let Some(action) = net_action_rx.recv().await {
             match action {
                 NetworkAction::Scan => {
                     if let Ok(aps) = controller.scan().await {
-                        let _ = net_state_tx.send(NetworkUpdate::UpdateAps(aps)).await;
+                        let _ = net_update_tx.send(NetworkUpdate::UpdateAps(aps)).await;
                     }
                 }
                 NetworkAction::ForceIwd => {}
@@ -41,18 +41,5 @@ pub async fn network_handle(
                 _ => {}
             };
         }
-    }
-}
-
-// state only for the ui selection of networks
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NetworkUiState {
-    pub selected: Option<usize>,
-    pub max: usize,
-}
-
-impl NetworkUiState {
-    pub fn new(selected: Option<usize>, max: usize) -> Self {
-        NetworkUiState { selected, max }
     }
 }

@@ -11,8 +11,9 @@ use toml::Value;
 use tracing::{info, instrument};
 
 use crate::{
-    app::{AppState, ViewId},
-    components::{connection::Connection, menu::MainMenu},
+    app::AppState,
+    components::{connection::Connection, main_menu::MainMenu},
+    state::State,
 };
 
 /// Theme global state, used to bypass needing to
@@ -107,13 +108,17 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &AppState) {
 
     // we give the widget only the necessary selections to
     // render
-    match state.view.active {
-        ViewId::MainMenu => {
-            let menu = MainMenu::new(&state.view.selections);
+    match &state.view_state {
+        State::MainMenu(list) => {
+            let menu = MainMenu::new(&list);
             frame.render_widget(menu, inner_area);
         }
-        ViewId::Connection => {
-            let con = Connection::new(&state.view.selections, &state.network);
+        State::Connection(connection_state) => {
+            let con = Connection::new(
+                &connection_state.networks,
+                &connection_state.actions,
+                &connection_state.focused_list,
+            );
             frame.render_widget(con, inner_area);
         }
         _ => {
