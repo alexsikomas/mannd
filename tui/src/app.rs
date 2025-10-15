@@ -7,7 +7,7 @@ use tracing::info;
 
 use crate::{
     error::TuiError,
-    network::{NetworkAction, NetworkState, NetworkUpdate, network_handle},
+    network::{NetworkAction, NetworkState, NetworkUiState, NetworkUpdate, network_handle},
     ui::render,
 };
 
@@ -43,7 +43,7 @@ impl AppState {
                 Selection::Network(arr) => {
                     // pressing enter just selecting and going to the 'actions' sidebar
                     // the same as just pressing right arrow
-                    self.view.selections.change_selection(KeyCode::Right);
+                    self.view.selections.selected += 1;
                     None
                 }
                 _ => None,
@@ -66,7 +66,7 @@ impl AppState {
                 self.view.active = ViewId::Connection;
                 // aps not init yet so has to be done once scan is finished,
                 // still need this as we need the values
-                self.view.selections = View::connection(0);
+                self.view.selections = View::connection(Some(0), 0);
                 info!(
                     "Updated selections (conn): {:?}, {:?}",
                     self.view.selections,
@@ -156,7 +156,7 @@ fn handle_net_state_msg(state: &mut AppState, net_state_rx: &mut Receiver<Networ
             NetworkUpdate::UpdateAps(aps) => {
                 state.network.aps = aps;
                 let selected = state.view.selections.selected.clone();
-                state.view.selections = View::connection(state.network.aps.len());
+                state.view.selections = View::connection(Some(0), state.network.aps.len());
                 state.view.selections.selected = selected;
             }
         }
@@ -198,9 +198,9 @@ impl View {
         ])
     }
 
-    fn connection(max: usize) -> SelectableList<Selection> {
+    fn connection(selected: Option<usize>, max: usize) -> SelectableList<Selection> {
         SelectableList::new(vec![
-            Selection::Network([0, max]),
+            Selection::Network(NetworkUiState::new(selected, max)),
             Selection::Scan,
             Selection::Connect,
             Selection::Edit,
@@ -209,7 +209,7 @@ impl View {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Selection {
     // main menu
     Connection,
@@ -218,9 +218,7 @@ pub enum Selection {
     Exit,
 
     // connection
-    // first index is for current value, second is for max value.
-    // this represents the number of networks we have
-    Network([usize; 2]),
+    Network(NetworkUiState),
     Scan,
     Connect,
     Edit,
@@ -243,7 +241,7 @@ impl Selection {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SelectableList<T> {
     pub items: Vec<T>,
     pub selected: usize,
@@ -264,18 +262,26 @@ impl SelectableList<Selection> {
             KeyCode::Up => {
                 // check if selection is Network
                 match self.get_selected_mut() {
-                    Selection::Network(arr) => {
-                        if arr[1] == 0 {
+                    Selection::Network(state) => {
+                        if state.max == 0 || state.selected.is_none() {
                             return;
                         }
 
-                        if arr[0] == 0 {
-                            arr[0] = arr[1] - 1;
+                        if state.selected == Some(0) {
+                            state.selected = Some(state.max - 1);
                         } else {
-                            arr[0] -= 1;
+                            state.selected = Some(state.selected.unwrap() - 1);
                         }
                         return;
                     }
+                    Selection::Scan => match &self.items[0] {
+                        Selection::Network(state) => {
+                            if state.selected.is_none() {
+                                return;
+                            }
+                        }
+                        _ => {}
+                    },
                     _ => {}
                 };
 
@@ -287,14 +293,26 @@ impl SelectableList<Selection> {
             }
             KeyCode::Down => {
                 match self.get_selected_mut() {
-                    Selection::Network(arr) => {
-                        if arr[1] > arr[0] + 1 {
-                            arr[0] += 1;
+                    Selection::Network(state) => {
+                        if state.max == 0 || state.selected.is_none() {
+                            return;
+                        }
+
+                        if state.max > state.selected.unwrap() + 1 {
+                            state.selected = Some(state.selected.unwrap() + 1);
                         } else {
-                            arr[0] = 0;
+                            state.selected = Some(0);
                         }
                         return;
                     }
+                    Selection::Scan => match &self.items[0] {
+                        Selection::Network(state) => {
+                            if state.selected.is_none() {
+                                return;
+                            }
+                        }
+                        _ => {}
+                    },
                     _ => {}
                 };
 
@@ -306,6 +324,12 @@ impl SelectableList<Selection> {
             }
             KeyCode::Left => match self.get_selected() {
                 Selection::Scan | Selection::Connect | Selection::Edit | Selection::Remove => {
+                    match &self.items[0] {
+                        Selection::Network(state) => {
+                            self.items = View::connection(Some(0), state.max).items;
+                        }
+                        _ => {}
+                    }
                     self.selected = 0;
                 }
                 _ => {}
@@ -313,7 +337,8 @@ impl SelectableList<Selection> {
             KeyCode::Right => {
                 // check if network
                 match self.get_selected() {
-                    Selection::Network(_) => {
+                    Selection::Network(state) => {
+                        self.items = View::connection(None, state.max).items;
                         self.selected += 1;
                     }
                     _ => {}
