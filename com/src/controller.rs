@@ -4,7 +4,7 @@ use crate::{
     systemd::systemctl,
     wireless::{WifiAdapter, common::AccessPoint, iwd::Iwd, wpa_supplicant::WpaSupplicant},
 };
-use tracing::{info, instrument};
+use tracing::{error, info, instrument};
 use zbus::Connection;
 
 // Netlink not used here as I'm not implementing WPA authentication
@@ -84,9 +84,27 @@ impl Controller {
         }
     }
 
-    pub async fn scan(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+    pub async fn scan(&mut self) -> Result<(), ComError> {
         match &mut self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => Ok(iwd.get_networks().await?),
+            Some(WirelessAdapter::Iwd(iwd)) => {
+                iwd.scan().await?;
+                Ok(())
+            }
+            _ => Err(ComError::NetworkNotFound),
+        }
+    }
+    pub async fn get_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+        match &mut self.wifi {
+            Some(WirelessAdapter::Iwd(iwd)) => {
+                let imv = iwd.get_networks().await;
+                match imv {
+                    Ok(v) => Ok(v),
+                    Err(e) => {
+                        error!("ERROR! {:?}", e);
+                        Err(ComError::NetworkNotFound)
+                    }
+                }
+            }
             _ => Err(ComError::NetworkNotFound),
         }
     }

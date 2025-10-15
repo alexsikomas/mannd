@@ -1,5 +1,6 @@
 use com::wireless::common::AccessPoint;
 use crossterm::event::KeyCode;
+use tracing::info;
 
 use crate::{app::UpdateAction, network::NetworkAction};
 
@@ -121,7 +122,7 @@ impl State {
         State::MainMenu(SelectableList::new(vec![
             MainMenuSelection::Connection,
             MainMenuSelection::Vpn,
-            MainMenuSelection::Connection,
+            MainMenuSelection::Config,
             MainMenuSelection::Exit,
         ]))
     }
@@ -161,7 +162,7 @@ impl State {
                 return Self::handle_main_menu_input(list, key);
             }
             Self::Connection(conn_state) => {
-                Self::handle_connection_input(conn_state, key);
+                return Self::handle_connection_input(conn_state, key);
             }
             Self::Vpn => {}
             Self::Config => {}
@@ -185,7 +186,10 @@ impl State {
         None
     }
 
-    fn handle_connection_input(conn_state: &mut ConnectionState, key: KeyCode) {
+    fn handle_connection_input(
+        conn_state: &mut ConnectionState,
+        key: KeyCode,
+    ) -> Option<UpdateAction> {
         match &conn_state.focused_list {
             FocusedConnection::Actions => match key {
                 KeyCode::Up => {
@@ -197,6 +201,12 @@ impl State {
                 KeyCode::Left => {
                     conn_state.focused_list = FocusedConnection::Networks;
                 }
+                KeyCode::Enter => match conn_state.actions.get_selected_value() {
+                    ConnectionAction::Scan => {
+                        return Some(UpdateAction::Network(NetworkAction::Scan));
+                    }
+                    _ => {}
+                },
                 _ => {}
             },
             FocusedConnection::Networks => match key {
@@ -211,7 +221,8 @@ impl State {
                 }
                 _ => {}
             },
-        }
+        };
+        None
     }
 }
 

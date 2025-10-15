@@ -4,6 +4,7 @@ pub struct AccessPoint {
     pub security: Security,
     pub known: bool,
     pub connected: bool,
+    pub nearby: bool,
 }
 
 #[derive(Debug, Clone)]

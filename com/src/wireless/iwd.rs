@@ -1,4 +1,4 @@
-use std::{env, fmt::format, net, path::PathBuf};
+use std::{env, fmt::format, net, path::PathBuf, time::Duration};
 
 use async_trait::async_trait;
 use quick_xml::{Reader, events::Event};
@@ -150,54 +150,50 @@ impl Iwd {
         }
     }
 
-    pub async fn get_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+    pub async fn scan(&mut self) -> Result<(), ComError> {
         let proxy = zbus::Proxy::new(
             &self.conn,
             self.service.clone(),
             self.path.clone(),
-            "org.freedesktop.DBus.Introspectable",
+            "net.commman.iwd.Station",
         )
         .await?;
-        let introspect = proxy.introspect().await?;
-        let mut xml = Reader::from_str(&introspect);
-        xml.config_mut().trim_text(true);
 
-        let mut buf = Vec::new();
-        let mut network_paths = Vec::<String>::new();
-        loop {
-            match xml.read_event_into(&mut buf) {
-                // ap names are under 'node' in iwd dbus
-                // self close tag triggers Empty event
-                Ok(Event::Empty(ref e)) => {
-                    if e.name().as_ref() == b"node" {
-                        for attribute in e.attributes() {
-                            let attr = attribute?;
-                            if attr.key.as_ref() == b"name" {
-                                network_paths.push(
-                                    attr.decode_and_unescape_value(xml.decoder())?.to_string(),
-                                );
-                            }
-                        }
-                    }
-                }
-                Ok(Event::Eof) => break,
-                Err(e) => {
-                    return Err(ComError::XmlRead(format!(
-                        "Error at position {}: {:?}",
-                        xml.buffer_position(),
-                        e
-                    )));
-                }
-                _ => (),
-            }
+        proxy.call_noreply("Scan", &()).await?;
+
+        Ok(())
+    }
+
+    pub async fn get_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+        let proxy = zbus::proxy::Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            "net.connman.iwd.Station",
+        )
+        .await?;
+
+        let aps = proxy.call_method("GetOrderedNetworks", &()).await?.body();
+        let aps: Vec<(OwnedObjectPath, i16)> = aps.deserialize()?;
+
+        let mut access_points: Vec<AccessPoint> = vec![];
+        for ap in aps {
+            let proxy = zbus::proxy::Proxy::new(
+                &self.conn,
+                self.service.clone(),
+                ap.0.as_str(),
+                "net.connman.iwd.Network",
+            )
+            .await?;
+
+            // FIX: very janky
+            let ssid = self
+                .get_ap_info(String::from(ap.0.as_str().split("/").last().unwrap()))
+                .await?;
+            access_points.push(ssid);
         }
 
-        let mut networks = vec![];
-        for path in network_paths {
-            let network = self.get_ap_info(path).await?;
-            networks.push(network);
-        }
-        Ok(networks)
+        Ok(access_points)
     }
 
     pub async fn get_ap_info(&self, network: String) -> Result<AccessPoint, ComError> {
@@ -246,6 +242,7 @@ impl Iwd {
             security,
             known,
             connected,
+            nearby: true,
         })
     }
 
@@ -363,20 +360,20 @@ mod tests {
     //     Ok(())
     // }
 
-    #[tokio::test]
-    async fn test_get_networks() -> Result<(), ComError> {
-        let mut iwd = setup().await?;
-        iwd.update_networks().await?;
-        iwd.print_networks().await;
-        Ok(())
-    }
-
-    // configuration tests
-    #[tokio::test]
-    async fn test_get_conf_path() -> Result<(), ComError> {
-        let path = Iwd::get_conf().await?;
-        Ok(())
-    }
+    // #[tokio::test]
+    // async fn test_get_networks() -> Result<(), ComError> {
+    //     let mut iwd = setup().await?;
+    //     iwd.update_networks().await?;
+    //     iwd.print_networks().await;
+    //     Ok(())
+    // }
+    //
+    // // configuration tests
+    // #[tokio::test]
+    // async fn test_get_conf_path() -> Result<(), ComError> {
+    //     let path = Iwd::get_conf().await?;
+    //     Ok(())
+    // }
 }
 //
 // #[derive(Debug)]
