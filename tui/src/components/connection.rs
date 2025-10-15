@@ -10,7 +10,7 @@ use tracing::info;
 use crate::{
     app::{SelectableList, Selection},
     network::NetworkState,
-    ui::{THEME, Theme},
+    ui::{THEME, Theme, ThemeColor},
 };
 
 pub struct Connection<'a> {
@@ -65,16 +65,20 @@ impl<'a> Widget for Connection<'a> {
         for (i, network) in self.network.aps.iter().enumerate() {
             let mut fg_col = theme.foreground.color();
             // active hover
-            if let Selection::Network(val) = self.list.items[self.list.selected] {
-                if i == val[0] {
-                    fg_col = theme.accent.color();
+            if let Selection::Network(net_state) = &self.list.items[self.list.selected] {
+                if net_state.selected.is_some() {
+                    if i == net_state.selected.unwrap() {
+                        fg_col = theme.accent.color();
+                    }
                 }
             } else {
                 // option hover for actions like connect
-                match self.list.items[0] {
-                    Selection::Network(arr) => {
-                        if arr[0] == i {
-                            fg_col = theme.info.color();
+                match &self.list.items[0] {
+                    Selection::Network(net_state) => {
+                        if net_state.selected.is_some() {
+                            if i == net_state.selected.unwrap() {
+                                fg_col = theme.info.color();
+                            }
                         }
                     }
                     _ => {}
@@ -110,18 +114,28 @@ impl<'a> Widget for Connection<'a> {
         .flex(Flex::Center)
         .split(selection_area);
 
-        info!("{:?}", self.list.items);
         // skip first value as it's for knowing if we are in the left menu
         for (i, item) in self.list.items.iter().skip(1).enumerate() {
             if i >= selection_chunks.len() {
                 break;
             }
 
-            let (fg_col, bg_col) = if (i + 1) == self.list.selected {
-                (theme.background.color(), theme.secondary.color())
-            } else {
-                (theme.foreground.color(), theme.background.color())
+            let (mut fg_col, mut bg_col) = (theme.muted.color(), theme.muted.color());
+            // check if a network is actually selected
+            match &self.list.items[0] {
+                Selection::Network(net_state) => {
+                    if net_state.selected.is_some() || self.list.items[i + 1] == Selection::Scan {
+                        fg_col = theme.foreground.color();
+                        bg_col = theme.background.color();
+                    }
+                }
+                _ => {}
             };
+
+            if (i + 1) == self.list.selected {
+                fg_col = theme.background.color();
+                bg_col = theme.secondary.color();
+            }
 
             let paragraph = Paragraph::new(item.as_str())
                 .centered()

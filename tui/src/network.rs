@@ -1,5 +1,6 @@
 use com::{controller::Controller, wireless::common::AccessPoint};
 use tokio::sync::mpsc::{Receiver, Sender};
+use tracing::info;
 
 use crate::app::AppState;
 
@@ -40,5 +41,18 @@ pub async fn network_handle(
                 _ => {}
             };
         }
+    }
+}
+
+// state only for the ui selection of networks
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NetworkUiState {
+    pub selected: Option<usize>,
+    pub max: usize,
+}
+
+impl NetworkUiState {
+    pub fn new(selected: Option<usize>, max: usize) -> Self {
+        NetworkUiState { selected, max }
     }
 }
