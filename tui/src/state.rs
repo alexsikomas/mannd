@@ -88,7 +88,11 @@ impl<T> SelectableList<T> {
     }
 
     fn next(&mut self) {
-        if self.selected == self.items.len() {
+        if self.items.len() == 0 {
+            return;
+        }
+
+        if self.selected == self.items.len() - 1 {
             self.selected = 0;
         } else {
             self.selected += 1;

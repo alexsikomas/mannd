@@ -2,6 +2,8 @@
 pub struct AccessPoint {
     pub ssid: String, // name
     pub security: Security,
+    pub known: bool,
+    pub connected: bool,
 }
 
 #[derive(Debug, Clone)]

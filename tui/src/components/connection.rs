@@ -51,7 +51,13 @@ impl<'a> Widget for Connection<'a> {
         let network_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .borders(Borders::ALL)
-            .style(Style::new().fg(theme.primary.color()))
+            .style(
+                Style::new().fg(if *self.focused == FocusedConnection::Networks {
+                    theme.primary.color()
+                } else {
+                    theme.muted.color()
+                }),
+            )
             .title_top(
                 Line::from(" Network Status ")
                     .centered()
@@ -75,6 +81,7 @@ impl<'a> Widget for Connection<'a> {
         info!("{:?}", self.networks);
         for (i, network) in self.networks.items.iter().enumerate() {
             let mut text = network.ssid.clone();
+            // precedence: selected > connected > known > default
             let (mut fg_col, bg_col) = (theme.foreground.color(), theme.background.color());
             if self.networks.selected == i {
                 if *self.focused == FocusedConnection::Networks {
@@ -82,13 +89,22 @@ impl<'a> Widget for Connection<'a> {
                 } else {
                     fg_col = theme.info.color();
                 }
+            } else if self.networks.items[i].connected {
+                fg_col = theme.success.color();
+            } else if self.networks.items[i].known {
+                fg_col = theme.tertiary.color();
             }
 
             match network.security {
                 Security::Psk => {
-                    text.push_str(" ");
+                    text.push_str("  ");
                 }
-                _ => {}
+                Security::Open => {
+                    text.push_str(" (Open)");
+                }
+                Security::Ieee8021x => {
+                    text.push_str(" (802.1x)");
+                }
             }
             // select hover for options like connect
             Paragraph::new(text)
@@ -99,7 +115,13 @@ impl<'a> Widget for Connection<'a> {
         let selection_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .borders(Borders::ALL)
-            .style(Style::new().fg(theme.primary.color()))
+            .style(
+                Style::new().fg(if *self.focused == FocusedConnection::Actions {
+                    theme.primary.color()
+                } else {
+                    theme.muted.color()
+                }),
+            )
             .title_top(
                 Line::from(" Options ")
                     .centered()
