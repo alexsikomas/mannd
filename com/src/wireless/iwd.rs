@@ -7,7 +7,7 @@ use tracing::{info, instrument};
 use zbus::{
     Connection,
     fdo::ObjectManagerProxy,
-    zvariant::{OwnedObjectPath, Value},
+    zvariant::{ObjectPath, OwnedObjectPath, Value},
 };
 
 use crate::{
@@ -223,7 +223,30 @@ impl Iwd {
                 return Err(ComError::InvalidSecurityType);
             }
         }
-        Ok(AccessPoint { ssid, security })
+
+        let mut known = false;
+
+        let known_network: Option<OwnedObjectPath>;
+        match self
+            .get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork")
+            .await
+        {
+            Ok(val) => {
+                known = true;
+            }
+            Err(_) => known_network = None,
+        }
+
+        let connected = self
+            .get_prop_from_proxy::<bool>(&proxy, "Connected")
+            .await?;
+
+        Ok(AccessPoint {
+            ssid,
+            security,
+            known,
+            connected,
+        })
     }
 
     // pub async fn get_network_info(&self, network: String) -> Result<IwdNetwork, ComError> {

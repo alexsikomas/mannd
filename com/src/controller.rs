@@ -17,8 +17,6 @@ pub enum WirelessAdapter {
 #[derive(Debug)]
 pub struct Controller {
     pub wifi: Option<WirelessAdapter>,
-    /// Used for ethernet
-    // pub wired: WiredNetlink,
     connection: Connection,
 }
 
