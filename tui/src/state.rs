@@ -11,6 +11,11 @@ pub enum State {
     Config,
 }
 
+#[derive(Debug)]
+pub enum PromptState {
+    Conenct(ConnectionPromptSelect),
+}
+
 pub enum MainMenuSelection {
     Connection,
     Vpn,
@@ -72,6 +77,13 @@ impl ConnectionAction {
             Self::Remove => "Remove",
         }
     }
+}
+
+#[derive(Debug)]
+pub enum ConnectionPromptSelect {
+    Password,
+    Connect,
+    Back,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -204,6 +216,12 @@ impl State {
                 KeyCode::Enter => match conn_state.actions.get_selected_value() {
                     ConnectionAction::Scan => {
                         return Some(UpdateAction::Network(NetworkAction::Scan));
+                    }
+                    ConnectionAction::Connect => {
+                        info!("ENTER ON CONNECT");
+                        return Some(UpdateAction::OpenPrompt(PromptState::Conenct(
+                            ConnectionPromptSelect::Password,
+                        )));
                     }
                     _ => {}
                 },

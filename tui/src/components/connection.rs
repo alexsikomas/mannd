@@ -9,8 +9,9 @@ use ratatui::{
 use tracing::info;
 
 use crate::{
+    components::net_prompt::NetworkPrompt,
     network::NetworkState,
-    state::{ConnectionAction, FocusedConnection, SelectableList},
+    state::{ConnectionAction, FocusedConnection, PromptState, SelectableList},
     ui::{THEME, Theme, ThemeColor},
 };
 
@@ -18,6 +19,7 @@ pub struct Connection<'a> {
     networks: &'a SelectableList<AccessPoint>,
     actions: &'a SelectableList<ConnectionAction>,
     focused: &'a FocusedConnection,
+    prompt: &'a Option<PromptState>,
 }
 
 impl<'a> Connection<'a> {
@@ -25,11 +27,13 @@ impl<'a> Connection<'a> {
         networks: &'a SelectableList<AccessPoint>,
         actions: &'a SelectableList<ConnectionAction>,
         focused: &'a FocusedConnection,
+        prompt: &'a Option<PromptState>,
     ) -> Self {
         Self {
             networks,
             actions,
             focused,
+            prompt,
         }
     }
 }
@@ -83,7 +87,7 @@ impl<'a> Widget for Connection<'a> {
 
         network_block.render(main_chunks[0], buf);
 
-        info!("{:?}", self.networks);
+        // Networks (left)
         for (i, network) in self.networks.items.iter().enumerate() {
             let mut text = network.ssid.clone();
             // precedence: selected > connected > known > default
@@ -118,20 +122,20 @@ impl<'a> Widget for Connection<'a> {
         }
 
         select_heading_style = Style::new().fg(theme.accent.color());
-        if *self.focused == FocusedConnection::Actions {
+        if *self.focused == FocusedConnection::Actions && self.prompt.is_none() {
             select_heading_style = Style::new().fg(theme.accent.color()).bold();
         }
 
         let selection_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .borders(Borders::ALL)
-            .style(
-                Style::new().fg(if *self.focused == FocusedConnection::Actions {
+            .style(Style::new().fg(
+                if *self.focused == FocusedConnection::Actions && self.prompt.is_none() {
                     theme.primary.color()
                 } else {
                     theme.muted.color()
-                }),
-            )
+                },
+            ))
             .title_top(
                 Line::from(" Options ")
                     .centered()
@@ -151,6 +155,7 @@ impl<'a> Widget for Connection<'a> {
         .flex(Flex::Center)
         .split(selection_area);
 
+        // Action labels (right)
         for (i, item) in self.actions.items.iter().enumerate() {
             if i >= selection_chunks.len() {
                 break;
@@ -178,6 +183,22 @@ impl<'a> Widget for Connection<'a> {
             }
 
             paragraph.render(selection_chunks[i], buf);
+        }
+
+        if let Some(prompt) = self.prompt {
+            match prompt {
+                PromptState::Conenct(selected) => {
+                    let prompt_layout = Layout::vertical([Constraint::Percentage(40)])
+                        .flex(Flex::Center)
+                        .split(
+                            Layout::horizontal([Constraint::Percentage(30)])
+                                .flex(Flex::Center)
+                                .split(area)[0],
+                        );
+                    NetworkPrompt::new(&self.networks.items[self.networks.selected], selected)
+                        .render(prompt_layout[0], buf);
+                }
+            }
         }
     }
 }
