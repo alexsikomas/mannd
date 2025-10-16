@@ -187,7 +187,7 @@ impl<'a> Widget for Connection<'a> {
 
         if let Some(prompt) = self.prompt {
             match prompt {
-                PromptState::Conenct(selected) => {
+                PromptState::Connect(selected) => {
                     let prompt_layout = Layout::vertical([Constraint::Percentage(40)])
                         .flex(Flex::Center)
                         .split(
