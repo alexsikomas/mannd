@@ -58,7 +58,19 @@ impl App {
 
             if event::poll(Duration::from_millis(100))? {
                 if let Ok(Event::Key(key)) = event::read() {
-                    match state.view_state.handle_input(key.code) {
+                    let mut action: Option<UpdateAction> = None;
+
+                    // are we dealing with prompt or normal menu?
+                    match &mut state.prompt_view {
+                        Some(prompt) => {
+                            action = prompt.handle_input(key.code);
+                        }
+                        None => {
+                            action = state.view_state.handle_input(key.code);
+                        }
+                    };
+
+                    match action {
                         Some(UpdateAction::Network(action)) => {
                             let _ = net_action_tx.send(action).await;
                         }
@@ -78,7 +90,6 @@ impl App {
             }
 
             if state.redraw {
-                info!("{:?}", state.prompt_view);
                 terminal.draw(|f| render(f, &state))?;
                 state.redraw = false;
             }

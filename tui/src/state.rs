@@ -13,7 +13,7 @@ pub enum State {
 
 #[derive(Debug)]
 pub enum PromptState {
-    Conenct(ConnectionPromptSelect),
+    Connect(ConnectionPrompt),
 }
 
 pub enum MainMenuSelection {
@@ -86,6 +86,21 @@ pub enum ConnectionPromptSelect {
     Back,
 }
 
+#[derive(Debug)]
+pub struct ConnectionPrompt {
+    pub password: String,
+    pub select: ConnectionPromptSelect,
+}
+
+impl ConnectionPrompt {
+    fn new() -> Self {
+        Self {
+            password: String::new(),
+            select: ConnectionPromptSelect::Password,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SelectableList<T> {
     pub items: Vec<T>,
@@ -149,11 +164,12 @@ impl State {
                 State::MainMenu(_) => {
                     return Some(UpdateAction::Exit);
                 }
-                State::Connection(_) => {
+                State::Connection(conn_state) => {
                     *self = State::main_menu();
                 }
                 _ => {}
             }
+            return None;
         }
 
         match self {
@@ -218,9 +234,8 @@ impl State {
                         return Some(UpdateAction::Network(NetworkAction::Scan));
                     }
                     ConnectionAction::Connect => {
-                        info!("ENTER ON CONNECT");
-                        return Some(UpdateAction::OpenPrompt(PromptState::Conenct(
-                            ConnectionPromptSelect::Password,
+                        return Some(UpdateAction::OpenPrompt(PromptState::Connect(
+                            ConnectionPrompt::new(),
                         )));
                     }
                     _ => {}
@@ -236,6 +251,32 @@ impl State {
                 }
                 KeyCode::Right | KeyCode::Enter => {
                     conn_state.focused_list = FocusedConnection::Actions;
+                }
+                _ => {}
+            },
+        };
+        None
+    }
+}
+
+impl PromptState {
+    pub fn handle_input(&mut self, key: KeyCode) -> Option<UpdateAction> {
+        match key {
+            KeyCode::Esc => {
+                return Some(UpdateAction::ExitPrompt);
+            }
+            _ => {}
+        };
+
+        match self {
+            PromptState::Connect(conn) => match key {
+                KeyCode::Backspace => {
+                    if conn.password.len() > 0 {
+                        conn.password.pop();
+                    }
+                }
+                KeyCode::Char(c) => {
+                    conn.password.push(c);
                 }
                 _ => {}
             },
