@@ -8,7 +8,7 @@ use tracing::info;
 use crate::{
     error::TuiError,
     network::{NetworkAction, NetworkState, NetworkUpdate, network_handle},
-    state::{ConnectionState, State},
+    state::{ConnectionState, PromptState, State},
     ui::render,
 };
 
@@ -18,6 +18,8 @@ pub struct AppState {
     is_running: bool,
     redraw: bool,
     pub view_state: State,
+    // for prompts inside of a view state
+    pub prompt_view: Option<PromptState>,
     pub network: NetworkState,
 }
 
@@ -27,6 +29,7 @@ impl AppState {
             view_state: State::main_menu(),
             is_running: true,
             redraw: false,
+            prompt_view: None,
             network: NetworkState {
                 selected: None,
                 aps: vec![],
@@ -62,6 +65,12 @@ impl App {
                         Some(UpdateAction::Exit) => {
                             state.is_running = false;
                         }
+                        Some(UpdateAction::OpenPrompt(prompt)) => {
+                            state.prompt_view = Some(prompt);
+                        }
+                        Some(UpdateAction::ExitPrompt) => {
+                            state.prompt_view = None;
+                        }
                         None => {}
                     };
                 };
@@ -69,6 +78,7 @@ impl App {
             }
 
             if state.redraw {
+                info!("{:?}", state.prompt_view);
                 terminal.draw(|f| render(f, &state))?;
                 state.redraw = false;
             }
@@ -99,5 +109,7 @@ fn handle_net_state_msg(state: &mut AppState, net_update_rx: &mut Receiver<Netwo
 
 pub enum UpdateAction {
     Network(NetworkAction),
+    OpenPrompt(PromptState),
+    ExitPrompt,
     Exit,
 }
