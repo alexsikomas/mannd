@@ -114,7 +114,6 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &AppState) {
             frame.render_widget(menu, inner_area);
         }
         State::Connection(connection_state) => {
-            info!("{:?}", state.prompt_view);
             let con = Connection::new(
                 &connection_state.networks,
                 &connection_state.actions,
