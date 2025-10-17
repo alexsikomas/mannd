@@ -116,7 +116,7 @@ impl Controller {
         }
     }
 
-    async fn ssid_connect(&self, ssid: &str, psk: &str) -> Result<(), ComError> {
+    async fn ssid_connect(&self, ssid: &'static str, psk: &'static str) -> Result<(), ComError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 iwd.connect_network(ssid, psk).await?;

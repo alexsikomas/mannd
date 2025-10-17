@@ -1,19 +1,17 @@
-use std::{env, fmt::format, net, path::PathBuf, time::Duration};
-
 use async_trait::async_trait;
-use quick_xml::{Reader, events::Event};
-use tokio::fs::{self, OpenOptions};
+use quick_xml::events::BytesCData;
 use tracing::{info, instrument};
 use zbus::{
-    Connection,
+    Connection, Proxy,
     fdo::ObjectManagerProxy,
-    zvariant::{ObjectPath, OwnedObjectPath, Value},
+    zvariant::{OwnedObjectPath, Value},
 };
 
 use crate::{
     error::ComError,
     wireless::{
         WifiAdapter,
+        agent::IwdAgent,
         common::{AccessPoint, Security},
     },
 };
@@ -22,7 +20,10 @@ use crate::{
 pub struct Iwd {
     path: String,
     service: String,
+    /// System connection
     conn: Connection,
+    /// Session connection needed for agent
+    session_conn: Connection,
 }
 
 #[async_trait]
@@ -34,10 +35,18 @@ impl WifiAdapter for Iwd {
     async fn new(conn: Connection) -> Result<Self, ComError> {
         info!("Attempting to create iwd dbus connection");
         let service = "net.connman.iwd".to_string();
+        let session_conn = Connection::session().await?;
+        session_conn.request_name("org.mannd.IwdAgent").await?;
+
+        session_conn
+            .object_server()
+            .at("/org/mannd/IwdAgent", IwdAgent::new())
+            .await?;
 
         match Self::find_adapter_path(&conn, &service).await {
             Ok(Some(path)) => Ok(Self {
                 conn,
+                session_conn,
                 service,
                 path,
             }),
@@ -54,8 +63,16 @@ impl WifiAdapter for Iwd {
     ///
     /// Since iwd does not allow connecting via BSSID the connection band is determined by signal
     /// strength internally by iwd, this can be tweaked in the iwd configuration file
-    async fn connect_network(&self, ssid: &str, psk: &str) -> Result<(), ComError> {
-        todo!()
+    async fn connect_network(&self, ssid: &'static str, psk: &'static str) -> Result<(), ComError> {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            format!("{}/{}", self.path.clone(), Self::ssid_to_hex(ssid)),
+            "net.connman.iwd.Network",
+        )
+        .await?;
+
+        Ok(())
     }
 
     /// Disconnects from the current WiFi network, does not remove the network
@@ -76,7 +93,7 @@ impl WifiAdapter for Iwd {
 
     /// Adds a network but does not connect to it; used by `connect_network` before it connects to
     /// a network
-    async fn add_network(&self, ssid: &str, psk: &str) -> Result<(), ComError> {
+    async fn add_network(&self, ssid: &'static str, psk: &'static str) -> Result<(), ComError> {
         todo!()
     }
 
@@ -150,29 +167,32 @@ impl Iwd {
         }
     }
 
-    pub async fn scan(&mut self) -> Result<(), ComError> {
-        let proxy = zbus::Proxy::new(
+    fn ssid_to_hex(ssid: &'static str) -> String {
+        let bytes = ssid.as_bytes();
+        bytes
+            .into_iter()
+            .map(|b| format!("{:X}", b).as_str().to_owned())
+            .collect()
+    }
+
+    async fn get_interface_proxy(&self, interface: &'static str) -> Result<Proxy, ComError> {
+        Ok(Proxy::new(
             &self.conn,
             self.service.clone(),
             self.path.clone(),
-            "net.connman.iwd.Station",
+            format!("net.connman.iwd.{}", interface),
         )
-        .await?;
+        .await?)
+    }
 
+    pub async fn scan(&mut self) -> Result<(), ComError> {
+        let proxy = self.get_interface_proxy("Station").await?;
         proxy.call_noreply("Scan", &()).await?;
-
         Ok(())
     }
 
     pub async fn get_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
-        let proxy = zbus::proxy::Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            self.path.clone(),
-            "net.connman.iwd.Station",
-        )
-        .await?;
-
+        let proxy = self.get_interface_proxy("Station").await?;
         let aps = proxy.call_method("GetOrderedNetworks", &()).await?.body();
         let aps: Vec<(OwnedObjectPath, i16)> = aps.deserialize()?;
 
@@ -245,98 +265,6 @@ impl Iwd {
             nearby: true,
         })
     }
-
-    // pub async fn get_network_info(&self, network: String) -> Result<IwdNetwork, ComError> {
-    //     let proxy = zbus::Proxy::new(
-    //         &self.conn,
-    //         self.service.clone(),
-    //         format!("{}/{}", self.path.clone(), network),
-    //         "net.connman.iwd.Network",
-    //     )
-    //     .await?;
-    //
-    //     let ess = self
-    //         .get_prop_from_proxy::<Vec<OwnedObjectPath>>(&proxy, "ExtendedServiceSet")
-    //         .await?;
-    //
-    //     let connected = self
-    //         .get_prop_from_proxy::<bool>(&proxy, "Connected")
-    //         .await?;
-    //
-    //     let device = self
-    //         .get_prop_from_proxy::<OwnedObjectPath>(&proxy, "Device")
-    //         .await?;
-    //
-    //     let known_network: Option<OwnedObjectPath>;
-    //     match self
-    //         .get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork")
-    //         .await
-    //     {
-    //         Ok(known) => {
-    //             known_network = Some(known);
-    //         }
-    //         Err(_) => known_network = None,
-    //     }
-    //
-    //     let name = self.get_prop_from_proxy::<String>(&proxy, "Name").await?;
-    //
-    //     let security: Security;
-    //     match self
-    //         .get_prop_from_proxy::<String>(&proxy, "Type")
-    //         .await?
-    //         .as_str()
-    //     {
-    //         "psk" => security = Security::Psk,
-    //         "open" => security = Security::Open,
-    //         "8021x" => security = Security::Ieee8021x,
-    //         _ => {
-    //             return Err(ComError::InvalidSecurityType);
-    //         }
-    //     }
-    //
-    //     Ok(IwdNetwork {
-    //         ap: AccessPoint {
-    //             ssid: name,
-    //             security,
-    //         },
-    //         ess,
-    //         connected,
-    //         device,
-    //         known_network,
-    //     })
-    // }
-
-    //     async fn print_networks(&self) -
-    //                         net_state_tx.send(NetworkUpdate::UpdateAps())
-    //                 // not found conf
-    //                 if fs::metadata(v).await.is_err() {
-    //                     let file = OpenOptions::new()
-    //                         .write(true)
-    //                         .read(true)
-    //                         .create(true)
-    //                         .open(&conf_path)
-    //                         .await?;
-    //                 }
-    //                 return Ok(PathBuf::from(conf_path));
-    //             }
-    //             // no env
-    //             Err(e) => {
-    //                 let mut conf_path = PathBuf::from(iwd_path);
-    //                 conf_path.push("main.conf");
-    //                 if fs::metadata(&conf_path).await.is_err() {
-    //                     // /etc/iwd could possibly not exist
-    //                     fs::create_dir_all(iwd_path).await?;
-    //                     OpenOptions::new()
-    //                         .write(true)
-    //                         .read(true)
-    //                         .create(true)
-    //                         .open(&conf_path)
-    //                         .await?;
-    //                 }
-    //                 return Ok(PathBuf::from(conf_path));
-    //             }
-    //         }
-    //     }
 }
 
 #[cfg(test)]

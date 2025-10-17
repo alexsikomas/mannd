@@ -11,7 +11,7 @@ impl WifiAdapter for WpaSupplicant {
     async fn new(conn: Connection) -> Result<Self, ComError> {
         todo!()
     }
-    async fn connect_network(&self, ssid: &str, psk: &str) -> Result<(), ComError> {
+    async fn connect_network(&self, ssid: &'static str, psk: &'static str) -> Result<(), ComError> {
         todo!()
     }
     async fn disconnect(&self) -> Result<(), ComError> {
@@ -23,7 +23,7 @@ impl WifiAdapter for WpaSupplicant {
     async fn list_configured_networks(&self) -> Result<Vec<String>, ComError> {
         todo!()
     }
-    async fn add_network(&self, ssid: &str, psk: &str) -> Result<(), ComError> {
+    async fn add_network(&self, ssid: &'static str, psk: &'static str) -> Result<(), ComError> {
         todo!()
     }
     async fn remove_network(&self, ssid: &str) -> Result<(), ComError> {
