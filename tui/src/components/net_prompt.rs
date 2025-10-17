@@ -76,11 +76,18 @@ impl<'a> Widget for NetworkPrompt<'a> {
 
         Paragraph::new(ssid_line).render(ssid_area, buf);
 
+        let password_box_style = if matches!(self.selected.select, ConnectionPromptSelect::Password)
+        {
+            Style::new().fg(theme.accent.color())
+        } else {
+            Style::new().fg(theme.muted.color())
+        };
+
         let password_box = Block::new()
             .title_top(Line::from(" Password ").style(Style::new().fg(theme.tertiary.color())))
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .style(Style::new().fg(theme.accent.color()));
+            .style(password_box_style);
 
         let password_text_area = Layout::horizontal([Constraint::Percentage(98)])
             .flex(Flex::Center)
@@ -89,5 +96,58 @@ impl<'a> Widget for NetworkPrompt<'a> {
         password_box.render(password_area, buf);
         let password_text = Paragraph::new("*".repeat(self.selected.password.len()));
         password_text.render(password_text_area, buf);
+
+        let connect_box_style = if matches!(self.selected.select, ConnectionPromptSelect::Connect) {
+            Style::new().fg(theme.accent.color())
+        } else {
+            Style::new().fg(theme.muted.color())
+        };
+
+        let connect_block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .style(connect_box_style);
+
+        let back_block_style = if matches!(self.selected.select, ConnectionPromptSelect::Back) {
+            Style::new().fg(theme.accent.color())
+        } else {
+            Style::new().fg(theme.muted.color())
+        };
+
+        let back_block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .style(back_block_style);
+
+        let button_layouts = Layout::vertical([Constraint::Min(0), Constraint::Length(3)])
+            .flex(Flex::Center)
+            .split(
+                Layout::horizontal([Constraint::Min(0), Constraint::Percentage(60)])
+                    .flex(Flex::Center)
+                    .split(inner_area)[1],
+            );
+
+        let button_layouts = Layout::horizontal([
+            Constraint::Percentage(20),
+            Constraint::Percentage(30),
+            Constraint::Percentage(1),
+        ])
+        .flex(Flex::End)
+        .spacing(1)
+        .split(button_layouts[1]);
+
+        Line::from("Connect")
+            .style(Style::new().fg(theme.muted.color()))
+            .centered()
+            .render(connect_block.inner(button_layouts[1]), buf);
+
+        connect_block.render(button_layouts[1], buf);
+
+        Line::from("Back")
+            .style(Style::new().fg(theme.muted.color()))
+            .centered()
+            .render(back_block.inner(button_layouts[0]), buf);
+
+        back_block.render(button_layouts[0], buf);
     }
 }
