@@ -155,7 +155,7 @@ impl Iwd {
             &self.conn,
             self.service.clone(),
             self.path.clone(),
-            "net.commman.iwd.Station",
+            "net.connman.iwd.Station",
         )
         .await?;
 

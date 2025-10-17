@@ -87,7 +87,14 @@ impl Controller {
     pub async fn scan(&mut self) -> Result<(), ComError> {
         match &mut self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
-                iwd.scan().await?;
+                match iwd.scan().await {
+                    Ok(_) => {
+                        info!("EVERYTHING WENT FINE WHILE SCANNING");
+                    }
+                    Err(com) => {
+                        info!("{:?} ERROR WHILE SCANNING", com);
+                    }
+                }
                 Ok(())
             }
             _ => Err(ComError::NetworkNotFound),

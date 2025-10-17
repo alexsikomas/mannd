@@ -270,8 +270,17 @@ impl PromptState {
 
         match self {
             PromptState::Connect(conn) => match key {
+                KeyCode::Enter => match conn.select {
+                    ConnectionPromptSelect::Connect => {}
+                    ConnectionPromptSelect::Back => {
+                        return Some(UpdateAction::ExitPrompt);
+                    }
+                    _ => {}
+                },
                 KeyCode::Backspace => {
-                    if conn.password.len() > 0 {
+                    if conn.password.len() > 0
+                        && matches!(conn.select, ConnectionPromptSelect::Password)
+                    {
                         conn.password.pop();
                     }
                 }
