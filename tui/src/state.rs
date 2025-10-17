@@ -275,9 +275,37 @@ impl PromptState {
                         conn.password.pop();
                     }
                 }
-                KeyCode::Char(c) => {
-                    conn.password.push(c);
-                }
+                KeyCode::Up => match conn.select {
+                    ConnectionPromptSelect::Password => {
+                        conn.select = ConnectionPromptSelect::Connect;
+                    }
+                    _ => {
+                        conn.select = ConnectionPromptSelect::Password;
+                    }
+                },
+                KeyCode::Down => match conn.select {
+                    ConnectionPromptSelect::Password => {
+                        conn.select = ConnectionPromptSelect::Connect;
+                    }
+                    _ => {
+                        conn.select = ConnectionPromptSelect::Password;
+                    }
+                },
+                KeyCode::Left | KeyCode::Right => match conn.select {
+                    ConnectionPromptSelect::Password => {}
+                    ConnectionPromptSelect::Connect => {
+                        conn.select = ConnectionPromptSelect::Back;
+                    }
+                    ConnectionPromptSelect::Back => {
+                        conn.select = ConnectionPromptSelect::Connect;
+                    }
+                },
+                KeyCode::Char(c) => match conn.select {
+                    ConnectionPromptSelect::Password => {
+                        conn.password.push(c);
+                    }
+                    _ => {}
+                },
                 _ => {}
             },
         };
