@@ -4,7 +4,7 @@ use tracing::{info, instrument};
 use zbus::{
     Connection, Proxy,
     fdo::ObjectManagerProxy,
-    zvariant::{OwnedObjectPath, Value},
+    zvariant::{ObjectPath, OwnedObjectPath, Value},
 };
 
 use crate::{
@@ -22,8 +22,6 @@ pub struct Iwd {
     service: String,
     /// System connection
     conn: Connection,
-    /// Session connection needed for agent
-    session_conn: Connection,
 }
 
 #[async_trait]
@@ -35,18 +33,20 @@ impl WifiAdapter for Iwd {
     async fn new(conn: Connection) -> Result<Self, ComError> {
         info!("Attempting to create iwd dbus connection");
         let service = "net.connman.iwd".to_string();
-        let session_conn = Connection::session().await?;
-        session_conn.request_name("org.mannd.IwdAgent").await?;
+        match conn.request_name("org.mannd.IwdAgent").await {
+            Ok(v) => {}
+            Err(e) => {
+                info!("{e}");
+            }
+        }
 
-        session_conn
-            .object_server()
+        conn.object_server()
             .at("/org/mannd/IwdAgent", IwdAgent::new())
             .await?;
 
         match Self::find_adapter_path(&conn, &service).await {
             Ok(Some(path)) => Ok(Self {
                 conn,
-                session_conn,
                 service,
                 path,
             }),
@@ -173,6 +173,57 @@ impl Iwd {
             .into_iter()
             .map(|b| format!("{:X}", b).as_str().to_owned())
             .collect()
+    }
+
+    pub async fn register_agent(&self) -> Result<(), ComError> {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            "/net/connman/iwd",
+            "net.connman.iwd.AgentManager",
+        )
+        .await?;
+
+        let agent_path = "/org/mannd/IwdAgent";
+
+        let agent_objpath = zbus::zvariant::OwnedObjectPath::try_from(agent_path).unwrap();
+
+        let resp: Result<(), zbus::Error> = proxy.call("RegisterAgent", &(agent_objpath)).await;
+        match resp {
+            Ok(_) => {
+                info!("Agent registration call successful.");
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!("Error registering agent: {:?}", e);
+                Err(ComError::OperationFailed(e.to_string()))
+            }
+        }
+    }
+
+    pub async fn unregister_agent(&self) -> Result<(), ComError> {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            "/net/connman/iwd",
+            "net.connman.iwd.AgentManager",
+        )
+        .await?;
+
+        let agent_path = "/org/mannd/IwdAgent";
+        let agent_objpath = zbus::zvariant::OwnedObjectPath::try_from(agent_path).unwrap();
+
+        let resp: Result<(), zbus::Error> = proxy.call("UnregisterAgent", &(agent_objpath)).await;
+        match resp {
+            Ok(_) => {
+                info!("Sucessfully unregisted agent");
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!("Error unregistering agent: {:?}", e);
+                Err(ComError::OperationFailed(e.to_string()))
+            }
+        }
     }
 
     async fn get_interface_proxy(&self, interface: &'static str) -> Result<Proxy, ComError> {
