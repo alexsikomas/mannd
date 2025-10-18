@@ -7,11 +7,10 @@ edition = "2024"
 async-trait = "0.1.89"
 neli = { version = "0.7.1", features = ["async", "tokio"] }
 neli-proc-macros = "0.2.1"
-quick-xml = { version = "0.38.3", features = ["async-tokio"] }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-zbus = { version = "5.10.0", features = ["tokio"] }
+zbus = { version = "5.10.0", default-features = false, features = ["tokio"] }
 zbus_systemd = { version = "0.25701.0", features = [
   "network1",
   "resolve1",

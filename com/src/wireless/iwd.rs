@@ -1,9 +1,11 @@
+use std::sync::{Arc, Mutex};
+
 use async_trait::async_trait;
-use quick_xml::events::BytesCData;
 use tracing::{info, instrument};
 use zbus::{
     Connection, Proxy,
     fdo::ObjectManagerProxy,
+    names::OwnedUniqueName,
     zvariant::{ObjectPath, OwnedObjectPath, Value},
 };
 
@@ -11,7 +13,7 @@ use crate::{
     error::ComError,
     wireless::{
         WifiAdapter,
-        agent::IwdAgent,
+        agent::{AgentState, IwdAgent, IwdAgentMsg},
         common::{AccessPoint, Security},
     },
 };
@@ -22,6 +24,8 @@ pub struct Iwd {
     service: String,
     /// System connection
     conn: Connection,
+    unique_name: OwnedUniqueName,
+    agent_state: Arc<Mutex<AgentState>>,
 }
 
 #[async_trait]
@@ -31,24 +35,34 @@ impl WifiAdapter for Iwd {
     /// `Controller` between processes.
     #[instrument]
     async fn new(conn: Connection) -> Result<Self, ComError> {
-        info!("Attempting to create iwd dbus connection");
         let service = "net.connman.iwd".to_string();
-        match conn.request_name("org.mannd.IwdAgent").await {
-            Ok(v) => {}
-            Err(e) => {
-                info!("{e}");
+
+        let unique_name: OwnedUniqueName;
+        let agent_state = Arc::new(Mutex::new(AgentState::new()));
+
+        match &conn.unique_name() {
+            Some(name) => {
+                unique_name = name.clone().to_owned();
+                &conn
+                    .object_server()
+                    .at("/org/mannd/IwdAgent", IwdAgent::new(agent_state.clone()))
+                    .await?;
+            }
+            None => {
+                tracing::error!("Did not get a unique name?");
+                return Err(ComError::OperationFailed(
+                    "Could not get a unique name".to_string(),
+                ));
             }
         }
-
-        conn.object_server()
-            .at("/org/mannd/IwdAgent", IwdAgent::new())
-            .await?;
 
         match Self::find_adapter_path(&conn, &service).await {
             Ok(Some(path)) => Ok(Self {
                 conn,
                 service,
                 path,
+                unique_name,
+                agent_state,
             }),
             Err(e) => Err(ComError::AdapterNotFound(format!(
                 "Could not find an adapter, is iwd installed?\n Error: {e}"
@@ -63,16 +77,25 @@ impl WifiAdapter for Iwd {
     ///
     /// Since iwd does not allow connecting via BSSID the connection band is determined by signal
     /// strength internally by iwd, this can be tweaked in the iwd configuration file
-    async fn connect_network(&self, ssid: &'static str, psk: &'static str) -> Result<(), ComError> {
+    async fn connect_network(&self, ssid: String, psk: String) -> Result<(), ComError> {
+        self.set_password(psk);
+
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            format!("{}/{}", self.path.clone(), Self::ssid_to_hex(ssid)),
+            format!("{}/{}_psk", self.path.clone(), Self::ssid_to_hex(ssid)),
             "net.connman.iwd.Network",
         )
         .await?;
 
-        Ok(())
+        let resp: Result<(), zbus::Error> = proxy.call("Connect", &()).await;
+        match resp {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                tracing::error!("Error occured: {e}");
+                Err(ComError::OperationFailed(format!("{}", e)))
+            }
+        }
     }
 
     /// Disconnects from the current WiFi network, does not remove the network
@@ -105,6 +128,11 @@ impl WifiAdapter for Iwd {
 
 // Networking related
 impl Iwd {
+    fn set_password(&self, psk: String) {
+        let mut state = self.agent_state.lock().unwrap();
+        state.password = Some(psk);
+    }
+
     /// Returns the object path of the iwd station, currently only returns the first station
     async fn find_adapter_path(
         conn: &Connection,
@@ -167,11 +195,11 @@ impl Iwd {
         }
     }
 
-    fn ssid_to_hex(ssid: &'static str) -> String {
+    fn ssid_to_hex(ssid: String) -> String {
         let bytes = ssid.as_bytes();
         bytes
             .into_iter()
-            .map(|b| format!("{:X}", b).as_str().to_owned())
+            .map(|b| format!("{:x}", b).as_str().to_owned())
             .collect()
     }
 

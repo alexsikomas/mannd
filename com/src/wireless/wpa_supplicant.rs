@@ -11,7 +11,7 @@ impl WifiAdapter for WpaSupplicant {
     async fn new(conn: Connection) -> Result<Self, ComError> {
         todo!()
     }
-    async fn connect_network(&self, ssid: &'static str, psk: &'static str) -> Result<(), ComError> {
+    async fn connect_network(&self, ssid: String, psk: String) -> Result<(), ComError> {
         todo!()
     }
     async fn disconnect(&self) -> Result<(), ComError> {

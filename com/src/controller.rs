@@ -5,7 +5,7 @@ use crate::{
     wireless::{WifiAdapter, common::AccessPoint, iwd::Iwd, wpa_supplicant::WpaSupplicant},
 };
 use tracing::{error, info, instrument};
-use zbus::Connection;
+use zbus::{Connection, conn::Builder};
 
 // Netlink not used here as I'm not implementing WPA authentication
 #[derive(Debug)]
@@ -23,10 +23,7 @@ pub struct Controller {
 impl Controller {
     #[instrument]
     pub async fn new() -> Result<Self, ComError> {
-        info!("Creating controller");
         let conn = zbus::Connection::system().await?;
-        info!("Zbus connection successful");
-        // let mut wired = WiredNetlink::connect().await?;
 
         Ok(Self {
             wifi: None,
@@ -60,12 +57,10 @@ impl Controller {
 
     #[instrument]
     async fn connect_iwd(&mut self) -> Result<(), ComError> {
-        info!("Attempting to setup iwd connection");
         let conn = self.connection.clone();
         match Iwd::new(conn).await {
             Ok(iwd) => {
                 iwd.register_agent().await?;
-                iwd.unregister_agent().await?;
                 self.wifi = Some(WirelessAdapter::Iwd(iwd));
                 Ok(())
             }
@@ -75,7 +70,6 @@ impl Controller {
 
     #[instrument]
     async fn connect_wpa(&mut self) -> Result<(), ComError> {
-        info!("Attempting to setup wpa connection");
         let conn = self.connection.clone();
         match WpaSupplicant::new(conn).await {
             Ok(wpa) => {
@@ -91,10 +85,10 @@ impl Controller {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 match iwd.scan().await {
                     Ok(_) => {
-                        info!("EVERYTHING WENT FINE WHILE SCANNING");
+                        info!("Scan succeeded.\n");
                     }
                     Err(com) => {
-                        info!("{:?} ERROR WHILE SCANNING", com);
+                        tracing::error!("There was an error while scanning!\n{}\n", com);
                     }
                 }
                 Ok(())
@@ -118,7 +112,7 @@ impl Controller {
         }
     }
 
-    async fn ssid_connect(&self, ssid: &'static str, psk: &'static str) -> Result<(), ComError> {
+    pub async fn ssid_connect(&self, ssid: String, psk: String) -> Result<(), ComError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 iwd.connect_network(ssid, psk).await?;
