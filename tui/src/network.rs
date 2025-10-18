@@ -42,9 +42,9 @@ pub async fn network_handle(
                 }
                 NetworkAction::Connect(ssid, psk) => {
                     if let Ok(()) = controller.ssid_connect(ssid, psk).await {
-                        info!("Connection to network was successful\n");
+                        info!("Connection to network was successful");
                     } else {
-                        tracing::error!("Connection to network was not successful.\n");
+                        tracing::error!("Connection to network was not successful.");
                     }
                 }
                 NetworkAction::ForceIwd => {}
