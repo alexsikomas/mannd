@@ -1,5 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use tokio::sync::RwLock;
+use tracing::info;
 use zbus::{
     Connection, DBusError, interface,
     zvariant::{ObjectPath, OwnedObjectPath},
@@ -15,7 +17,7 @@ pub struct AgentState {
 }
 
 pub struct IwdAgent {
-    state: Arc<Mutex<AgentState>>,
+    state: Arc<RwLock<AgentState>>,
 }
 
 #[derive(Debug, DBusError)]
@@ -37,39 +39,54 @@ impl AgentState {
 }
 
 impl IwdAgent {
-    pub fn new(state: Arc<Mutex<AgentState>>) -> Self {
+    pub fn new(state: Arc<RwLock<AgentState>>) -> Self {
         Self { state }
     }
 }
 
 // docs: https://kernel.googlesource.com/pub/scm/network/wireless/iwd/+/master/doc/agent-api.txt
-#[interface(name = "org.mannd.IwdAgent")]
+#[interface(name = "net.connman.iwd.Agent")]
 impl IwdAgent {
     async fn release(&mut self) {
-        let mut state = self.state.lock().unwrap();
-        state.username = None;
-        state.password = None;
+        info!("Relase");
+        let mut writer = self.state.write().await;
+        writer.username = None;
+        writer.password = None;
     }
 
     async fn requestPassphrase(&self, network: OwnedObjectPath) -> String {
-        let mut state = self.state.lock().unwrap();
-        match &state.password {
-            Some(pass) => pass.clone(),
-            None => "".to_string(),
+        info!("Passphrase has been requested");
+        match self.state.try_read() {
+            Ok(reader) => match &reader.password {
+                Some(pass) => pass.clone(),
+                None => {
+                    info!("Sending empty string because password is not set.");
+                    "".to_string()
+                }
+            },
+            Err(e) => {
+                tracing::error!("Error obtaining reading lock.");
+                "".to_string()
+            }
         }
     }
 
     async fn requestPrivateKeyPassphrase(&self, network: OwnedObjectPath) -> String {
+        info!("Private Key Passphrase");
         todo!()
     }
 
     async fn requestUserNameAndPassword(&self, network: OwnedObjectPath) -> (String, String) {
+        info!("Username and Password");
         todo!()
     }
 
     async fn requestUserPassword(&self, network: OwnedObjectPath) -> Result<String, IwdAgentError> {
+        info!("User Password");
         todo!()
     }
 
-    async fn cancel(&self) {}
+    async fn cancel(&self) {
+        info!("Cancel");
+    }
 }

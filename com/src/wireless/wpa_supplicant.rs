@@ -8,9 +8,9 @@ pub struct WpaSupplicant {}
 
 #[async_trait]
 impl WifiAdapter for WpaSupplicant {
-    async fn new(conn: Connection) -> Result<Self, ComError> {
-        todo!()
-    }
+    // async fn new(conn: Connection) -> Result<Self, ComError> {
+    //     todo!()
+    // }
     async fn connect_network(&self, ssid: String, psk: String) -> Result<(), ComError> {
         todo!()
     }
@@ -32,7 +32,7 @@ impl WifiAdapter for WpaSupplicant {
 }
 
 impl WpaSupplicant {
-    async fn new() -> Result<Self, ComError> {
+    pub async fn new(conn: Connection) -> Result<Self, ComError> {
         todo!()
     }
 }

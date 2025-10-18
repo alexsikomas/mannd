@@ -1,6 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use async_trait::async_trait;
+use tokio::sync::RwLock;
 use tracing::{info, instrument};
 use zbus::{
     Connection, Proxy,
@@ -24,62 +25,30 @@ pub struct Iwd {
     service: String,
     /// System connection
     conn: Connection,
-    unique_name: OwnedUniqueName,
-    agent_state: Arc<Mutex<AgentState>>,
+    agent_state: Arc<RwLock<AgentState>>,
 }
 
 #[async_trait]
 impl WifiAdapter for Iwd {
-    /// Creates a new instance of the `Iwd` struct. Takes in a `zbus::Connection` to minimise the
-    /// number of connections that need to be created, allowing one to be shared by the
-    /// `Controller` between processes.
-    #[instrument]
-    async fn new(conn: Connection) -> Result<Self, ComError> {
-        let service = "net.connman.iwd".to_string();
-
-        let unique_name: OwnedUniqueName;
-        let agent_state = Arc::new(Mutex::new(AgentState::new()));
-
-        match &conn.unique_name() {
-            Some(name) => {
-                unique_name = name.clone().to_owned();
-                &conn
-                    .object_server()
-                    .at("/org/mannd/IwdAgent", IwdAgent::new(agent_state.clone()))
-                    .await?;
-            }
-            None => {
-                tracing::error!("Did not get a unique name?");
-                return Err(ComError::OperationFailed(
-                    "Could not get a unique name".to_string(),
-                ));
-            }
-        }
-
-        match Self::find_adapter_path(&conn, &service).await {
-            Ok(Some(path)) => Ok(Self {
-                conn,
-                service,
-                path,
-                unique_name,
-                agent_state,
-            }),
-            Err(e) => Err(ComError::AdapterNotFound(format!(
-                "Could not find an adapter, is iwd installed?\n Error: {e}"
-            ))),
-            _ => Err(ComError::AdapterNotFound(
-                "Could not find an adapter, is iwd installed?".to_string(),
-            )),
-        }
-    }
-
     /// Connects to a network provided an SSID and passphrase.
     ///
     /// Since iwd does not allow connecting via BSSID the connection band is determined by signal
     /// strength internally by iwd, this can be tweaked in the iwd configuration file
     async fn connect_network(&self, ssid: String, psk: String) -> Result<(), ComError> {
-        self.set_password(psk);
+        match self.agent_state.try_write() {
+            Ok(mut writer) => {
+                writer.password = Some(psk);
+            }
+            Err(e) => {
+                tracing::error!("Error trying to get lock on writer. {e}");
+            }
+        }
 
+        info!(
+            "Connecting to: {}/{}_psk",
+            self.path.clone(),
+            Self::ssid_to_hex(ssid.clone())
+        );
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -88,9 +57,13 @@ impl WifiAdapter for Iwd {
         )
         .await?;
 
+        info!("Attempting to connect.");
         let resp: Result<(), zbus::Error> = proxy.call("Connect", &()).await;
         match resp {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                info!("Connected to the network without recieving an error.");
+                Ok(())
+            }
             Err(e) => {
                 tracing::error!("Error occured: {e}");
                 Err(ComError::OperationFailed(format!("{}", e)))
@@ -128,9 +101,32 @@ impl WifiAdapter for Iwd {
 
 // Networking related
 impl Iwd {
-    fn set_password(&self, psk: String) {
-        let mut state = self.agent_state.lock().unwrap();
-        state.password = Some(psk);
+    /// Creates a new instance of the `Iwd` struct. Takes in a `zbus::Connection` to minimise the
+    /// number of connections that need to be created, allowing one to be shared by the
+    /// `Controller` between processes.
+    #[instrument]
+    pub async fn new(
+        conn: Connection,
+        agent_state: Arc<RwLock<AgentState>>,
+    ) -> Result<Self, ComError> {
+        let service = "net.connman.iwd".to_string();
+
+        let unique_name: OwnedUniqueName;
+
+        match Self::find_adapter_path(&conn, &service).await {
+            Ok(Some(path)) => Ok(Self {
+                conn,
+                service,
+                path,
+                agent_state,
+            }),
+            Err(e) => Err(ComError::AdapterNotFound(format!(
+                "Could not find an adapter, is iwd installed?\n Error: {e}"
+            ))),
+            _ => Err(ComError::AdapterNotFound(
+                "Could not find an adapter, is iwd installed?".to_string(),
+            )),
+        }
     }
 
     /// Returns the object path of the iwd station, currently only returns the first station
@@ -197,10 +193,7 @@ impl Iwd {
 
     fn ssid_to_hex(ssid: String) -> String {
         let bytes = ssid.as_bytes();
-        bytes
-            .into_iter()
-            .map(|b| format!("{:x}", b).as_str().to_owned())
-            .collect()
+        bytes.into_iter().map(|b| format!("{:02x}", b)).collect()
     }
 
     pub async fn register_agent(&self) -> Result<(), ComError> {
@@ -212,11 +205,9 @@ impl Iwd {
         )
         .await?;
 
-        let agent_path = "/org/mannd/IwdAgent";
-
-        let agent_objpath = zbus::zvariant::OwnedObjectPath::try_from(agent_path).unwrap();
-
-        let resp: Result<(), zbus::Error> = proxy.call("RegisterAgent", &(agent_objpath)).await;
+        let agent_path =
+            ObjectPath::from_static_str("/org/mannd/IwdAgent").expect("Static path is valid");
+        let resp: Result<(), zbus::Error> = proxy.call("RegisterAgent", &(agent_path)).await;
         match resp {
             Ok(_) => {
                 info!("Agent registration call successful.");

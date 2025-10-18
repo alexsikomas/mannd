@@ -1,8 +1,17 @@
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
 use crate::{
     error::ComError,
     netlink::WirelessNetlink,
     systemd::systemctl,
-    wireless::{WifiAdapter, common::AccessPoint, iwd::Iwd, wpa_supplicant::WpaSupplicant},
+    wireless::{
+        WifiAdapter,
+        agent::{AgentState, IwdAgent},
+        common::AccessPoint,
+        iwd::Iwd,
+        wpa_supplicant::WpaSupplicant,
+    },
 };
 use tracing::{error, info, instrument};
 use zbus::{Connection, conn::Builder};
@@ -17,49 +26,63 @@ pub enum WirelessAdapter {
 #[derive(Debug)]
 pub struct Controller {
     pub wifi: Option<WirelessAdapter>,
-    connection: Connection,
+    connection: Option<Connection>,
 }
 
 impl Controller {
     #[instrument]
     pub async fn new() -> Result<Self, ComError> {
-        let conn = zbus::Connection::system().await?;
+        // This is mostly a temporary connection
+        let connection = Some(Connection::system().await?);
 
         Ok(Self {
             wifi: None,
-            connection: conn,
+            connection,
         })
     }
 
     /// Sets wifi to be either iwd, wpa or netlink
     pub async fn determine_adapter(&mut self) {
-        let ctl = systemctl::Systemctl::new(self.connection.clone());
-        match ctl.is_service_active("iwd".to_string()).await {
-            Some(v) => {
-                if v {
-                    self.connect_iwd().await;
-                    return;
+        match &self.connection {
+            Some(conn) => {
+                let ctl = systemctl::Systemctl::new(conn.clone());
+                match ctl.is_service_active("iwd".to_string()).await {
+                    Some(v) => {
+                        if v {
+                            self.connect_iwd().await;
+                            return;
+                        }
+                    }
+                    _ => {}
                 }
-            }
-            _ => {}
-        }
 
-        match ctl.is_service_active("wpa_supplicant".to_string()).await {
-            Some(v) => {
-                if v {
-                    self.connect_wpa().await;
-                    return;
+                match ctl.is_service_active("wpa_supplicant".to_string()).await {
+                    Some(v) => {
+                        if v {
+                            self.connect_wpa().await;
+                            return;
+                        }
+                    }
+                    _ => {}
                 }
             }
-            _ => {}
+            None => {
+                tracing::error!("Connection has yet to be set in the controller!");
+            }
         }
     }
 
     #[instrument]
     async fn connect_iwd(&mut self) -> Result<(), ComError> {
-        let conn = self.connection.clone();
-        match Iwd::new(conn).await {
+        let agent_state = Arc::new(RwLock::new(AgentState::new()));
+        let conn = zbus::connection::Builder::system()?
+            .serve_at("/org/mannd/IwdAgent", IwdAgent::new(agent_state.clone()))?
+            .build()
+            .await?;
+
+        match Iwd::new(conn.clone(), agent_state.clone()).await {
             Ok(iwd) => {
+                self.connection = Some(conn);
                 iwd.register_agent().await?;
                 self.wifi = Some(WirelessAdapter::Iwd(iwd));
                 Ok(())
@@ -70,13 +93,20 @@ impl Controller {
 
     #[instrument]
     async fn connect_wpa(&mut self) -> Result<(), ComError> {
-        let conn = self.connection.clone();
-        match WpaSupplicant::new(conn).await {
-            Ok(wpa) => {
-                self.wifi = Some(WirelessAdapter::Wpa(wpa));
-                Ok(())
+        match &self.connection {
+            Some(conn) => match WpaSupplicant::new(conn.clone()).await {
+                Ok(wpa) => {
+                    self.wifi = Some(WirelessAdapter::Wpa(wpa));
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            },
+            None => {
+                tracing::error!("wpa_supplicant attempted to connect without a ZBus connection!");
+                Err(ComError::OperationFailed(
+                    "No ZBus Connection, check the logs.".to_string(),
+                ))
             }
-            Err(e) => Err(e),
         }
     }
 
@@ -85,10 +115,10 @@ impl Controller {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 match iwd.scan().await {
                     Ok(_) => {
-                        info!("Scan succeeded.\n");
+                        info!("Scan succeeded.");
                     }
                     Err(com) => {
-                        tracing::error!("There was an error while scanning!\n{}\n", com);
+                        tracing::error!("There was an error while scanning!\n{}", com);
                     }
                 }
                 Ok(())
