@@ -88,13 +88,15 @@ pub enum ConnectionPromptSelect {
 
 #[derive(Debug)]
 pub struct ConnectionPrompt {
+    pub ssid: String,
     pub password: String,
     pub select: ConnectionPromptSelect,
 }
 
 impl ConnectionPrompt {
-    fn new() -> Self {
+    fn new(ssid: String) -> Self {
         Self {
+            ssid,
             password: String::new(),
             select: ConnectionPromptSelect::Password,
         }
@@ -235,7 +237,9 @@ impl State {
                     }
                     ConnectionAction::Connect => {
                         return Some(UpdateAction::OpenPrompt(PromptState::Connect(
-                            ConnectionPrompt::new(),
+                            ConnectionPrompt::new(
+                                conn_state.networks.get_selected_value().ssid.clone(),
+                            ),
                         )));
                     }
                     _ => {}
@@ -271,7 +275,12 @@ impl PromptState {
         match self {
             PromptState::Connect(conn) => match key {
                 KeyCode::Enter => match conn.select {
-                    ConnectionPromptSelect::Connect => {}
+                    ConnectionPromptSelect::Connect => {
+                        return Some(UpdateAction::Network(NetworkAction::Connect(
+                            conn.ssid.clone(),
+                            conn.password.clone(),
+                        )));
+                    }
                     ConnectionPromptSelect::Back => {
                         return Some(UpdateAction::ExitPrompt);
                     }

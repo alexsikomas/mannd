@@ -10,7 +10,7 @@ pub trait WifiAdapter: Debug {
     async fn new(conn: Connection) -> Result<Self, ComError>
     where
         Self: Sized;
-    async fn connect_network(&self, ssid: &'static str, psk: &'static str) -> Result<(), ComError>;
+    async fn connect_network(&self, ssid: String, psk: String) -> Result<(), ComError>;
     async fn disconnect(&self) -> Result<(), ComError>;
     async fn status(&self) -> Result<String, ComError>;
     async fn list_configured_networks(&self) -> Result<Vec<String>, ComError>;

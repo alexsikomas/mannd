@@ -1,14 +1,21 @@
+use std::sync::{Arc, Mutex};
+
 use zbus::{
-    DBusError, interface,
+    Connection, DBusError, interface,
     zvariant::{ObjectPath, OwnedObjectPath},
 };
 
 // Do compiler optimisations make it so that
 // the password may be repeated in memory even if later
 // cleared?
+#[derive(Debug)]
+pub struct AgentState {
+    pub username: Option<String>,
+    pub password: Option<String>,
+}
+
 pub struct IwdAgent {
-    username: Option<String>,
-    password: Option<String>,
+    state: Arc<Mutex<AgentState>>,
 }
 
 #[derive(Debug, DBusError)]
@@ -16,7 +23,11 @@ enum IwdAgentError {
     Canceled,
 }
 
-impl IwdAgent {
+pub enum IwdAgentMsg {
+    SetPassword(String),
+}
+
+impl AgentState {
     pub fn new() -> Self {
         Self {
             username: None,
@@ -25,16 +36,27 @@ impl IwdAgent {
     }
 }
 
+impl IwdAgent {
+    pub fn new(state: Arc<Mutex<AgentState>>) -> Self {
+        Self { state }
+    }
+}
+
 // docs: https://kernel.googlesource.com/pub/scm/network/wireless/iwd/+/master/doc/agent-api.txt
 #[interface(name = "org.mannd.IwdAgent")]
 impl IwdAgent {
     async fn release(&mut self) {
-        self.username = None;
-        self.password = None;
+        let mut state = self.state.lock().unwrap();
+        state.username = None;
+        state.password = None;
     }
 
     async fn requestPassphrase(&self, network: OwnedObjectPath) -> String {
-        todo!()
+        let mut state = self.state.lock().unwrap();
+        match &state.password {
+            Some(pass) => pass.clone(),
+            None => "".to_string(),
+        }
     }
 
     async fn requestPrivateKeyPassphrase(&self, network: OwnedObjectPath) -> String {

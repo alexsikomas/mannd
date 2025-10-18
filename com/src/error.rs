@@ -1,5 +1,4 @@
 use neli::err::RouterError;
-use quick_xml::events::attributes::AttrError;
 use std::fmt::{Debug, Display};
 use thiserror::Error;
 
@@ -46,14 +45,6 @@ pub enum ComError {
     ZbusFreedesktop(#[from] zbus::fdo::Error),
     #[error("Zbus zvariant Error: {0}")]
     Zvariant(#[from] zbus::zvariant::Error),
-
-    // xml parsing
-    #[error("XML Attribute Error: {0}")]
-    XmlAttr(#[from] AttrError),
-    #[error("XML Error: {0}")]
-    Xml(#[from] quick_xml::Error),
-    #[error("XML Buffer Read Error: {0}")]
-    XmlRead(String),
 }
 
 impl<T, P> From<neli::err::RouterError<T, P>> for ComError

@@ -44,7 +44,6 @@ impl Debug for WirelessNetlink {
 impl WirelessNetlink {
     #[instrument]
     pub async fn connect() -> Result<Self, ComError> {
-        info!("Creating wireless netlink connection");
         let (mut router, mut handle) =
             NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
         let family_id = router.resolve_genl_family(NL_80211_GENL_NAME).await?;
@@ -76,7 +75,6 @@ impl WirelessNetlink {
     where
         T: for<'a> TryFrom<Attrs<'a, Nl80211Attr>, Error = DeError>,
     {
-        info!("Attempting to retireve information from netlink");
         let msghdr = GenlmsghdrBuilder::<Nl80211Cmd, Nl80211Attr>::default()
             .cmd(cmd)
             .attrs({
@@ -101,7 +99,6 @@ impl WirelessNetlink {
             .build()
             .unwrap();
 
-        info!("Built netlink message header");
         let mut recv: NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>> = self
             .router
             .send(
