@@ -64,6 +64,8 @@ impl Controller {
         let conn = self.connection.clone();
         match Iwd::new(conn).await {
             Ok(iwd) => {
+                iwd.register_agent().await?;
+                iwd.unregister_agent().await?;
                 self.wifi = Some(WirelessAdapter::Iwd(iwd));
                 Ok(())
             }
