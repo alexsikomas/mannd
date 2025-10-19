@@ -34,11 +34,11 @@ impl MainMenuSelection {
     }
 }
 
+#[derive(Debug)]
 pub enum ConnectionAction {
     Scan,
     Connect,
-    Add,
-    Remove,
+    Forget,
 }
 
 #[derive(PartialEq, Eq)]
@@ -60,8 +60,7 @@ impl ConnectionState {
             actions: SelectableList::new(vec![
                 ConnectionAction::Scan,
                 ConnectionAction::Connect,
-                ConnectionAction::Add,
-                ConnectionAction::Remove,
+                ConnectionAction::Forget,
             ]),
             focused_list: FocusedConnection::Networks,
         }
@@ -73,8 +72,7 @@ impl ConnectionAction {
         match self {
             Self::Scan => "Scan",
             Self::Connect => "Connect",
-            Self::Add => "Add",
-            Self::Remove => "Remove",
+            Self::Forget => "Forget",
         }
     }
 }
@@ -223,7 +221,9 @@ impl State {
         match &conn_state.focused_list {
             FocusedConnection::Actions => match key {
                 KeyCode::Up => {
+                    info!("{:?}", conn_state.actions);
                     conn_state.actions.prev();
+                    info!("{:?}", conn_state.actions);
                 }
                 KeyCode::Down => {
                     conn_state.actions.next();
@@ -236,10 +236,18 @@ impl State {
                         return Some(UpdateAction::Network(NetworkAction::Scan));
                     }
                     ConnectionAction::Connect => {
-                        return Some(UpdateAction::OpenPrompt(PromptState::Connect(
-                            ConnectionPrompt::new(
-                                conn_state.networks.get_selected_value().ssid.clone(),
-                            ),
+                        if !conn_state.networks.get_selected_value().known {
+                            return Some(UpdateAction::OpenPrompt(PromptState::Connect(
+                                ConnectionPrompt::new(
+                                    conn_state.networks.get_selected_value().ssid.clone(),
+                                ),
+                            )));
+                        }
+
+                        // connect function does not need any password if already known
+                        return Some(UpdateAction::Network(NetworkAction::Connect(
+                            conn_state.networks.get_selected_value().ssid.clone(),
+                            "".to_string(),
                         )));
                     }
                     _ => {}
