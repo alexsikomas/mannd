@@ -8,7 +8,9 @@ use tracing::info;
 use crate::{
     error::TuiError,
     network::{NetworkAction, NetworkState, NetworkUpdate, network_handle},
-    state::{ConnectionState, PromptState, State},
+    state::{
+        ConnectionAction, ConnectionState, FocusedConnection, PromptState, SelectableList, State,
+    },
     ui::render,
 };
 
@@ -20,7 +22,6 @@ pub struct AppState {
     pub view_state: State,
     // for prompts inside of a view state
     pub prompt_view: Option<PromptState>,
-    pub network: NetworkState,
 }
 
 impl AppState {
@@ -30,10 +31,6 @@ impl AppState {
             is_running: true,
             redraw: false,
             prompt_view: None,
-            network: NetworkState {
-                selected: None,
-                aps: vec![],
-            },
         }
     }
 }
@@ -59,6 +56,27 @@ impl App {
             if event::poll(Duration::from_millis(100))? {
                 if let Ok(Event::Key(key)) = event::read() {
                     let mut action: Option<UpdateAction> = None;
+
+                    match &mut state.view_state {
+                        State::Connection(conn_state) => {
+                            if matches!(conn_state.focused_list, FocusedConnection::Networks) {
+                                let mut action_list = vec![ConnectionAction::Scan];
+
+                                if let Some(network) =
+                                    &conn_state.networks.items.get(conn_state.networks.selected)
+                                {
+                                    if !network.connected {
+                                        action_list.push(ConnectionAction::Connect);
+                                    }
+                                    if network.known {
+                                        action_list.push(ConnectionAction::Forget);
+                                    }
+                                }
+                                conn_state.actions = SelectableList::new(action_list);
+                            }
+                        }
+                        _ => {}
+                    };
 
                     // are we dealing with prompt or normal menu?
                     match &mut state.prompt_view {
@@ -103,13 +121,13 @@ fn handle_net_state_msg(state: &mut AppState, net_update_rx: &mut Receiver<Netwo
     if let Ok(msg) = net_update_rx.try_recv() {
         match msg {
             NetworkUpdate::Select(i) => {
-                state.network.selected = Some(i);
+                // state.network.selected = Some(i);
             }
             NetworkUpdate::Deselect => {
-                state.network.selected = None;
+                // state.network.selected = None;
             }
             NetworkUpdate::UpdateAps(aps) => {
-                state.network.aps = aps.clone();
+                // state.network.aps = aps.clone();
                 state.view_state = State::Connection(ConnectionState::new(aps));
             }
         }
