@@ -57,27 +57,6 @@ impl App {
                 if let Ok(Event::Key(key)) = event::read() {
                     let mut action: Option<UpdateAction> = None;
 
-                    match &mut state.view_state {
-                        State::Connection(conn_state) => {
-                            if matches!(conn_state.focused_list, FocusedConnection::Networks) {
-                                let mut action_list = vec![ConnectionAction::Scan];
-
-                                if let Some(network) =
-                                    &conn_state.networks.items.get(conn_state.networks.selected)
-                                {
-                                    if !network.connected {
-                                        action_list.push(ConnectionAction::Connect);
-                                    }
-                                    if network.known {
-                                        action_list.push(ConnectionAction::Forget);
-                                    }
-                                }
-                                conn_state.actions = SelectableList::new(action_list);
-                            }
-                        }
-                        _ => {}
-                    };
-
                     // are we dealing with prompt or normal menu?
                     match &mut state.prompt_view {
                         Some(prompt) => {
@@ -104,6 +83,28 @@ impl App {
                         None => {}
                     };
                 };
+
+                match &mut state.view_state {
+                    State::Connection(conn_state) => {
+                        if matches!(conn_state.focused_list, FocusedConnection::Networks) {
+                            let mut action_list = vec![ConnectionAction::Scan];
+
+                            if let Some(network) =
+                                &conn_state.networks.items.get(conn_state.networks.selected)
+                            {
+                                if !network.connected {
+                                    action_list.push(ConnectionAction::Connect);
+                                }
+                                if network.known {
+                                    action_list.push(ConnectionAction::Forget);
+                                }
+                            }
+                            conn_state.actions = SelectableList::new(action_list);
+                        }
+                    }
+                    _ => {}
+                };
+
                 state.redraw = true;
             }
 

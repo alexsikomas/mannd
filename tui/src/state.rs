@@ -57,11 +57,7 @@ impl ConnectionState {
     pub fn new(aps: Vec<AccessPoint>) -> Self {
         Self {
             networks: SelectableList::new(aps),
-            actions: SelectableList::new(vec![
-                ConnectionAction::Scan,
-                ConnectionAction::Connect,
-                ConnectionAction::Forget,
-            ]),
+            actions: SelectableList::new(vec![ConnectionAction::Scan]),
             focused_list: FocusedConnection::Networks,
         }
     }
