@@ -151,7 +151,25 @@ impl Controller {
                 wpa.connect_network(ssid, psk).await?;
             }
             None => {
-                info!("Tried to connect to network without an initalised adapter?");
+                tracing::error!("Tried to connect to network without an initalised adapter?");
+            }
+        };
+        Ok(())
+    }
+
+    pub async fn disconenct(&self) -> Result<(), ComError> {
+        match &self.wifi {
+            Some(WirelessAdapter::Iwd(iwd)) => {
+                iwd.disconnect().await?;
+            }
+            Some(WirelessAdapter::Wpa(wpa)) => {
+                wpa.disconnect().await?;
+            }
+            None => {
+                tracing::error!("Tried to disconnect but no wifi adapter was initalised.");
+                return Err(ComError::OperationFailed(
+                    "No adapter to be able to disconnect from networks".to_string(),
+                ));
             }
         };
         Ok(())

@@ -41,19 +41,26 @@ tui() {
     echo "Building TUI..."
     # Release
     if [[ "$1" == "r" ]] || [[ "$1" == "release" ]]; then
-        cargo build --release --package tui
-        sudo setcap cap_net_admin,cap_dac_override=ep ./target/release/tui
-        if [[ "$2" == "opt" ]] || [[ "$2" == "optimise" ]] then
-            upx --best --lzma ./target/release/tui
+        if cargo build --release --package tui;  then
+            if sudo setcap cap_net_admin,cap_dac_override=ep ./target/release/tui; then 
+                if [[ "$2" == "opt" ]] || [[ "$2" == "optimise" ]] then
+                    upx --best --lzma ./target/release/tui
+                fi
+                ./target/release/tui
+                exit 0
+            fi
         fi
-        ./target/release/tui
-        exit 0
+        exit 1
     fi
 
    # Debug 
-   cargo build --package tui
-   sudo setcap cap_net_admin,cap_dac_override=ep ./target/debug/tui
-   ./target/debug/tui
+   if cargo build --package tui; then 
+       if sudo setcap cap_net_admin,cap_dac_override=ep ./target/debug/tui; then 
+           ./target/debug/tui
+           exit 0
+       fi
+   fi
+   exit 1
 }
 
 com() {
