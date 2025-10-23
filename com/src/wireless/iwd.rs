@@ -73,7 +73,19 @@ impl WifiAdapter for Iwd {
 
     /// Disconnects from the current WiFi network, does not remove the network
     async fn disconnect(&self) -> Result<(), ComError> {
-        todo!()
+        let proxy = self.get_interface_proxy("Station").await?;
+        let resp: Result<(), zbus::Error> = proxy.call("Disconnect", &()).await;
+        info!("Calling the disconnect function");
+        match resp {
+            Ok(()) => {
+                info!("Disconnected from network");
+                Ok(())
+            }
+            Err(err) => {
+                tracing::error!("Could not disconnect. {err}");
+                Err(ComError::OperationFailed("Disconnect".to_string()))
+            }
+        }
     }
 
     /// Returns the current status of the connected WiFi network

@@ -8,6 +8,7 @@ use crate::app::AppState;
 pub enum NetworkAction {
     Scan,
     Connect(String, String),
+    Disconnect,
     ForceIwd,
     ForceWpa,
     ForceWifiNetlink,
@@ -45,6 +46,12 @@ pub async fn network_handle(
                         info!("Connection to network was successful");
                     } else {
                         tracing::error!("Connection to network was not successful.");
+                    }
+                }
+                NetworkAction::Disconnect => {
+                    if let Ok(()) = controller.disconenct().await {
+                        info!("Disconnected from a network");
+                    } else {
                     }
                 }
                 NetworkAction::ForceIwd => {}

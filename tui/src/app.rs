@@ -94,6 +94,8 @@ impl App {
                             {
                                 if !network.connected {
                                     action_list.push(ConnectionAction::Connect);
+                                } else {
+                                    action_list.push(ConnectionAction::Disconnect);
                                 }
                                 if network.known {
                                     action_list.push(ConnectionAction::Forget);

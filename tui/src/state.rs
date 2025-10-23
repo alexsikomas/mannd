@@ -38,6 +38,7 @@ impl MainMenuSelection {
 pub enum ConnectionAction {
     Scan,
     Connect,
+    Disconnect,
     Forget,
 }
 
@@ -58,7 +59,7 @@ impl ConnectionState {
         Self {
             networks: SelectableList::new(aps),
             actions: SelectableList::new(vec![ConnectionAction::Scan]),
-            focused_list: FocusedConnection::Networks,
+            focused_list: FocusedConnection::Actions,
         }
     }
 }
@@ -68,6 +69,7 @@ impl ConnectionAction {
         match self {
             Self::Scan => "Scan",
             Self::Connect => "Connect",
+            Self::Disconnect => "Disconnect",
             Self::Forget => "Forget",
         }
     }
@@ -245,6 +247,9 @@ impl State {
                             conn_state.networks.get_selected_value().ssid.clone(),
                             "".to_string(),
                         )));
+                    }
+                    ConnectionAction::Disconnect => {
+                        return Some(UpdateAction::Network(NetworkAction::Disconnect));
                     }
                     _ => {}
                 },
