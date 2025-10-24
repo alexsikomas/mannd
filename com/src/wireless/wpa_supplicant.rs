@@ -1,7 +1,10 @@
 use async_trait::async_trait;
 use zbus::Connection;
 
-use crate::{error::ComError, wireless::WifiAdapter};
+use crate::{
+    error::ComError,
+    wireless::{common::Security, WifiAdapter},
+};
 
 #[derive(Debug, Clone)]
 pub struct WpaSupplicant {}
@@ -11,7 +14,12 @@ impl WifiAdapter for WpaSupplicant {
     // async fn new(conn: Connection) -> Result<Self, ComError> {
     //     todo!()
     // }
-    async fn connect_network(&self, ssid: String, psk: String) -> Result<(), ComError> {
+    async fn connect_network(
+        &self,
+        ssid: String,
+        psk: String,
+        security: Security,
+    ) -> Result<(), ComError> {
         todo!()
     }
     async fn disconnect(&self) -> Result<(), ComError> {
@@ -23,10 +31,7 @@ impl WifiAdapter for WpaSupplicant {
     async fn list_configured_networks(&self) -> Result<Vec<String>, ComError> {
         todo!()
     }
-    async fn add_network(&self, ssid: &'static str, psk: &'static str) -> Result<(), ComError> {
-        todo!()
-    }
-    async fn remove_network(&self, ssid: &str) -> Result<(), ComError> {
+    async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ComError> {
         todo!()
     }
 }

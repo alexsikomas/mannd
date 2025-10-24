@@ -168,6 +168,7 @@ fn handle_net_state_msg(state: &mut AppState, net_update_rx: &mut Receiver<Netwo
             NetworkUpdate::AddKnownNetworks(aps) => {
                 // state.view_state = State::Connection(state.)
             }
+            NetworkUpdate::Update => {}
         }
         state.redraw = true;
     };

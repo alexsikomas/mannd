@@ -1,4 +1,7 @@
-use com::{controller::Controller, wireless::common::AccessPoint};
+use com::{
+    controller::Controller,
+    wireless::common::{AccessPoint, Security},
+};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::info;
 
@@ -8,7 +11,8 @@ use crate::app::AppState;
 pub enum NetworkAction {
     Scan,
     GetKnownNetworks,
-    Connect(String, String),
+    Connect(String, String, Security),
+    Forget(String, Security),
     Info,
     Disconnect,
     ForceIwd,
@@ -18,6 +22,7 @@ pub enum NetworkAction {
 
 pub enum NetworkUpdate {
     Select(usize),
+    Update,
     Deselect,
     /// Unreachable known networks
     AddKnownNetworks(Vec<AccessPoint>),
@@ -45,8 +50,8 @@ pub async fn network_handle(
                         }
                     }
                 }
-                NetworkAction::Connect(ssid, psk) => {
-                    if let Ok(()) = controller.ssid_connect(ssid, psk).await {
+                NetworkAction::Connect(ssid, psk, sec) => {
+                    if let Ok(()) = controller.ssid_connect(ssid, psk, sec).await {
                         info!("Connection to network was successful");
                     } else {
                         tracing::error!("Connection to network was not successful.");
@@ -63,6 +68,11 @@ pub async fn network_handle(
                         // At this point some of the networks will still be reachable
                         // we don't have self so can't do check here
                         let _ = net_update_tx.send(NetworkUpdate::AddKnownNetworks(known_aps));
+                    }
+                }
+                NetworkAction::Forget(ssid, sec) => {
+                    if let Ok(()) = controller.remove_network(ssid, sec).await {
+                        let _ = net_update_tx.send(NetworkUpdate::Update);
                     }
                 }
                 NetworkAction::ForceIwd => {}
