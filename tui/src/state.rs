@@ -34,11 +34,12 @@ impl MainMenuSelection {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ConnectionAction {
     Scan,
     Connect,
     Disconnect,
+    // Info,
     Forget,
 }
 
@@ -70,6 +71,7 @@ impl ConnectionAction {
             Self::Scan => "Scan",
             Self::Connect => "Connect",
             Self::Disconnect => "Disconnect",
+            // Self::Info => "Info",
             Self::Forget => "Forget",
         }
     }
@@ -137,7 +139,7 @@ impl<T> SelectableList<T> {
         }
     }
 
-    fn get_selected_value(&self) -> &T {
+    pub fn get_selected_value(&self) -> &T {
         &self.items[self.selected]
     }
 }
@@ -248,6 +250,9 @@ impl State {
                             "".to_string(),
                         )));
                     }
+                    // ConnectionAction::Info => {
+                    // return Some(UpdateAction::Network(NetworkAction::Info));
+                    // }
                     ConnectionAction::Disconnect => {
                         return Some(UpdateAction::Network(NetworkAction::Disconnect));
                     }

@@ -7,7 +7,9 @@ use crate::app::AppState;
 #[derive(Debug)]
 pub enum NetworkAction {
     Scan,
+    GetKnownNetworks,
     Connect(String, String),
+    Info,
     Disconnect,
     ForceIwd,
     ForceWpa,
@@ -17,6 +19,8 @@ pub enum NetworkAction {
 pub enum NetworkUpdate {
     Select(usize),
     Deselect,
+    /// Unreachable known networks
+    AddKnownNetworks(Vec<AccessPoint>),
     UpdateAps(Vec<AccessPoint>),
 }
 
@@ -52,6 +56,13 @@ pub async fn network_handle(
                     if let Ok(()) = controller.disconenct().await {
                         info!("Disconnected from a network");
                     } else {
+                    }
+                }
+                NetworkAction::GetKnownNetworks => {
+                    if let Ok(known_aps) = controller.get_known_networks().await {
+                        // At this point some of the networks will still be reachable
+                        // we don't have self so can't do check here
+                        let _ = net_update_tx.send(NetworkUpdate::AddKnownNetworks(known_aps));
                     }
                 }
                 NetworkAction::ForceIwd => {}

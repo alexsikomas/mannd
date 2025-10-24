@@ -246,6 +246,7 @@ dependencies = [
  "async-trait",
  "neli",
  "neli-proc-macros",
+ "serde",
  "thiserror",
  "tokio",
  "tracing",
