@@ -35,7 +35,12 @@ impl WifiAdapter for Iwd {
     ///
     /// Since iwd does not allow connecting via BSSID the connection band is determined by signal
     /// strength internally by iwd, this can be tweaked in the iwd configuration file
-    async fn connect_network(&self, ssid: String, psk: String) -> Result<(), ComError> {
+    async fn connect_network(
+        &self,
+        ssid: String,
+        psk: String,
+        security: Security,
+    ) -> Result<(), ComError> {
         match self.agent_state.try_write() {
             Ok(mut writer) => {
                 writer.password = Some(psk);
@@ -46,14 +51,21 @@ impl WifiAdapter for Iwd {
         }
 
         info!(
-            "Connecting to: {}/{}_psk",
+            "Connecting to: {}/{}_{}",
             self.path.clone(),
-            Self::ssid_to_hex(ssid.clone())
+            Self::ssid_to_hex(ssid.clone()),
+            security
         );
+
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            format!("{}/{}_psk", self.path.clone(), Self::ssid_to_hex(ssid)),
+            format!(
+                "{}/{}_{}",
+                self.path.clone(),
+                Self::ssid_to_hex(ssid),
+                security
+            ),
             "net.connman.iwd.Network",
         )
         .await?;
@@ -100,15 +112,37 @@ impl WifiAdapter for Iwd {
         todo!()
     }
 
-    /// Adds a network but does not connect to it; used by `connect_network` before it connects to
-    /// a network
-    async fn add_network(&self, ssid: &'static str, psk: &'static str) -> Result<(), ComError> {
-        todo!()
-    }
-
     /// Removes a network from the configured networks
-    async fn remove_network(&self, ssid: &str) -> Result<(), ComError> {
-        todo!()
+    async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ComError> {
+        info!(
+            "/net/connman/iwd/{}_{}",
+            Self::ssid_to_hex(ssid.to_string()),
+            security,
+        );
+
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            format!(
+                "/net/connman/iwd/{}_{}",
+                Self::ssid_to_hex(ssid.to_string()),
+                security,
+            ),
+            "net.connman.iwd.KnownNetwork",
+        )
+        .await?;
+
+        let res: Result<(), zbus::Error> = proxy.call("Forget", &()).await;
+        match res {
+            Ok(()) => {
+                info!("Successfully forgot {ssid}");
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!("Error occured while trying to forget network: {e}");
+                Err(ComError::OperationFailed("Remove Network".to_string()))
+            }
+        }
     }
 }
 

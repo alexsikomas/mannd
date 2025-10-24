@@ -7,7 +7,7 @@ use crate::{
     systemd::systemctl,
     wireless::{
         agent::{AgentState, IwdAgent},
-        common::AccessPoint,
+        common::{AccessPoint, Security},
         iwd::Iwd,
         wpa_supplicant::WpaSupplicant,
         WifiAdapter,
@@ -144,13 +144,18 @@ impl Controller {
         }
     }
 
-    pub async fn ssid_connect(&self, ssid: String, psk: String) -> Result<(), ComError> {
+    pub async fn ssid_connect(
+        &self,
+        ssid: String,
+        psk: String,
+        security: Security,
+    ) -> Result<(), ComError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
-                iwd.connect_network(ssid, psk).await?;
+                iwd.connect_network(ssid, psk, security).await?;
             }
             Some(WirelessAdapter::Wpa(wpa)) => {
-                wpa.connect_network(ssid, psk).await?;
+                wpa.connect_network(ssid, psk, security).await?;
             }
             None => {
                 tracing::error!("Tried to connect to network without an initalised adapter?");
@@ -191,6 +196,22 @@ impl Controller {
 
         // temp while wpa not implemented
         Ok(vec![])
+    }
+
+    pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ComError> {
+        match &self.wifi {
+            Some(WirelessAdapter::Iwd(iwd)) => match iwd.remove_network(ssid, security).await {
+                Ok(()) => {
+                    return Ok(());
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            },
+            Some(WirelessAdapter::Wpa(wpa)) => {}
+            None => {}
+        }
+        Ok(())
     }
 
     pub async fn info(&self, ssid: String) -> Result<(), ComError> {

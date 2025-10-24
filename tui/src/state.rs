@@ -1,4 +1,4 @@
-use com::wireless::common::AccessPoint;
+use com::wireless::common::{AccessPoint, Security};
 use crossterm::event::KeyCode;
 use tracing::info;
 
@@ -236,18 +236,19 @@ impl State {
                         return Some(UpdateAction::Network(NetworkAction::Scan));
                     }
                     ConnectionAction::Connect => {
-                        if !conn_state.networks.get_selected_value().known {
-                            return Some(UpdateAction::OpenPrompt(PromptState::Connect(
-                                ConnectionPrompt::new(
-                                    conn_state.networks.get_selected_value().ssid.clone(),
-                                ),
+                        let selected = conn_state.networks.get_selected_value();
+
+                        if selected.known || matches!(selected.security, Security::Open) {
+                            // connect function does not need any password if already known
+                            return Some(UpdateAction::Network(NetworkAction::Connect(
+                                selected.ssid.clone(),
+                                "".to_string(),
+                                selected.security.clone(),
                             )));
                         }
 
-                        // connect function does not need any password if already known
-                        return Some(UpdateAction::Network(NetworkAction::Connect(
-                            conn_state.networks.get_selected_value().ssid.clone(),
-                            "".to_string(),
+                        return Some(UpdateAction::OpenPrompt(PromptState::Connect(
+                            ConnectionPrompt::new(selected.ssid.clone()),
                         )));
                     }
                     // ConnectionAction::Info => {
@@ -255,6 +256,13 @@ impl State {
                     // }
                     ConnectionAction::Disconnect => {
                         return Some(UpdateAction::Network(NetworkAction::Disconnect));
+                    }
+                    ConnectionAction::Forget => {
+                        let selected = conn_state.networks.get_selected_value();
+                        return Some(UpdateAction::Network(NetworkAction::Forget(
+                            selected.ssid.clone(),
+                            selected.security.clone(),
+                        )));
                     }
                     _ => {}
                 },
@@ -293,6 +301,7 @@ impl PromptState {
                         return Some(UpdateAction::Network(NetworkAction::Connect(
                             conn.ssid.clone(),
                             conn.password.clone(),
+                            Security::Psk,
                         )));
                     }
                     ConnectionPromptSelect::Back => {
