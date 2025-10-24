@@ -7,7 +7,7 @@ use tracing::info;
 
 use crate::{
     error::TuiError,
-    network::{NetworkAction, NetworkState, NetworkUpdate, network_handle},
+    network::{network_handle, NetworkAction, NetworkState, NetworkUpdate},
     state::{
         ConnectionAction, ConnectionState, FocusedConnection, PromptState, SelectableList, State,
     },
@@ -95,6 +95,7 @@ impl App {
                                 if !network.connected {
                                     action_list.push(ConnectionAction::Connect);
                                 } else {
+                                    // action_list.push(ConnectionAction::Info);
                                     action_list.push(ConnectionAction::Disconnect);
                                 }
                                 if network.known {
@@ -131,7 +132,41 @@ fn handle_net_state_msg(state: &mut AppState, net_update_rx: &mut Receiver<Netwo
             }
             NetworkUpdate::UpdateAps(aps) => {
                 // state.network.aps = aps.clone();
-                state.view_state = State::Connection(ConnectionState::new(aps));
+                match &state.view_state {
+                    State::Connection(conn_state) => {
+                        if (conn_state.networks.items.is_empty()) {
+                            state.view_state = State::Connection(ConnectionState::new(aps));
+                        } else {
+                            let selected_network = conn_state.networks.get_selected_value();
+                            let cached_actions = conn_state.actions.clone();
+
+                            let mut new_state = ConnectionState::new(aps);
+
+                            let index = new_state
+                                .networks
+                                .items
+                                .iter()
+                                .position(|v| v.ssid == selected_network.ssid);
+
+                            match index {
+                                Some(val) => {
+                                    new_state.networks.selected = val;
+                                    new_state.actions = cached_actions;
+                                }
+                                None => {
+                                    // since non-empty
+                                    new_state.networks.selected = 0;
+                                }
+                            }
+
+                            state.view_state = State::Connection(new_state);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            NetworkUpdate::AddKnownNetworks(aps) => {
+                // state.view_state = State::Connection(state.)
             }
         }
         state.redraw = true;

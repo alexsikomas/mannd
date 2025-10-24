@@ -6,15 +6,15 @@ use crate::{
     netlink::WirelessNetlink,
     systemd::systemctl,
     wireless::{
-        WifiAdapter,
         agent::{AgentState, IwdAgent},
         common::AccessPoint,
         iwd::Iwd,
         wpa_supplicant::WpaSupplicant,
+        WifiAdapter,
     },
 };
 use tracing::{error, info, instrument};
-use zbus::{Connection, conn::Builder};
+use zbus::{conn::Builder, Connection};
 
 // Netlink not used here as I'm not implementing WPA authentication
 #[derive(Debug)]
@@ -26,6 +26,7 @@ pub enum WirelessAdapter {
 #[derive(Debug)]
 pub struct Controller {
     pub wifi: Option<WirelessAdapter>,
+    pub netlink: WirelessNetlink,
     connection: Option<Connection>,
 }
 
@@ -37,6 +38,7 @@ impl Controller {
 
         Ok(Self {
             wifi: None,
+            netlink: WirelessNetlink::connect().await?,
             connection,
         })
     }
@@ -172,6 +174,26 @@ impl Controller {
                 ));
             }
         };
+        Ok(())
+    }
+
+    pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+        match &mut self.wifi {
+            Some(WirelessAdapter::Iwd(iwd)) => match iwd.get_known_networks().await {
+                Ok(aps) => {
+                    return Ok(aps);
+                }
+                Err(e) => {}
+            },
+            Some(WirelessAdapter::Wpa(wpa)) => {}
+            None => {}
+        }
+
+        // temp while wpa not implemented
+        Ok(vec![])
+    }
+
+    pub async fn info(&self, ssid: String) -> Result<(), ComError> {
         Ok(())
     }
 }

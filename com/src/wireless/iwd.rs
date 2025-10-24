@@ -1,21 +1,22 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde::Deserialize;
 use tokio::sync::RwLock;
 use tracing::{info, instrument};
 use zbus::{
-    Connection, Proxy,
     fdo::ObjectManagerProxy,
     names::OwnedUniqueName,
-    zvariant::{ObjectPath, OwnedObjectPath, Value},
+    zvariant::{self, ObjectPath, OwnedObjectPath, Type, Value},
+    Connection, Proxy,
 };
 
 use crate::{
     error::ComError,
     wireless::{
-        WifiAdapter,
         agent::{AgentState, IwdAgent, IwdAgentMsg},
         common::{AccessPoint, Security},
+        WifiAdapter,
     },
 };
 
@@ -298,6 +299,47 @@ impl Iwd {
         Ok(access_points)
     }
 
+    pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+        let mut known_networks: Vec<AccessPoint> = vec![];
+        let proxy = ObjectManagerProxy::new(&self.conn, self.service.clone(), "/").await?;
+        for (path, interface) in proxy.get_managed_objects().await? {
+            if let Some(known_network_props) = interface.get("net.connman.iwd.KnownNetwork") {
+                let mut name: String = "".to_string();
+                let mut security: Security = Security::Psk;
+
+                if let Some(net_name) = known_network_props.get("Name") {
+                    name = net_name.downcast_ref::<String>().unwrap_or("".to_string());
+                }
+                if let Some(net_security) = known_network_props.get("Type") {
+                    let security_str = net_security.downcast_ref::<&str>().unwrap_or("psk");
+                    match security_str {
+                        "open" => {
+                            security = Security::Open;
+                        }
+                        "psk" => {
+                            security = Security::Psk;
+                        }
+                        "8021x" => {
+                            security = Security::Ieee8021x;
+                        }
+                        _ => {
+                            security = Security::Psk;
+                        }
+                    }
+                }
+
+                known_networks.push(AccessPoint {
+                    ssid: name,
+                    security,
+                    known: true,
+                    connected: false,
+                    nearby: false,
+                });
+            }
+        }
+        Ok(known_networks)
+    }
+
     pub async fn get_ap_info(&self, network: String) -> Result<AccessPoint, ComError> {
         let proxy = zbus::Proxy::new(
             &self.conn,
@@ -347,6 +389,21 @@ impl Iwd {
             nearby: true,
         })
     }
+
+    pub async fn get_modes(&self) -> Result<Vec<String>, ComError> {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            "net.connman.iwd.Adapter",
+        )
+        .await?;
+
+        let modes = self
+            .get_prop_from_proxy::<Vec<String>>(&proxy, "SupportedModes")
+            .await?;
+        Ok(modes)
+    }
 }
 
 #[cfg(test)]
@@ -357,10 +414,10 @@ mod tests {
     use super::*;
 
     // Networking tests
-    async fn setup() -> Result<Iwd, ComError> {
-        let conn = zbus::Connection::system().await?;
-        Ok(Iwd::new(conn).await?)
-    }
+    // async fn setup() -> Result<Iwd, ComError> {
+    //     let conn = zbus::Connection::system().await?;
+    //     Ok(Iwd::new(conn).await?)
+    // }
 
     // #[tokio::test]
     // async fn test_get_connected_network() -> Result<(), ComError> {
@@ -407,6 +464,7 @@ mod tests {
 //     }
 // }
 
+// Config settings
 enum IwdConfigGroup {
     General,
     Network,

@@ -3,12 +3,12 @@ use std::{borrow::Cow, fmt::Debug};
 use crate::{
     error::ComError,
     wireless::defs::{
-        NL_80211_GENL_NAME, NL_80211_GENL_VERSION,
         attr::{Attrs, Nl80211Attr},
         bss::Bss,
         cmd::Nl80211Cmd,
         interface::Interface,
         station::Station,
+        NL_80211_GENL_NAME, NL_80211_GENL_VERSION,
     },
 };
 
@@ -236,7 +236,9 @@ impl WirelessNetlink {
     }
 
     // Interface commands
-    async fn get_interface() {}
+    // async fn get_interface(&self) {
+    // self.nl_info(interface_index, Nl80211Cmd::CmdGetInterface);
+    // }
 
     async fn set_interface() {}
 

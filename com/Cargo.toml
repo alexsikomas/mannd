@@ -8,13 +8,14 @@ async-trait = "0.1.89"
 neli = { version = "0.7.1", features = ["async", "tokio"] }
 neli-proc-macros = "0.2.1"
 thiserror = { workspace = true }
+serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 zbus = { version = "5.10.0", default-features = false, features = ["tokio"] }
 zbus_systemd = { version = "0.25701.0", features = [
-  "network1",
-  "resolve1",
-  "systemd1",
+    "network1",
+    "resolve1",
+    "systemd1",
 ] }
 
 [build-dependencies]
