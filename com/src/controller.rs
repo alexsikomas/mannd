@@ -6,15 +6,15 @@ use crate::{
     netlink::WirelessNetlink,
     systemd::systemctl,
     wireless::{
+        WifiAdapter,
         agent::{AgentState, IwdAgent},
         common::{AccessPoint, Security},
         iwd::Iwd,
         wpa_supplicant::WpaSupplicant,
-        WifiAdapter,
     },
 };
 use tracing::{error, info, instrument};
-use zbus::{conn::Builder, Connection};
+use zbus::{Connection, conn::Builder};
 
 // Netlink not used here as I'm not implementing WPA authentication
 #[derive(Debug)]
@@ -211,6 +211,18 @@ impl Controller {
             Some(WirelessAdapter::Wpa(wpa)) => {}
             None => {}
         }
+        Ok(())
+    }
+
+    /// Performs cleanup before the application exits
+    pub async fn exit(&self) -> Result<(), ComError> {
+        match &self.wifi {
+            Some(WirelessAdapter::Iwd(iwd)) => {
+                iwd.unregister_agent().await?;
+            }
+            Some(WirelessAdapter::Wpa(wpa)) => {}
+            None => {}
+        };
         Ok(())
     }
 

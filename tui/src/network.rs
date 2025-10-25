@@ -14,6 +14,7 @@ pub enum NetworkAction {
     Connect(String, String, Security),
     Forget(String, Security),
     Info,
+    Exit,
     Disconnect,
     ForceIwd,
     ForceWpa,
@@ -67,18 +68,27 @@ pub async fn network_handle(
                     if let Ok(known_aps) = controller.get_known_networks().await {
                         // At this point some of the networks will still be reachable
                         // we don't have self so can't do check here
-                        let _ = net_update_tx.send(NetworkUpdate::AddKnownNetworks(known_aps));
+                        let _ = net_update_tx
+                            .send(NetworkUpdate::AddKnownNetworks(known_aps))
+                            .await;
                     }
                 }
                 NetworkAction::Forget(ssid, sec) => {
                     if let Ok(()) = controller.remove_network(ssid, sec).await {
-                        let _ = net_update_tx.send(NetworkUpdate::Update);
+                        update_networks(&mut controller, &net_update_tx).await;
                     }
                 }
+                NetworkAction::Exit => if let Ok(()) = controller.exit().await {},
                 NetworkAction::ForceIwd => {}
                 NetworkAction::ForceWpa => {}
                 _ => {}
             };
         }
+    }
+}
+
+async fn update_networks(controller: &mut Controller, net_update_tx: &Sender<NetworkUpdate>) {
+    if let Ok(aps) = controller.get_networks().await {
+        let _ = net_update_tx.send(NetworkUpdate::UpdateAps(aps)).await;
     }
 }

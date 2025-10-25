@@ -7,7 +7,7 @@ use tracing::info;
 
 use crate::{
     error::TuiError,
-    network::{network_handle, NetworkAction, NetworkState, NetworkUpdate},
+    network::{NetworkAction, NetworkState, NetworkUpdate, network_handle},
     state::{
         ConnectionAction, ConnectionState, FocusedConnection, PromptState, SelectableList, State,
     },
@@ -38,7 +38,9 @@ impl AppState {
 impl App {
     pub async fn run() -> Result<(), TuiError> {
         let mut state = AppState::new().await;
+        // to network thread
         let (net_action_tx, mut net_action_rx) = mpsc::channel::<NetworkAction>(32);
+        // from network thread
         let (net_update_tx, mut net_update_rx) = mpsc::channel::<NetworkUpdate>(32);
 
         let mut terminal = ratatui::init();
@@ -117,6 +119,7 @@ impl App {
             }
         }
 
+        net_action_tx.send(NetworkAction::Exit).await;
         Ok(())
     }
 }
@@ -169,7 +172,7 @@ fn handle_net_state_msg(state: &mut AppState, net_update_rx: &mut Receiver<Netwo
                 // state.view_state = State::Connection(state.)
             }
             NetworkUpdate::Update => {}
-        }
+        };
         state.redraw = true;
     };
 }
