@@ -5,18 +5,18 @@ use serde::Deserialize;
 use tokio::sync::RwLock;
 use tracing::{info, instrument};
 use zbus::{
+    Connection, Proxy,
     fdo::ObjectManagerProxy,
     names::OwnedUniqueName,
     zvariant::{self, ObjectPath, OwnedObjectPath, Type, Value},
-    Connection, Proxy,
 };
 
 use crate::{
     error::ComError,
     wireless::{
+        WifiAdapter,
         agent::{AgentState, IwdAgent, IwdAgentMsg},
         common::{AccessPoint, Security},
-        WifiAdapter,
     },
 };
 
@@ -304,7 +304,9 @@ impl Iwd {
 
     pub async fn scan(&mut self) -> Result<(), ComError> {
         let proxy = self.get_interface_proxy("Station").await?;
-        proxy.call_noreply("Scan", &()).await?;
+        if !self.get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
+            proxy.call_noreply("Scan", &()).await?;
+        }
         Ok(())
     }
 
