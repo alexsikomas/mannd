@@ -3,7 +3,7 @@ use tokio::sync::RwLock;
 
 use crate::{
     error::ComError,
-    netlink::WirelessNetlink,
+    netlink::Netlink,
     systemd::systemctl,
     wireless::{
         WifiAdapter,
@@ -26,7 +26,7 @@ pub enum WirelessAdapter {
 #[derive(Debug)]
 pub struct Controller {
     pub wifi: Option<WirelessAdapter>,
-    pub netlink: WirelessNetlink,
+    pub netlink: Netlink,
     connection: Option<Connection>,
 }
 
@@ -38,7 +38,7 @@ impl Controller {
 
         Ok(Self {
             wifi: None,
-            netlink: WirelessNetlink::connect().await?,
+            netlink: Netlink::connect_wireless().await?,
             connection,
         })
     }

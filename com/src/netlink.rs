@@ -26,14 +26,14 @@ use neli::{
 };
 use tracing::{info, instrument};
 
-pub struct WirelessNetlink {
+pub struct Netlink {
     router: NlRouter,
     handle: NlRouterReceiverHandle<u16, Genlmsghdr<u8, u16, NoUserHeader>>,
     family_id: u16,
     mcast: Multicast,
 }
 
-impl Debug for WirelessNetlink {
+impl Debug for Netlink {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WirelessNetlink")
             .field("family_id", &self.family_id)
@@ -41,9 +41,9 @@ impl Debug for WirelessNetlink {
     }
 }
 
-impl WirelessNetlink {
+impl Netlink {
     #[instrument]
-    pub async fn connect() -> Result<Self, ComError> {
+    pub async fn connect_wireless() -> Result<Self, ComError> {
         let (mut router, mut handle) =
             NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
         let family_id = router.resolve_genl_family(NL_80211_GENL_NAME).await?;
