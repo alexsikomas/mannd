@@ -18,6 +18,10 @@ pub enum ComError {
     NeliPacketError(Box<dyn ThreadSafeError>),
     #[error("Netlink Socket Error: {0}")]
     NeliSocketError(#[from] neli::err::SocketError),
+    #[error("Rt Builder Error: {0}")]
+    RtBuilder(#[from] neli::rtnl::RtattrBuilderError),
+    #[error("Ifinfomsg error: {0}")]
+    Ifinfomsg(#[from] neli::rtnl::IfinfomsgBuilderError),
 
     #[error("Network could not be found!")]
     NetworkNotFound,
