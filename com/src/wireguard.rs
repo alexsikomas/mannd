@@ -1,17 +1,17 @@
-use std::{ffi::CStr, io::Cursor, net::IpAddr};
+use std::{any::Any, ffi::CStr, io::Cursor, net::IpAddr};
 
 use futures::stream::StreamExt;
 use neli::{
     attr::Attribute,
     consts::{
         nl::NlmF,
-        rtnl::{Ifa, Ifla, IflaInfo, RtAddrFamily, Rtm},
+        rtnl::{Ifa, Iff, Ifla, IflaInfo, RtAddrFamily, Rtm},
     },
-    genl::Genlmsghdr,
+    genl::{AttrTypeBuilder, Genlmsghdr, NlattrBuilder},
     nl::{NlPayload, NlmsghdrBuilder},
     router::asynchronous::{NlRouter, NlRouterReceiverHandle},
     rtnl::{Ifaddrmsg, IfaddrmsgBuilder, Ifinfomsg, IfinfomsgBuilder, Rtattr, RtattrBuilder},
-    types::{GenlBuffer, RtBuffer},
+    types::{GenlBuffer, NlBuffer, RtBuffer},
     utils::Groups,
     ToBytes,
 };
@@ -82,8 +82,7 @@ impl Wireguard {
         Ok(())
     }
 
-    async fn set_addr(&self, ips: Vec<IpAddr>) -> Result<(), ComError> {
-        // interface index
+    async fn get_index(&self) -> Result<u32, ComError> {
         let mut index: u32 = 0;
         let ifinfomsg = IfinfomsgBuilder::default()
             .ifi_family(neli::consts::rtnl::RtAddrFamily::Unspecified)
@@ -127,17 +126,27 @@ impl Wireguard {
             ));
         }
 
-        // add addr
+        Ok(index)
+    }
+    async fn set_addr(&self, ips: Vec<IpAddr>) -> Result<(), ComError> {
+        let index = self.get_index().await?;
 
         for ip in ips {
             match ip {
                 IpAddr::V4(addr) => {
                     let mut attrs = RtBuffer::new();
 
+                    println!("addr: {}", addr.to_string());
                     attrs.push(
                         RtattrBuilder::default()
                             .rta_type(Ifa::Local)
-                            .rta_payload(addr.to_string())
+                            .rta_payload(addr.octets())
+                            .build()?,
+                    );
+                    attrs.push(
+                        RtattrBuilder::default()
+                            .rta_type(Ifa::Address)
+                            .rta_payload(addr.octets())
                             .build()?,
                     );
 
@@ -145,6 +154,8 @@ impl Wireguard {
                         .ifa_family(neli::consts::rtnl::RtAddrFamily::Inet)
                         .ifa_index(index)
                         .rtattrs(attrs)
+                        .ifa_prefixlen(32)
+                        .ifa_scope(neli::consts::rtnl::RtScope::Universe)
                         .build()?;
 
                     self.router
@@ -161,7 +172,7 @@ impl Wireguard {
                     attrs.push(
                         RtattrBuilder::default()
                             .rta_type(Ifa::Local)
-                            .rta_payload(addr.to_string())
+                            .rta_payload(addr.octets())
                             .build()?,
                     );
 
@@ -169,6 +180,8 @@ impl Wireguard {
                         .ifa_family(neli::consts::rtnl::RtAddrFamily::Inet6)
                         .ifa_index(index)
                         .rtattrs(attrs)
+                        .ifa_prefixlen(128)
+                        .ifa_scope(neli::consts::rtnl::RtScope::Universe)
                         .build()?;
 
                     self.router
@@ -184,8 +197,62 @@ impl Wireguard {
         Ok(())
     }
 
-    async fn set_mtu(mtu: u32) -> Result<(), ComError> {
-        todo!()
+    async fn set_mtu(&self, mtu: u32) -> Result<(), ComError> {
+        let index = self.get_index().await?;
+
+        let mut attrs = RtBuffer::new();
+
+        attrs.push(
+            RtattrBuilder::default()
+                .rta_type(Ifla::Mtu)
+                .rta_payload(mtu)
+                .build()?,
+        );
+        let ifi = IfinfomsgBuilder::default()
+            .ifi_family(RtAddrFamily::Unspecified)
+            .ifi_type(neli::consts::rtnl::Arphrd::Netrom)
+            .ifi_index(index as i32)
+            .rtattrs(attrs)
+            .build()?;
+
+        self.router
+            .send::<_, _, (), ()>(
+                Rtm::Newlink,
+                NlmF::REQUEST | NlmF::ACK,
+                NlPayload::Payload(ifi),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn set_state(&self, go_up: bool) -> Result<(), ComError> {
+        let index = self.get_index().await?;
+
+        let ifi = match go_up {
+            true => IfinfomsgBuilder::default()
+                .ifi_family(RtAddrFamily::Unspecified)
+                .ifi_type(neli::consts::rtnl::Arphrd::Netrom)
+                .ifi_index(index as i32)
+                .ifi_flags(Iff::UP)
+                .ifi_change(Iff::from_bits_truncate(1))
+                .build()?,
+            false => IfinfomsgBuilder::default()
+                .ifi_family(RtAddrFamily::Unspecified)
+                .ifi_type(neli::consts::rtnl::Arphrd::Netrom)
+                .ifi_index(index as i32)
+                .ifi_flags(Iff::empty())
+                .ifi_change(Iff::UP)
+                .build()?,
+        };
+
+        self.router
+            .send::<_, _, (), ()>(
+                Rtm::Newlink,
+                NlmF::REQUEST | NlmF::ACK,
+                NlPayload::Payload(ifi),
+            )
+            .await?;
+        Ok(())
     }
 
     // [#] resolvconf -a il-tlv-wg-102 -m 0 -x
@@ -195,7 +262,10 @@ impl Wireguard {
 
 // tests
 mod tests {
-    use std::sync::Arc;
+    use std::{
+        net::{Ipv4Addr, Ipv6Addr},
+        sync::Arc,
+    };
 
     use tokio::sync::OnceCell;
 
@@ -216,7 +286,19 @@ mod tests {
     #[tokio::test]
     async fn set_addr_test() -> Result<(), ComError> {
         let wg = get_wg_interface().await?;
-        wg.set_addr(vec![]).await?;
+        wg.set_addr(vec![
+            IpAddr::V4(Ipv4Addr::new(12, 76, 70, 29)),
+            IpAddr::V6(Ipv6Addr::new(
+                0xfa00, 0xb1bb, 0x7bbb, 0xbb21, 1, 0, 0x9, 0x4694,
+            )),
+        ])
+        .await?;
+        Ok(())
+    }
+
+    async fn set_mtu_test() -> Result<(), ComError> {
+        let wg = get_wg_interface().await?;
+        wg.set_mtu(1420).await?;
         Ok(())
     }
 }
