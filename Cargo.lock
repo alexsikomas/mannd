@@ -244,6 +244,8 @@ name = "com"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures",
+ "futures-timer",
  "neli",
  "neli-proc-macros",
  "serde",
