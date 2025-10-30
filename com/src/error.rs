@@ -22,6 +22,8 @@ pub enum ComError {
     RtBuilder(#[from] neli::rtnl::RtattrBuilderError),
     #[error("Ifinfomsg error: {0}")]
     Ifinfomsg(#[from] neli::rtnl::IfinfomsgBuilderError),
+    #[error("Ifaddr error: {0}")]
+    Ifaddrmsgbuilder(#[from] neli::rtnl::IfaddrmsgBuilderError),
 
     #[error("Network could not be found!")]
     NetworkNotFound,
