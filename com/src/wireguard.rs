@@ -1,6 +1,5 @@
-use std::{any::Any, ffi::CStr, io::Cursor, net::IpAddr};
-
 use futures::stream::StreamExt;
+
 use neli::{
     attr::Attribute,
     consts::{
@@ -15,6 +14,7 @@ use neli::{
     utils::Groups,
     ToBytes,
 };
+use std::{any::Any, ffi::CStr, io::Cursor, net::IpAddr};
 use tokio::process::Command;
 use tracing::info;
 
@@ -27,7 +27,7 @@ struct Wireguard {
 }
 
 impl Wireguard {
-    /// Connects socket and sets up wg0
+    /// Connects socket and sets up `INTERFACE`
     async fn start_interface() -> Result<Self, ComError> {
         let (router, handle) =
             NlRouter::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty()).await?;
@@ -82,6 +82,7 @@ impl Wireguard {
         Ok(())
     }
 
+    /// Gets `INTERFACE` index
     async fn get_index(&self) -> Result<u32, ComError> {
         let mut index: u32 = 0;
         let ifinfomsg = IfinfomsgBuilder::default()
@@ -128,6 +129,8 @@ impl Wireguard {
 
         Ok(index)
     }
+
+    /// Adds the IPv4/6 address to the `INTERFACE`
     async fn set_addr(&self, ips: Vec<IpAddr>) -> Result<(), ComError> {
         let index = self.get_index().await?;
 
@@ -197,6 +200,10 @@ impl Wireguard {
         Ok(())
     }
 
+    /// Sets MTU to prevent ip fragmentation
+    ///
+    /// MTU should typically be set to 1420 since
+    /// standard ethernet = 1500, worst case overhead = 80
     async fn set_mtu(&self, mtu: u32) -> Result<(), ComError> {
         let index = self.get_index().await?;
 
@@ -225,6 +232,7 @@ impl Wireguard {
         Ok(())
     }
 
+    /// Set state of `INTERFACE` via Netlink
     async fn set_state(&self, go_up: bool) -> Result<(), ComError> {
         let index = self.get_index().await?;
 
@@ -251,6 +259,28 @@ impl Wireguard {
                 NlmF::REQUEST | NlmF::ACK,
                 NlPayload::Payload(ifi),
             )
+            .await?;
+        Ok(())
+    }
+
+    /// Configures the system DNS to exclusively use name servers from `INTERFACE`
+    /// This will ignore all other DNS configurations due to `-x` flag
+    async fn update_dns(&self) -> Result<(), ComError> {
+        let mut command = Command::new("resolvconf")
+            .args(vec!["-a", INTERFACE, "-m", "0", "-x"])
+            .output()
+            .await?;
+        Ok(())
+    }
+
+    /// Prevents routing loop
+    ///
+    /// Applies firewall mark for port 51820 to it's outgoing
+    /// packets
+    async fn add_fwmark(&self) -> Result<(), ComError> {
+        let mut command = Command::new("wg")
+            .args(vec!["set", INTERFACE, "fwmark", "51820"])
+            .output()
             .await?;
         Ok(())
     }
