@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fmt::Debug};
+use std::{borrow::Cow, fmt::Debug, net::Ipv4Addr};
 
 use crate::{
     error::ComError,
@@ -14,14 +14,17 @@ use crate::{
 
 use neli::{
     consts::{
-        nl::{NlmF, Nlmsg},
+        nl::{NlTypeWrapper, NlmF, Nlmsg},
+        rtnl::{Ifla, Rta, Rtm, RtmF},
         socket::NlFamily,
     },
     err::{DeError, MsgError},
     genl::{Genlmsghdr, GenlmsghdrBuilder, NlattrBuilder, NoUserHeader},
-    nl::NlPayload,
+    nl::{NlPayload, NlmsghdrBuilder},
     router::asynchronous::{NlRouter, NlRouterReceiverHandle},
-    types::GenlBuffer,
+    rtnl::{IfinfomsgBuilder, RtattrBuilder, Rtmsg, RtmsgBuilder},
+    socket::asynchronous::NlSocketHandle,
+    types::{GenlBuffer, NlBuffer, RtBuffer},
     utils::Groups,
 };
 use tracing::{info, instrument};
@@ -228,6 +231,78 @@ impl Netlink {
         Ok(self
             .nl_info(interface_index, Nl80211Cmd::CmdGetScan)
             .await?)
+    }
+
+    /// Used to identify the main physical interface
+    ///
+    pub async fn json_route() -> Result<(), ComError> {
+        // recieving messages is much simpler with this apporach rather than
+        // using &mut self here
+        let mut socket = NlSocketHandle::connect(NlFamily::Route, None, Groups::empty())?;
+        // Does the following command
+        // ip rotue -j get 8.8.8.8
+        let mut buffer = RtBuffer::new();
+        buffer.push(
+            RtattrBuilder::default()
+                .rta_type(Rta::Dst)
+                .rta_payload(Ipv4Addr::new(8, 8, 8, 8).octets())
+                .build()?,
+        );
+
+        let rtmsg = RtmsgBuilder::default()
+            .rtm_family(neli::consts::rtnl::RtAddrFamily::Inet)
+            .rtm_dst_len(32)
+            .rtm_src_len(0)
+            .rtm_tos(0)
+            .rtm_table(neli::consts::rtnl::RtTable::Unspec)
+            .rtm_protocol(neli::consts::rtnl::Rtprot::Unspec)
+            .rtm_scope(neli::consts::rtnl::RtScope::Universe)
+            .rtm_type(neli::consts::rtnl::Rtn::Unspec)
+            .rtm_flags(RtmF::LOOKUPTABLE)
+            .rtattrs(buffer)
+            .build()?;
+
+        // this doesn't get the json so ignore response
+        let nlmsg = NlmsghdrBuilder::default()
+            .nl_type(Rtm::Getroute)
+            .nl_flags(NlmF::REQUEST)
+            .nl_payload(NlPayload::Payload(rtmsg))
+            .build()?;
+
+        socket.send(&nlmsg).await?;
+        let messages = socket.recv_all::<NlTypeWrapper, Rtmsg>().await?;
+
+        let mut index = 0;
+        for msg in messages.0 {
+            if let Some(payload) = msg.get_payload() {
+                if let Some(attr) = payload.rtattrs().get_attr_handle().get_attribute(Rta::Oif) {
+                    let bytes = attr.rta_payload().as_ref();
+                    if bytes.len() == 4 {
+                        let arr: [u8; 4] = bytes.try_into().unwrap();
+                        index = u32::from_le_bytes(arr);
+                    }
+                }
+            }
+        }
+
+        // let buffer = RtBuffer::new();
+        // buffer.push(
+        //     RtattrBuilder::default()
+        //         .rta_type(Ifla::ExtMask)
+        //         .rta_payload(1 | 2)
+        //         .build()?,
+        // );
+        // let ifimsg = IfinfomsgBuilder::default()
+        //     .ifi_family(neli::consts::rtnl::RtAddrFamily::Unspecified)
+        //     .ifi_type(neli::consts::rtnl::Arphrd::Netrom)
+        //     .ifi_index(1)
+        //     .rtattrs(buffer)
+        //     .build()?;
+        //
+        // self.router
+        // .send(Rtm::Getlink, NlmF::REQUEST, NlPayload::Payload(ifimsg))
+        // .await?;
+        Ok(())
     }
 
     /// Changes the power management mode
@@ -440,4 +515,16 @@ impl Netlink {
 struct Multicast {
     sock: NlRouter,
     recv: NlRouterReceiverHandle<u16, Genlmsghdr<u8, u16>>,
+}
+
+mod tests {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn json_route_test() -> Result<(), ComError> {
+        Netlink::json_route().await?;
+        Ok(())
+    }
 }
