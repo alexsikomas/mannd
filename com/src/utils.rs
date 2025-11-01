@@ -1,60 +1,101 @@
-use std::ffi::CStr;
+use std::{char::from_u32, ffi::CStr};
 
 use neli::{
     consts::{
-        nl::NlmF,
+        nl::{NlTypeWrapper, NlmF},
         rtnl::{Ifla, Rtm},
     },
-    nl::NlPayload,
+    nl::{NlPayload, NlmsghdrBuilder},
     router::asynchronous::{NlRouter, NlRouterReceiverHandle},
-    rtnl::{Ifinfomsg, IfinfomsgBuilder},
+    rtnl::{Ifinfomsg, IfinfomsgBuilder, Rtmsg},
+    socket::asynchronous::NlSocketHandle,
+    utils::Groups,
 };
 
 use crate::error::ComError;
 
-/// Gets `INTERFACE` index
-pub async fn get_index(router: &NlRouter, interface: &'static str) -> Result<u32, ComError> {
-    let mut index: u32 = 0;
+pub async fn get_name(index: u32) -> Result<String, ComError> {
+    let socket =
+        NlSocketHandle::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty())?;
     let ifinfomsg = IfinfomsgBuilder::default()
+        .ifi_index(index as i32)
         .ifi_family(neli::consts::rtnl::RtAddrFamily::Unspecified)
         .build()?;
 
-    let mut msg: NlRouterReceiverHandle<Rtm, Ifinfomsg> = router
-        .send(
-            Rtm::Getlink,
-            NlmF::REQUEST | NlmF::DUMP,
-            NlPayload::Payload(ifinfomsg),
-        )
-        .await?;
+    let nlmsg = NlmsghdrBuilder::default()
+        .nl_type(Rtm::Getlink)
+        .nl_flags(NlmF::REQUEST)
+        .nl_payload(NlPayload::Payload(ifinfomsg))
+        .build()?;
 
-    while let Some(Ok(res)) = msg.next::<Rtm, Ifinfomsg>().await {
-        if let Some(payload) = res.get_payload() {
-            let cur_index = payload.ifi_index();
-            for attr in res.get_payload().unwrap().rtattrs().iter() {
-                if (*attr.rta_type() == Ifla::Ifname) {
-                    let bytes = attr.rta_payload().as_ref();
+    socket.send(&nlmsg).await?;
 
-                    match CStr::from_bytes_until_nul(bytes) {
-                        Ok(v) => {
-                            if (v.to_string_lossy().into_owned() == interface) {
-                                index = cur_index.clone() as u32;
-                                break;
-                            }
-                        }
-                        Err(e) => {}
-                    };
+    let messages = socket.recv_all::<NlTypeWrapper, Ifinfomsg>().await?;
+    for msg in messages.0 {
+        if let Some(payload) = msg.get_payload() {
+            if let Some(name) = payload
+                .rtattrs()
+                .get_attr_handle()
+                .get_attribute(Ifla::Ifname)
+            {
+                if let Ok(mut name) = String::from_utf8((*name.rta_payload().as_ref()).to_vec()) {
+                    // remove the \0 char
+                    name.remove(name.len() - 1);
+                    return Ok(name);
                 }
             }
         }
     }
 
-    println!("wg-mannd is index: {}", index);
+    Ok("".to_string())
+}
+
+pub async fn get_index(interface: &'static str) -> Result<u32, ComError> {
+    let socket =
+        NlSocketHandle::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty())?;
+
+    let mut index: u32 = 0;
+    let ifinfomsg = IfinfomsgBuilder::default()
+        .ifi_family(neli::consts::rtnl::RtAddrFamily::Unspecified)
+        .build()?;
+
+    let nlmsg = NlmsghdrBuilder::default()
+        .nl_type(Rtm::Getlink)
+        .nl_flags(NlmF::REQUEST | NlmF::DUMP)
+        .nl_payload(NlPayload::Payload(ifinfomsg))
+        .build()?;
+
+    socket.send(&nlmsg).await?;
+
+    let messages = socket.recv_all::<NlTypeWrapper, Ifinfomsg>().await?;
+
+    for msg in messages.0 {
+        if let Some(payload) = msg.get_payload() {
+            let cur_index = payload.ifi_index();
+            if let Some(name) = payload
+                .rtattrs()
+                .get_attr_handle()
+                .get_attribute(Ifla::Ifname)
+            {
+                let bytes = name.rta_payload().as_ref();
+
+                match CStr::from_bytes_until_nul(bytes) {
+                    Ok(v) => {
+                        if (v.to_string_lossy().into_owned() == interface) {
+                            index = cur_index.clone() as u32;
+                            return Ok(index);
+                        }
+                    }
+                    Err(e) => {}
+                };
+            }
+        }
+    }
 
     if (index == 0) {
         return Err(ComError::OperationFailed(
             "Cannot find wg-mannd index!".to_string(),
         ));
     }
-
     Ok(index)
 }
