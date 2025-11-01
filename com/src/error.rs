@@ -28,6 +28,10 @@ pub enum ComError {
     Nlmsgbuilder(#[from] neli::genl::NlattrBuilderError),
     #[error("AttrType Builder Error: {0}")]
     AttrTypeBuilder(#[from] neli::genl::AttrTypeBuilderError),
+    #[error("Rtm Builder Error: {0}")]
+    RtmMsgBuilder(#[from] neli::rtnl::RtmsgBuilderError),
+    #[error("Nlmsg Builder Error: {0}")]
+    NlmsgBuilder(#[from] neli::nl::NlmsghdrBuilderError),
 
     #[error("Network could not be found!")]
     NetworkNotFound,
