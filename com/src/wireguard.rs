@@ -83,7 +83,7 @@ impl Wireguard {
     }
     /// Adds the IPv4/6 address to the `INTERFACE`
     async fn set_addr(&self, ips: Vec<IpAddr>) -> Result<(), ComError> {
-        let index = get_index(&self.router, INTERFACE).await?;
+        let index = get_index(INTERFACE).await?;
 
         for ip in ips {
             match ip {
@@ -156,7 +156,7 @@ impl Wireguard {
     /// MTU should typically be set to 1420 since
     /// standard ethernet = 1500, worst case overhead = 80
     async fn set_mtu(&self, mtu: u32) -> Result<(), ComError> {
-        let index = get_index(&self.router, INTERFACE).await?;
+        let index = get_index(INTERFACE).await?;
         let mut attrs = RtBuffer::new();
 
         attrs.push(
@@ -184,7 +184,7 @@ impl Wireguard {
 
     /// Set state of `INTERFACE` via Netlink
     async fn set_state(&self, go_up: bool) -> Result<(), ComError> {
-        let index = get_index(&self.router, INTERFACE).await?;
+        let index = get_index(INTERFACE).await?;
 
         let ifi = match go_up {
             true => IfinfomsgBuilder::default()
@@ -276,6 +276,7 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
     async fn set_mtu_test() -> Result<(), ComError> {
         let wg = get_wg_interface().await?;
         wg.set_mtu(1420).await?;

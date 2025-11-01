@@ -2,6 +2,7 @@ use std::{borrow::Cow, fmt::Debug, net::Ipv4Addr};
 
 use crate::{
     error::ComError,
+    utils::get_name,
     wireless::defs::{
         attr::{Attrs, Nl80211Attr},
         bss::Bss,
@@ -235,12 +236,12 @@ impl Netlink {
 
     /// Used to identify the main physical interface
     ///
-    pub async fn json_route() -> Result<(), ComError> {
-        // recieving messages is much simpler with this apporach rather than
-        // using &mut self here
+    /// uses route command to see which interface processes it
+    pub async fn get_main_interface() -> Result<(String, u32), ComError> {
+        // can't use self router as we need route here
         let mut socket = NlSocketHandle::connect(NlFamily::Route, None, Groups::empty())?;
         // Does the following command
-        // ip rotue -j get 8.8.8.8
+        // ip rotue get 8.8.8.8
         let mut buffer = RtBuffer::new();
         buffer.push(
             RtattrBuilder::default()
@@ -262,7 +263,6 @@ impl Netlink {
             .rtattrs(buffer)
             .build()?;
 
-        // this doesn't get the json so ignore response
         let nlmsg = NlmsghdrBuilder::default()
             .nl_type(Rtm::Getroute)
             .nl_flags(NlmF::REQUEST)
@@ -284,25 +284,8 @@ impl Netlink {
                 }
             }
         }
-
-        // let buffer = RtBuffer::new();
-        // buffer.push(
-        //     RtattrBuilder::default()
-        //         .rta_type(Ifla::ExtMask)
-        //         .rta_payload(1 | 2)
-        //         .build()?,
-        // );
-        // let ifimsg = IfinfomsgBuilder::default()
-        //     .ifi_family(neli::consts::rtnl::RtAddrFamily::Unspecified)
-        //     .ifi_type(neli::consts::rtnl::Arphrd::Netrom)
-        //     .ifi_index(1)
-        //     .rtattrs(buffer)
-        //     .build()?;
-        //
-        // self.router
-        // .send(Rtm::Getlink, NlmF::REQUEST, NlPayload::Payload(ifimsg))
-        // .await?;
-        Ok(())
+        let name = get_name(index).await?;
+        Ok((name, index))
     }
 
     /// Changes the power management mode
@@ -524,7 +507,7 @@ mod tests {
 
     #[tokio::test]
     async fn json_route_test() -> Result<(), ComError> {
-        Netlink::json_route().await?;
+        Netlink::get_main_interface().await?;
         Ok(())
     }
 }
