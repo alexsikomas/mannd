@@ -79,29 +79,27 @@ impl Netlink {
     where
         T: for<'a> TryFrom<Attrs<'a, Nl80211Attr>, Error = DeError>,
     {
+        let mut attrs = GenlBuffer::new();
+
         let msghdr = GenlmsghdrBuilder::<Nl80211Cmd, Nl80211Attr>::default()
             .cmd(cmd)
             .attrs({
-                let mut attrs = GenlBuffer::new();
                 if let Some(interface_index) = interface_index {
                     attrs.push(
                         NlattrBuilder::default()
                             .nla_type(
                                 neli::genl::AttrTypeBuilder::default()
                                     .nla_type(Nl80211Attr::AttrIfindex)
-                                    .build()
-                                    .unwrap(),
+                                    .build()?,
                             )
                             .nla_payload(interface_index)
-                            .build()
-                            .unwrap(),
+                            .build()?,
                     );
                 }
                 attrs
             })
             .version(NL_80211_GENL_VERSION)
-            .build()
-            .unwrap();
+            .build()?;
 
         let mut recv: NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>> = self
             .router
@@ -159,19 +157,16 @@ impl Netlink {
                             .nla_type(
                                 neli::genl::AttrTypeBuilder::default()
                                     .nla_type(Nl80211Attr::AttrIfindex)
-                                    .build()
-                                    .unwrap(),
+                                    .build()?,
                             )
                             .nla_payload(interface_index)
-                            .build()
-                            .unwrap(),
+                            .build()?,
                     );
                 }
                 attrs
             })
             .version(NL_80211_GENL_VERSION)
-            .build()
-            .unwrap();
+            .build()?;
 
         info!("Created netlink message header");
         let mut recv: NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>> = self
