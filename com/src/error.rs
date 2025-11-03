@@ -32,6 +32,8 @@ pub enum ComError {
     RtmMsgBuilder(#[from] neli::rtnl::RtmsgBuilderError),
     #[error("Nlmsg Builder Error: {0}")]
     NlmsgBuilder(#[from] neli::nl::NlmsghdrBuilderError),
+    #[error("Genlmsg Builder Error: {0}")]
+    GenlmsgBuilder(#[from] neli::genl::GenlmsghdrBuilderError),
 
     #[error("Network could not be found!")]
     NetworkNotFound,
