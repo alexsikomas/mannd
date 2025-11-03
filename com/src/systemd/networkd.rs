@@ -104,7 +104,6 @@ mod tests {
     #[tokio::test]
     async fn test_get_netd_files() -> Result<(), ComError> {
         let files = get_netd_files().await?;
-        println!("{:?}", files);
         Ok(())
     }
 

@@ -80,7 +80,6 @@ pub async fn get_index(interface: &'static str) -> Result<u32, ComError> {
 
                     match CStr::from_bytes_until_nul(bytes) {
                         Ok(v) => {
-                            println!("{} {}", v.to_string_lossy().into_owned(), interface);
                             if (v.to_string_lossy().into_owned() == interface) {
                                 index = cur_index.clone() as u32;
                                 return Ok(index);

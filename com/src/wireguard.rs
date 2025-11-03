@@ -4,17 +4,26 @@ use neli::{
     attr::Attribute,
     consts::{
         nl::NlmF,
-        rtnl::{Ifa, Iff, Ifla, IflaInfo, RtAddrFamily, Rtm},
+        rtnl::{Ifa, Iff, Ifla, IflaInfo, RtAddrFamily, Rta, Rtm, RtmF},
     },
     genl::{AttrTypeBuilder, Genlmsghdr, NlattrBuilder},
     nl::{NlPayload, NlmsghdrBuilder},
     router::asynchronous::{NlRouter, NlRouterReceiverHandle},
-    rtnl::{Ifaddrmsg, IfaddrmsgBuilder, Ifinfomsg, IfinfomsgBuilder, Rtattr, RtattrBuilder},
+    rtnl::{
+        Ifaddrmsg, IfaddrmsgBuilder, Ifinfomsg, IfinfomsgBuilder, Rtattr, RtattrBuilder,
+        RtmsgBuilder,
+    },
+    socket::asynchronous::NlSocketHandle,
     types::{GenlBuffer, NlBuffer, RtBuffer},
     utils::Groups,
     ToBytes,
 };
-use std::{any::Any, ffi::CStr, io::Cursor, net::IpAddr};
+use std::{
+    any::Any,
+    ffi::CStr,
+    io::Cursor,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+};
 use tokio::process::Command;
 use tracing::info;
 
@@ -89,8 +98,6 @@ impl Wireguard {
             match ip {
                 IpAddr::V4(addr) => {
                     let mut attrs = RtBuffer::new();
-
-                    println!("addr: {}", addr.to_string());
                     attrs.push(
                         RtattrBuilder::default()
                             .rta_type(Ifa::Local)
@@ -213,25 +220,220 @@ impl Wireguard {
         Ok(())
     }
 
-    /// Configures the system DNS to exclusively use name servers from `INTERFACE`
-    /// This will ignore all other DNS configurations due to `-x` flag
-    async fn update_dns(&self) -> Result<(), ComError> {
-        let mut command = Command::new("resolvconf")
-            .args(vec!["-a", INTERFACE, "-m", "0", "-x"])
+    /// Prevents routing loop
+    ///
+    /// Applies firewall mark for port 51820 to it's outgoing
+    /// packets
+    async fn add_wg_fwmark(&self) -> Result<(), ComError> {
+        let command = Command::new("wg")
+            .args(vec!["set", INTERFACE, "fwmark", "51820"])
             .output()
             .await?;
         Ok(())
     }
 
-    /// Prevents routing loop
-    ///
-    /// Applies firewall mark for port 51820 to it's outgoing
-    /// packets
-    async fn add_fwmark(&self) -> Result<(), ComError> {
-        let mut command = Command::new("wg")
-            .args(vec!["set", INTERFACE, "fwmark", "51820"])
+    async fn add_ip_fwmark(&self) -> Result<(), ComError> {
+        let _ = Command::new("sudo")
+            .args(vec![
+                "ip", "-6", "rule", "del", "not", "fwmark", "51820", "table", "51820",
+            ])
+            .output()
+            .await;
+
+        let command = Command::new("sudo")
+            .args(vec![
+                "ip", "-6", "rule", "add", "not", "fwmark", "51820", "table", "51820",
+            ])
             .output()
             .await?;
+
+        let _ = Command::new("sudo")
+            .args(vec![
+                "ip", "-4", "rule", "del", "not", "fwmark", "51820", "table", "51820",
+            ])
+            .output()
+            .await;
+
+        let command = Command::new("sudo")
+            .args(vec![
+                "ip", "-4", "rule", "add", "not", "fwmark", "51820", "table", "51820",
+            ])
+            .output()
+            .await?;
+
+        Ok(())
+        // This is not used because neli doesn't implement
+        // FIB_RULE_INVERT (0x02)
+        //
+        // let FRA_FWMARK = 10;
+        // let FIB_RULE_INVERT = 0x02;
+        // // ipv6
+        // let mut attrs = RtBuffer::new();
+        // attrs.push(
+        //     RtattrBuilder::default()
+        //         .rta_type(Rta::Mark)
+        //         .rta_payload(0xca6cu32)
+        //         .build()?,
+        // );
+        //
+        // // hex is just 51820
+        // attrs.push(
+        //     RtattrBuilder::default()
+        //         .rta_type(Rta::Table)
+        //         .rta_payload(0xca6c)
+        //         .build()?,
+        // );
+        //
+        // let rm: RtmF = 0x02.into();
+        // println!("{:?}", RtmF::EQUALIZE.bits());
+        // let rtmsg = RtmsgBuilder::default()
+        //     .rtm_family(RtAddrFamily::Inet)
+        //     .rtm_dst_len(0)
+        //     .rtm_src_len(0)
+        //     .rtm_tos(0)
+        //     .rtm_table(neli::consts::rtnl::RtTable::Unspec)
+        //     .rtm_protocol(neli::consts::rtnl::Rtprot::Unspec)
+        //     .rtm_scope(neli::consts::rtnl::RtScope::Universe)
+        //     .rtm_type(neli::consts::rtnl::Rtn::Unspec)
+        //     .rtattrs(attrs)
+        //     .build()?;
+        //
+        // self.router
+        //     .send::<_, _, (), ()>(
+        //         Rtm::Newrule,
+        //         NlmF::REQUEST | NlmF::ACK | NlmF::EXCL | NlmF::CREATE,
+        //         NlPayload::Payload(rtmsg),
+        //     )
+        //     .await?;
+    }
+
+    async fn prevent_default_route(&self) -> Result<(), ComError> {
+        // neli also doesn't implement FRA_SUPPRESS_PREFIXLEN
+        let _ = Command::new("sudo")
+            .args(vec![
+                "ip",
+                "-6",
+                "rule",
+                "del",
+                "table",
+                "main",
+                "suppress_prefixlength",
+                "0",
+            ])
+            .output()
+            .await;
+
+        let command = Command::new("sudo")
+            .args(vec![
+                "ip",
+                "-6",
+                "rule",
+                "add",
+                "table",
+                "main",
+                "suppress_prefixlength",
+                "0",
+            ])
+            .output()
+            .await?;
+
+        let _ = Command::new("sudo")
+            .args(vec![
+                "ip",
+                "-4",
+                "rule",
+                "del",
+                "table",
+                "main",
+                "suppress_prefixlength",
+                "0",
+            ])
+            .output()
+            .await;
+
+        let command = Command::new("sudo")
+            .args(vec![
+                "ip",
+                "-4",
+                "rule",
+                "add",
+                "table",
+                "main",
+                "suppress_prefixlength",
+                "0",
+            ])
+            .output()
+            .await?;
+
+        Ok(())
+    }
+
+    async fn route_traffic(&self) -> Result<(), ComError> {
+        let index = get_index(INTERFACE).await?;
+        let mut attrs = RtBuffer::new();
+        // ipv4
+        attrs.push(
+            RtattrBuilder::default()
+                .rta_type(Rta::Dst)
+                .rta_payload(Ipv4Addr::new(0, 0, 0, 0).octets())
+                .build()?,
+        );
+
+        attrs.push(
+            RtattrBuilder::default()
+                .rta_type(Rta::Oif)
+                .rta_payload(index)
+                .build()?,
+        );
+
+        let rtmsg = RtmsgBuilder::default()
+            .rtm_family(RtAddrFamily::Inet)
+            .rtm_dst_len(0)
+            .rtm_src_len(0)
+            .rtm_tos(0)
+            .rtm_table(neli::consts::rtnl::RtTable::Unspec)
+            .rtm_protocol(neli::consts::rtnl::Rtprot::Boot)
+            .rtm_scope(neli::consts::rtnl::RtScope::Link)
+            .rtm_type(neli::consts::rtnl::Rtn::Unicast)
+            .rtattrs(attrs)
+            .build()?;
+
+        self.router
+            .send::<_, _, (), ()>(Rtm::Newroute, NlmF::REQUEST, NlPayload::Payload(rtmsg))
+            .await?;
+
+        let mut attrs = RtBuffer::new();
+
+        attrs.push(
+            RtattrBuilder::default()
+                .rta_type(Rta::Dst)
+                .rta_payload(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0).octets())
+                .build()?,
+        );
+
+        attrs.push(
+            RtattrBuilder::default()
+                .rta_type(Rta::Oif)
+                .rta_payload(index)
+                .build()?,
+        );
+
+        let rtmsg = RtmsgBuilder::default()
+            .rtm_family(RtAddrFamily::Inet6)
+            .rtm_dst_len(0)
+            .rtm_src_len(0)
+            .rtm_tos(0)
+            .rtm_table(neli::consts::rtnl::RtTable::Unspec)
+            .rtm_protocol(neli::consts::rtnl::Rtprot::Boot)
+            .rtm_scope(neli::consts::rtnl::RtScope::Link)
+            .rtm_type(neli::consts::rtnl::Rtn::Unicast)
+            .rtattrs(attrs)
+            .build()?;
+
+        self.router
+            .send::<_, _, (), ()>(Rtm::Newroute, NlmF::REQUEST, NlPayload::Payload(rtmsg))
+            .await?;
+
         Ok(())
     }
 
@@ -261,6 +463,10 @@ mod tests {
         .await?;
 
         wg.set_mtu(1420).await?;
+        wg.add_wg_fwmark().await?;
+        wg.add_ip_fwmark().await?;
+        wg.prevent_default_route().await?;
+        wg.route_traffic().await?;
         Ok(())
     }
 }
