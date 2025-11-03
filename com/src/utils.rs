@@ -67,27 +67,28 @@ pub async fn get_index(interface: &'static str) -> Result<u32, ComError> {
 
     socket.send(&nlmsg).await?;
 
-    let messages = socket.recv_all::<NlTypeWrapper, Ifinfomsg>().await?;
+    while let Ok(messages) = socket.recv::<NlTypeWrapper, Ifinfomsg>().await {
+        for msg in messages.0.into_iter() {
+            if let Some(payload) = msg.unwrap().get_payload() {
+                let cur_index = payload.ifi_index();
+                if let Some(name) = payload
+                    .rtattrs()
+                    .get_attr_handle()
+                    .get_attribute(Ifla::Ifname)
+                {
+                    let bytes = name.rta_payload().as_ref();
 
-    for msg in messages.0 {
-        if let Some(payload) = msg.get_payload() {
-            let cur_index = payload.ifi_index();
-            if let Some(name) = payload
-                .rtattrs()
-                .get_attr_handle()
-                .get_attribute(Ifla::Ifname)
-            {
-                let bytes = name.rta_payload().as_ref();
-
-                match CStr::from_bytes_until_nul(bytes) {
-                    Ok(v) => {
-                        if (v.to_string_lossy().into_owned() == interface) {
-                            index = cur_index.clone() as u32;
-                            return Ok(index);
+                    match CStr::from_bytes_until_nul(bytes) {
+                        Ok(v) => {
+                            println!("{} {}", v.to_string_lossy().into_owned(), interface);
+                            if (v.to_string_lossy().into_owned() == interface) {
+                                index = cur_index.clone() as u32;
+                                return Ok(index);
+                            }
                         }
-                    }
-                    Err(e) => {}
-                };
+                        Err(e) => {}
+                    };
+                }
             }
         }
     }

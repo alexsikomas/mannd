@@ -242,30 +242,16 @@ impl Wireguard {
 
 // tests
 mod tests {
+    use super::*;
     use std::{
         net::{Ipv4Addr, Ipv6Addr},
         sync::Arc,
     };
 
-    use tokio::sync::OnceCell;
-
-    use super::*;
-
-    static WIREGUARD_INTERFACE: OnceCell<Arc<Wireguard>> = OnceCell::const_new();
-
-    async fn get_wg_interface() -> Result<Arc<Wireguard>, ComError> {
-        WIREGUARD_INTERFACE
-            .get_or_try_init(|| async {
-                let interface = Wireguard::start_interface().await?;
-                Ok(Arc::new(interface))
-            })
-            .await
-            .map(|arc| arc.clone())
-    }
-
     #[tokio::test]
-    async fn set_addr_test() -> Result<(), ComError> {
-        let wg = get_wg_interface().await?;
+    async fn wg_intergration_test() -> Result<(), ComError> {
+        let wg = Wireguard::start_interface().await?;
+
         wg.set_addr(vec![
             IpAddr::V4(Ipv4Addr::new(12, 76, 70, 29)),
             IpAddr::V6(Ipv6Addr::new(
@@ -273,12 +259,7 @@ mod tests {
             )),
         ])
         .await?;
-        Ok(())
-    }
 
-    #[tokio::test]
-    async fn set_mtu_test() -> Result<(), ComError> {
-        let wg = get_wg_interface().await?;
         wg.set_mtu(1420).await?;
         Ok(())
     }
