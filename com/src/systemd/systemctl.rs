@@ -2,6 +2,8 @@ use tracing::info;
 use zbus::Connection;
 use zbus_systemd::systemd1::UnitProxy;
 
+use crate::error::ComError;
+
 pub struct Systemctl {
     conn: Connection,
 }
@@ -38,5 +40,17 @@ impl Systemctl {
             }
         }
         return None;
+    }
+
+    pub async fn restart_networkd(&self) -> Result<(), ComError> {
+        if let Ok(unit) = UnitProxy::new(
+            &self.conn,
+            "/org/freedesktop/systemd1/unit/systemd_2dnetworkd_2eservice",
+        )
+        .await
+        {
+            unit.restart("replace".to_string()).await?;
+        }
+        Ok(())
     }
 }
