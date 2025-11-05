@@ -33,6 +33,7 @@ const INTERFACE: &str = "wg-mannd";
 
 struct Wireguard {
     router: NlRouter,
+    index: u32,
 }
 
 impl Wireguard {
@@ -79,7 +80,36 @@ impl Wireguard {
             )
             .await?;
 
-        Ok(Self { router })
+        let index = get_index(INTERFACE).await?;
+
+        Ok(Self { router, index })
+    }
+
+    async fn delete_interface(&self) -> Result<(), ComError> {
+        let mut attrs = RtBuffer::new();
+        attrs.push(
+            RtattrBuilder::default()
+                .rta_type(Ifla::Ifname)
+                .rta_payload(INTERFACE)
+                .build()?,
+        );
+
+        let ifinfomsg = IfinfomsgBuilder::default()
+            .ifi_family(neli::consts::rtnl::RtAddrFamily::Unspecified)
+            .ifi_type(neli::consts::rtnl::Arphrd::Netrom)
+            .ifi_index(self.index as i32)
+            .rtattrs(attrs)
+            .build()?;
+
+        self.router
+            .send::<Rtm, Ifinfomsg, (), ()>(
+                Rtm::Dellink,
+                NlmF::REQUEST | NlmF::ACK,
+                NlPayload::Payload(ifinfomsg),
+            )
+            .await?;
+
+        Ok(())
     }
 
     async fn set_conf(path: &'static str) -> Result<(), ComError> {
@@ -92,8 +122,6 @@ impl Wireguard {
     }
     /// Adds the IPv4/6 address to the `INTERFACE`
     async fn set_addr(&self, ips: Vec<IpAddr>) -> Result<(), ComError> {
-        let index = get_index(INTERFACE).await?;
-
         for ip in ips {
             match ip {
                 IpAddr::V4(addr) => {
@@ -113,7 +141,7 @@ impl Wireguard {
 
                     let ifaddr = IfaddrmsgBuilder::default()
                         .ifa_family(neli::consts::rtnl::RtAddrFamily::Inet)
-                        .ifa_index(index)
+                        .ifa_index(self.index)
                         .rtattrs(attrs)
                         .ifa_prefixlen(32)
                         .ifa_scope(neli::consts::rtnl::RtScope::Universe)
@@ -139,7 +167,7 @@ impl Wireguard {
 
                     let ifaddr = IfaddrmsgBuilder::default()
                         .ifa_family(neli::consts::rtnl::RtAddrFamily::Inet6)
-                        .ifa_index(index)
+                        .ifa_index(self.index)
                         .rtattrs(attrs)
                         .ifa_prefixlen(128)
                         .ifa_scope(neli::consts::rtnl::RtScope::Universe)
@@ -163,7 +191,6 @@ impl Wireguard {
     /// MTU should typically be set to 1420 since
     /// standard ethernet = 1500, worst case overhead = 80
     async fn set_mtu(&self, mtu: u32) -> Result<(), ComError> {
-        let index = get_index(INTERFACE).await?;
         let mut attrs = RtBuffer::new();
 
         attrs.push(
@@ -175,7 +202,7 @@ impl Wireguard {
         let ifi = IfinfomsgBuilder::default()
             .ifi_family(RtAddrFamily::Unspecified)
             .ifi_type(neli::consts::rtnl::Arphrd::Netrom)
-            .ifi_index(index as i32)
+            .ifi_index(self.index as i32)
             .rtattrs(attrs)
             .build()?;
 
@@ -191,20 +218,18 @@ impl Wireguard {
 
     /// Set state of `INTERFACE` via Netlink
     async fn set_state(&self, go_up: bool) -> Result<(), ComError> {
-        let index = get_index(INTERFACE).await?;
-
         let ifi = match go_up {
             true => IfinfomsgBuilder::default()
                 .ifi_family(RtAddrFamily::Unspecified)
                 .ifi_type(neli::consts::rtnl::Arphrd::Netrom)
-                .ifi_index(index as i32)
+                .ifi_index(self.index as i32)
                 .ifi_flags(Iff::UP)
                 .ifi_change(Iff::from_bits_truncate(1))
                 .build()?,
             false => IfinfomsgBuilder::default()
                 .ifi_family(RtAddrFamily::Unspecified)
                 .ifi_type(neli::consts::rtnl::Arphrd::Netrom)
-                .ifi_index(index as i32)
+                .ifi_index(self.index as i32)
                 .ifi_flags(Iff::empty())
                 .ifi_change(Iff::UP)
                 .build()?,
@@ -369,7 +394,6 @@ impl Wireguard {
     }
 
     async fn route_traffic(&self) -> Result<(), ComError> {
-        let index = get_index(INTERFACE).await?;
         let mut attrs = RtBuffer::new();
         // ipv4
         attrs.push(
@@ -382,7 +406,7 @@ impl Wireguard {
         attrs.push(
             RtattrBuilder::default()
                 .rta_type(Rta::Oif)
-                .rta_payload(index)
+                .rta_payload(self.index)
                 .build()?,
         );
 
@@ -414,7 +438,7 @@ impl Wireguard {
         attrs.push(
             RtattrBuilder::default()
                 .rta_type(Rta::Oif)
-                .rta_payload(index)
+                .rta_payload(self.index)
                 .build()?,
         );
 
@@ -467,6 +491,8 @@ mod tests {
         wg.add_ip_fwmark().await?;
         wg.prevent_default_route().await?;
         wg.route_traffic().await?;
+
+        wg.delete_interface().await?;
         Ok(())
     }
 }

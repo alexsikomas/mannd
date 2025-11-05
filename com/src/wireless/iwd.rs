@@ -5,18 +5,18 @@ use serde::Deserialize;
 use tokio::sync::RwLock;
 use tracing::{info, instrument};
 use zbus::{
-    Connection, Proxy,
     fdo::ObjectManagerProxy,
     names::OwnedUniqueName,
     zvariant::{self, ObjectPath, OwnedObjectPath, Type, Value},
+    Connection, Proxy,
 };
 
 use crate::{
     error::ComError,
     wireless::{
-        WifiAdapter,
         agent::{AgentState, IwdAgent, IwdAgentMsg},
-        common::{AccessPoint, Security},
+        common::{get_prop_from_proxy, AccessPoint, Security},
+        WifiAdapter,
     },
 };
 
@@ -191,53 +191,6 @@ impl Iwd {
         Ok(None)
     }
 
-    /// Returns the value of a property found under the `self.path` interfaces
-    /// Trait bounds follow from `zbus` downcast
-    async fn get_prop<'b, T>(&self, subpath: &str, prop: &str) -> Result<T, ComError>
-    where
-        T: TryFrom<Value<'b>>,
-        <T as TryFrom<Value<'b>>>::Error: Into<zbus::zvariant::Error>,
-    {
-        let interface_path = format!("{}.{}", self.service, subpath);
-        let proxy = zbus::Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            self.path.clone(),
-            interface_path.clone(),
-        )
-        .await?;
-
-        match proxy.get_property(prop).await? {
-            Some(val) => Ok(<zbus::zvariant::Value<'_> as Clone>::clone(&val).downcast::<T>()?),
-            None => Err(ComError::PropertyNotFound(format!(
-                "Could not find given property {} at {}",
-                prop, interface_path
-            ))),
-        }
-    }
-
-    /// Returns the value of a property found under the `self.path` interfaces
-    /// Proxy must be passed in, use this to reduce overhead
-    /// Trait bounds follow from `zbus` downcast
-    async fn get_prop_from_proxy<'b, T>(
-        &self,
-        proxy: &zbus::Proxy<'b>,
-        prop: &str,
-    ) -> Result<T, ComError>
-    where
-        T: TryFrom<Value<'b>>,
-        <T as TryFrom<Value<'b>>>::Error: Into<zbus::zvariant::Error>,
-    {
-        match proxy.get_property(prop).await? {
-            Some(val) => Ok(<zbus::zvariant::Value<'_> as Clone>::clone(&val).downcast::<T>()?),
-            None => Err(ComError::PropertyNotFound(format!(
-                "Could not find given property {} at {}",
-                prop,
-                proxy.path()
-            ))),
-        }
-    }
-
     fn ssid_to_hex(ssid: String) -> String {
         let bytes = ssid.as_bytes();
         bytes.into_iter().map(|b| format!("{:02x}", b)).collect()
@@ -304,7 +257,7 @@ impl Iwd {
 
     pub async fn scan(&mut self) -> Result<(), ComError> {
         let proxy = self.get_interface_proxy("Station").await?;
-        if !self.get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
+        if get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
             proxy.call_noreply("Scan", &()).await?;
         }
         Ok(())
@@ -385,10 +338,9 @@ impl Iwd {
         )
         .await?;
 
-        let ssid = self.get_prop_from_proxy::<String>(&proxy, "Name").await?;
+        let ssid = get_prop_from_proxy::<String>(&proxy, "Name").await?;
         let security: Security;
-        match self
-            .get_prop_from_proxy::<String>(&proxy, "Type")
+        match get_prop_from_proxy::<String>(&proxy, "Type")
             .await?
             .as_str()
         {
@@ -403,19 +355,14 @@ impl Iwd {
         let mut known = false;
 
         let known_network: Option<OwnedObjectPath>;
-        match self
-            .get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork")
-            .await
-        {
+        match get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork").await {
             Ok(val) => {
                 known = true;
             }
             Err(_) => known_network = None,
         }
 
-        let connected = self
-            .get_prop_from_proxy::<bool>(&proxy, "Connected")
-            .await?;
+        let connected = get_prop_from_proxy::<bool>(&proxy, "Connected").await?;
 
         Ok(AccessPoint {
             ssid,
@@ -435,9 +382,7 @@ impl Iwd {
         )
         .await?;
 
-        let modes = self
-            .get_prop_from_proxy::<Vec<String>>(&proxy, "SupportedModes")
-            .await?;
+        let modes = get_prop_from_proxy::<Vec<String>>(&proxy, "SupportedModes").await?;
         Ok(modes)
     }
 }
