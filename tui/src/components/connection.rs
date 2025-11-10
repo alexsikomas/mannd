@@ -10,9 +10,8 @@ use tracing::info;
 
 use crate::{
     components::net_prompt::NetworkPrompt,
-    network::NetworkState,
     state::{ConnectionAction, FocusedConnection, PromptState, SelectableList},
-    ui::{THEME, Theme, ThemeColor},
+    ui::{Theme, THEME},
 };
 
 pub struct Connection<'a> {

@@ -1,4 +1,4 @@
-use std::{char::from_u32, ffi::CStr};
+use std::ffi::CStr;
 
 use neli::{
     consts::{
@@ -6,8 +6,7 @@ use neli::{
         rtnl::{Ifla, Rtm},
     },
     nl::{NlPayload, NlmsghdrBuilder},
-    router::asynchronous::{NlRouter, NlRouterReceiverHandle},
-    rtnl::{Ifinfomsg, IfinfomsgBuilder, Rtmsg},
+    rtnl::{Ifinfomsg, IfinfomsgBuilder},
     socket::asynchronous::NlSocketHandle,
     utils::Groups,
 };
@@ -80,7 +79,7 @@ pub async fn get_index(interface: &'static str) -> Result<u32, ComError> {
 
                     match CStr::from_bytes_until_nul(bytes) {
                         Ok(v) => {
-                            if (v.to_string_lossy().into_owned() == interface) {
+                            if v.to_string_lossy().into_owned() == interface {
                                 index = cur_index.clone() as u32;
                                 return Ok(index);
                             }
@@ -92,7 +91,7 @@ pub async fn get_index(interface: &'static str) -> Result<u32, ComError> {
         }
     }
 
-    if (index == 0) {
+    if index == 0 {
         return Err(ComError::OperationFailed(
             "Cannot find wg-mannd index!".to_string(),
         ));

@@ -1,16 +1,9 @@
 //! Reference: https://w1.fi/wpa_supplicant/devel/dbus.html#dbus_network
-
-use std::ffi::CString;
-
 use async_trait::async_trait;
-use zbus::{Connection, Proxy};
 
 use crate::{
     error::ComError,
-    wireless::{
-        common::{get_prop_from_proxy, Security},
-        WifiAdapter,
-    },
+    wireless::{common::Security, WifiAdapter},
 };
 
 #[derive(Debug, Clone)]

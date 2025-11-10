@@ -1,4 +1,3 @@
-use tracing::info;
 use zbus::Connection;
 use zbus_systemd::systemd1::UnitProxy;
 

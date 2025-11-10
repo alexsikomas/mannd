@@ -1,23 +1,20 @@
-use neli::err::RouterError;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ComError {
     #[error("Netlink Message Error: {0}")]
-    NeliMsgError(#[from] neli::err::MsgError),
+    NeliMsg(#[from] neli::err::MsgError),
     #[error("Netlink Deserialisation Error: {0}")]
-    NeliDeError(#[from] neli::err::DeError),
+    NeliDe(#[from] neli::err::DeError),
     #[error("Netlink Serialisation Error: {0}")]
-    NeliSerError(#[from] neli::err::SerError),
+    NeliSer(#[from] neli::err::SerError),
     #[error("Netlink Builder Error: {0}")]
-    NeliBuilderError(#[from] neli::err::BuilderError),
+    NeliBuilder(#[from] neli::err::BuilderError),
     #[error("Netlink Router Error: {0}")]
-    NeliRouterError(Box<dyn ThreadSafeError>),
-    #[error("Netlink Packet Error: {0}")]
-    NeliPacketError(Box<dyn ThreadSafeError>),
+    NeliRouter(Box<dyn ThreadSafeError>),
     #[error("Netlink Socket Error: {0}")]
-    NeliSocketError(#[from] neli::err::SocketError),
+    NeliSocket(#[from] neli::err::SocketError),
     #[error("Rt Builder Error: {0}")]
     RtBuilder(#[from] neli::rtnl::RtattrBuilderError),
     #[error("Ifinfomsg error: {0}")]
@@ -69,16 +66,7 @@ where
     P: Debug + Send + Sync + 'static,
 {
     fn from(err: neli::err::RouterError<T, P>) -> Self {
-        ComError::NeliRouterError(Box::new(err))
-    }
-}
-
-impl<M> From<neli::err::Nlmsgerr<M>> for ComError
-where
-    M: Debug + Send + Sync + 'static,
-{
-    fn from(err: neli::err::Nlmsgerr<M>) -> Self {
-        ComError::NeliPacketError(Box::new(err))
+        ComError::NeliRouter(Box::new(err))
     }
 }
 

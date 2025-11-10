@@ -1,15 +1,14 @@
 use com::wireless::common::AccessPoint;
 use ratatui::{
-    layout::{Constraint, Direction, Flex, Layout, Margin, Offset, Position, Spacing},
+    layout::{Constraint, Flex, Layout},
     style::{Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
-use tracing::info;
 
 use crate::{
     state::{ConnectionPrompt, ConnectionPromptSelect},
-    ui::{THEME, Theme},
+    ui::{Theme, THEME},
 };
 
 pub struct NetworkPrompt<'a> {

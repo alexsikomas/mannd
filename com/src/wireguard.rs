@@ -1,31 +1,16 @@
-use futures::stream::StreamExt;
-
 use neli::{
-    attr::Attribute,
     consts::{
         nl::NlmF,
-        rtnl::{Ifa, Iff, Ifla, IflaInfo, RtAddrFamily, Rta, Rtm, RtmF},
+        rtnl::{Ifa, Iff, Ifla, IflaInfo, RtAddrFamily, Rta, Rtm},
     },
-    genl::{AttrTypeBuilder, Genlmsghdr, NlattrBuilder},
-    nl::{NlPayload, NlmsghdrBuilder},
-    router::asynchronous::{NlRouter, NlRouterReceiverHandle},
-    rtnl::{
-        Ifaddrmsg, IfaddrmsgBuilder, Ifinfomsg, IfinfomsgBuilder, Rtattr, RtattrBuilder,
-        RtmsgBuilder,
-    },
-    socket::asynchronous::NlSocketHandle,
-    types::{GenlBuffer, NlBuffer, RtBuffer},
+    nl::NlPayload,
+    router::asynchronous::NlRouter,
+    rtnl::{Ifaddrmsg, IfaddrmsgBuilder, Ifinfomsg, IfinfomsgBuilder, RtattrBuilder, RtmsgBuilder},
+    types::RtBuffer,
     utils::Groups,
-    ToBytes,
 };
-use std::{
-    any::Any,
-    ffi::CStr,
-    io::Cursor,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use tokio::process::Command;
-use tracing::info;
 
 use crate::{error::ComError, utils::get_index};
 
@@ -265,7 +250,7 @@ impl Wireguard {
             .output()
             .await;
 
-        let command = Command::new("sudo")
+        let _ = Command::new("sudo")
             .args(vec![
                 "ip", "-6", "rule", "add", "not", "fwmark", "51820", "table", "51820",
             ])
@@ -279,7 +264,7 @@ impl Wireguard {
             .output()
             .await;
 
-        let command = Command::new("sudo")
+        let _ = Command::new("sudo")
             .args(vec![
                 "ip", "-4", "rule", "add", "not", "fwmark", "51820", "table", "51820",
             ])
@@ -348,7 +333,7 @@ impl Wireguard {
             .output()
             .await;
 
-        let command = Command::new("sudo")
+        let _ = Command::new("sudo")
             .args(vec![
                 "ip",
                 "-6",
@@ -376,7 +361,7 @@ impl Wireguard {
             .output()
             .await;
 
-        let command = Command::new("sudo")
+        let _ = Command::new("sudo")
             .args(vec![
                 "ip",
                 "-4",

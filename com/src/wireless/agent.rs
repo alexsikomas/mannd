@@ -2,10 +2,7 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 use tracing::info;
-use zbus::{
-    Connection, DBusError, interface,
-    zvariant::{ObjectPath, OwnedObjectPath},
-};
+use zbus::{interface, zvariant::OwnedObjectPath, DBusError};
 
 // Do compiler optimisations make it so that
 // the password may be repeated in memory even if later
