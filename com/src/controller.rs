@@ -96,7 +96,7 @@ impl Controller {
     #[instrument]
     async fn connect_wpa(&mut self) -> Result<(), ComError> {
         match &self.connection {
-            Some(conn) => match WpaSupplicant::new(conn.clone()) {
+            Some(conn) => match WpaSupplicant::new() {
                 Ok(wpa) => {
                     self.wifi = Some(WirelessAdapter::Wpa(wpa));
                     Ok(())

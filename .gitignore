@@ -3,3 +3,5 @@
 **/*.rs.bk
 /gui/node_modules
 /.logs/*
+/com/src/wpa_supplicant/*
+!/com/src/wpa_supplicant/README.md

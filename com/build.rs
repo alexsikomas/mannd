@@ -10,6 +10,7 @@ fn main() {
 
     // wpa
     if which("wpa_supplicant").is_ok() {
+        println!("cargo:rustc-link-lib=wpa_supplicant");
         cc::Build::new()
             .file("./wpa_supplicant/wpa_ctrl.c")
             .include("wpa_supplicant")

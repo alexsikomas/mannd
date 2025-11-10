@@ -1,5 +1,7 @@
 //! Reference: https://w1.fi/wpa_supplicant/devel/dbus.html#dbus_network
 
+use std::ffi::CString;
+
 use async_trait::async_trait;
 use zbus::{Connection, Proxy};
 
@@ -9,14 +11,11 @@ use crate::{
         common::{get_prop_from_proxy, Security},
         WifiAdapter,
     },
+    wpa_ctrl_open,
 };
 
 #[derive(Debug, Clone)]
-pub struct WpaSupplicant {
-    conn: Connection,
-    service: String,
-    path: String,
-}
+pub struct WpaSupplicant {}
 
 #[async_trait]
 impl WifiAdapter for WpaSupplicant {
@@ -43,27 +42,15 @@ impl WifiAdapter for WpaSupplicant {
 }
 
 impl WpaSupplicant {
-    pub fn new(conn: Connection) -> Result<Self, ComError> {
-        let service = String::from("fi.w1.wpa_supplicant1");
-        let path = String::from("/fi/w1/wpa_supplicant1");
-        Ok(Self {
-            conn,
-            service,
-            path,
-        })
-    }
+    pub fn new() -> Result<Self, ComError> {
+        let wpa_socket_path =
+            CString::new("/run/wpa_supplicant/").expect("Could not make wpa CString");
 
-    pub async fn scan(&self) -> Result<(), ComError> {
-        let proxy = Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            self.path.clone(),
-            format!("{}.Interface", self.service.clone()),
-        )
-        .await?;
-
-        proxy.call::<_, _, ()>("Scan", &()).await?;
-        Ok(())
+        unsafe {
+            let mut wpa_ctrl = wpa_ctrl_open(wpa_socket_path.as_ptr());
+            println!("{:?}", wpa_ctrl);
+        }
+        todo!()
     }
 }
 
@@ -72,9 +59,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_wpa_scan() -> Result<(), ComError> {
-        let conn = Connection::system().await.unwrap();
-        let wpa = WpaSupplicant::new(conn)?;
-        wpa.scan().await?;
+        // let conn = Connection::system().await.unwrap();
+        let wpa = WpaSupplicant::new()?;
+        // wpa.scan().await?;
         Ok(())
     }
 }
