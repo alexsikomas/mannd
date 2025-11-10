@@ -476,8 +476,24 @@ mod tests {
 
     #[tokio::test]
     async fn wg_intergration_test() -> Result<(), ComError> {
-        let wg = Wireguard::start_interface().await?;
+        match caps::has_cap(
+            None,
+            caps::CapSet::Permitted,
+            caps::Capability::CAP_NET_ADMIN,
+        ) {
+            Ok(val) => {
+                if !val {
+                    println!("Wireguard integration test must be run with net_admin permission");
+                    return Err(ComError::OperationFailed("Failed".to_string()));
+                }
+            }
+            Err(e) => {
+                println!("Error occured while checking capabilities! {e}");
+                return Err(ComError::OperationFailed("Failed".to_string()));
+            }
+        }
 
+        let wg = Wireguard::start_interface().await?;
         wg.set_addr(vec![
             IpAddr::V4(Ipv4Addr::new(12, 76, 70, 29)),
             IpAddr::V6(Ipv6Addr::new(
