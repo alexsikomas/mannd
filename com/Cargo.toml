@@ -21,7 +21,9 @@ zbus_systemd = { version = "0.25701.0", features = [
 ] }
 
 [build-dependencies]
+cc = { version = "1.2.45" }
 which = { version = "8.0.0" }
+bindgen = { version = "0.72.1" }
 
 [target.'cfg(target_os = "linux")']
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
