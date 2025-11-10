@@ -11,7 +11,6 @@ use crate::{
         common::{get_prop_from_proxy, Security},
         WifiAdapter,
     },
-    wpa_ctrl_open,
 };
 
 #[derive(Debug, Clone)]
@@ -43,14 +42,6 @@ impl WifiAdapter for WpaSupplicant {
 
 impl WpaSupplicant {
     pub fn new() -> Result<Self, ComError> {
-        println!("INSIDE OF NEW WPA");
-        let wpa_socket_path =
-            CString::new("/run/wpa_supplicant/").expect("Could not make wpa CString");
-
-        unsafe {
-            let mut wpa_ctrl = wpa_ctrl_open(wpa_socket_path.as_ptr());
-            println!("{:?}", wpa_ctrl);
-        }
         Ok(Self {})
     }
 }
