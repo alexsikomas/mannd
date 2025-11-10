@@ -354,12 +354,12 @@ impl Iwd {
 
         let mut known = false;
 
-        let known_network: Option<OwnedObjectPath>;
+        // let known_network: Option<OwnedObjectPath>;
         match get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork").await {
-            Ok(val) => {
+            Ok(_) => {
                 known = true;
             }
-            Err(_) => known_network = None,
+            _ => {}
         }
 
         let connected = get_prop_from_proxy::<bool>(&proxy, "Connected").await?;

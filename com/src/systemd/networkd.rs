@@ -1,12 +1,11 @@
 use std::{
-    io::{self, Write},
+    io::{self},
     net::IpAddr,
-    path::{Path, PathBuf},
-    sync::LazyLock,
+    path::PathBuf,
 };
 
 use tokio::{
-    fs::{read_dir, write, File, ReadDir},
+    fs::{read_dir, File},
     io::AsyncWriteExt,
 };
 
@@ -39,7 +38,7 @@ impl Section {
         file.write(format!("[{}]\n", self.name).as_bytes()).await?;
         for (key, val) in &self.props {
             file.write(format!("{}={}\n", key, val).as_bytes()).await?;
-            if matches!(&self.props[self.props.len() - 1].0, key) {
+            if &self.props[self.props.len() - 1].0 == key {
                 file.write(b"\n").await?;
             }
         }

@@ -1,13 +1,11 @@
 use std::time::Duration;
 
-use com::controller::Controller;
-use crossterm::event::{self, Event, KeyCode};
-use tokio::sync::mpsc::{self, Receiver, Sender};
-use tracing::info;
+use crossterm::event::{self, Event};
+use tokio::sync::mpsc::{self, Receiver};
 
 use crate::{
     error::TuiError,
-    network::{NetworkAction, NetworkState, NetworkUpdate, network_handle},
+    network::{network_handle, NetworkAction, NetworkUpdate},
     state::{
         ConnectionAction, ConnectionState, FocusedConnection, PromptState, SelectableList, State,
     },
@@ -137,7 +135,7 @@ fn handle_net_state_msg(state: &mut AppState, net_update_rx: &mut Receiver<Netwo
                 // state.network.aps = aps.clone();
                 match &state.view_state {
                     State::Connection(conn_state) => {
-                        if (conn_state.networks.items.is_empty()) {
+                        if conn_state.networks.items.is_empty() {
                             state.view_state = State::Connection(ConnectionState::new(aps));
                         } else {
                             let selected_network = conn_state.networks.get_selected_value();

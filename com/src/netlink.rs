@@ -16,16 +16,16 @@ use crate::{
 use neli::{
     consts::{
         nl::{NlTypeWrapper, NlmF, Nlmsg},
-        rtnl::{Ifla, Rta, Rtm, RtmF},
+        rtnl::{Rta, Rtm, RtmF},
         socket::NlFamily,
     },
     err::{DeError, MsgError},
     genl::{Genlmsghdr, GenlmsghdrBuilder, NlattrBuilder, NoUserHeader},
     nl::{NlPayload, NlmsghdrBuilder},
     router::asynchronous::{NlRouter, NlRouterReceiverHandle},
-    rtnl::{IfinfomsgBuilder, RtattrBuilder, Rtmsg, RtmsgBuilder},
+    rtnl::{RtattrBuilder, Rtmsg, RtmsgBuilder},
     socket::asynchronous::NlSocketHandle,
-    types::{GenlBuffer, NlBuffer, RtBuffer},
+    types::{GenlBuffer, RtBuffer},
     utils::Groups,
 };
 use tracing::{info, instrument};
@@ -48,14 +48,13 @@ impl Debug for Netlink {
 impl Netlink {
     #[instrument]
     pub async fn connect_wireless() -> Result<Self, ComError> {
-        let (mut router, mut handle) =
-            NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
+        let (router, handle) = NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
         let family_id = router.resolve_genl_family(NL_80211_GENL_NAME).await?;
         let scan_group = router
             .resolve_nl_mcast_group(NL_80211_GENL_NAME, "scan")
             .await?;
 
-        let (mcast_sock, mut mcast_recv) =
+        let (mcast_sock, mcast_recv) =
             NlRouter::connect(NlFamily::Generic, None, Groups::new_groups(&[scan_group])).await?;
 
         info!("Successfully created wireless netlink connection");
@@ -122,7 +121,7 @@ impl Netlink {
                 Nlmsg::Error => {
                     let err = "Parsing response.nl_type in get_info_vec";
                     tracing::error!(err);
-                    return Err(ComError::NeliMsgError(MsgError::new(err)));
+                    return Err(ComError::NeliMsg(MsgError::new(err)));
                 }
                 Nlmsg::Done => return Ok(retval),
                 _ => retval.push(
@@ -169,7 +168,7 @@ impl Netlink {
             .build()?;
 
         info!("Created netlink message header");
-        let mut recv: NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>> = self
+        let recv: NlRouterReceiverHandle<Nlmsg, Genlmsghdr<Nl80211Cmd, Nl80211Attr>> = self
             .router
             .send(
                 self.family_id,
@@ -218,7 +217,7 @@ impl Netlink {
                     None => {}
                 },
                 Some(Err(e)) => {
-                    return Err(ComError::NeliRouterError(Box::new(e)));
+                    return Err(ComError::NeliRouter(Box::new(e)));
                 }
                 _ => {}
             }
@@ -234,7 +233,7 @@ impl Netlink {
     /// uses route command to see which interface processes it
     pub async fn get_main_interface() -> Result<(String, u32), ComError> {
         // can't use self router as we need route here
-        let mut socket = NlSocketHandle::connect(NlFamily::Route, None, Groups::empty())?;
+        let socket = NlSocketHandle::connect(NlFamily::Route, None, Groups::empty())?;
         // Does the following command
         // ip rotue get 8.8.8.8
         let mut buffer = RtBuffer::new();

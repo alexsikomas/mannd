@@ -14,7 +14,7 @@ use crate::{
     },
 };
 use tracing::{error, info, instrument};
-use zbus::{conn::Builder, Connection};
+use zbus::Connection;
 
 // Netlink not used here as I'm not implementing WPA authentication
 #[derive(Debug)]
@@ -51,7 +51,7 @@ impl Controller {
                 match ctl.is_service_active("iwd".to_string()).await {
                     Some(v) => {
                         if v {
-                            self.connect_iwd().await;
+                            let _ = self.connect_iwd().await;
                             return;
                         }
                     }
@@ -61,7 +61,7 @@ impl Controller {
                 match ctl.is_service_active("wpa_supplicant".to_string()).await {
                     Some(v) => {
                         if v {
-                            self.connect_wpa().await;
+                            let _ = self.connect_wpa().await;
                             return;
                         }
                     }
@@ -96,7 +96,7 @@ impl Controller {
     #[instrument]
     async fn connect_wpa(&mut self) -> Result<(), ComError> {
         match &self.connection {
-            Some(conn) => match WpaSupplicant::new() {
+            Some(_) => match WpaSupplicant::new() {
                 Ok(wpa) => {
                     self.wifi = Some(WirelessAdapter::Wpa(wpa));
                     Ok(())
@@ -188,7 +188,9 @@ impl Controller {
                 Ok(aps) => {
                     return Ok(aps);
                 }
-                Err(e) => {}
+                Err(e) => {
+                    return Err(e);
+                }
             },
             Some(WirelessAdapter::Wpa(wpa)) => {}
             None => {}
@@ -239,24 +241,24 @@ mod tests {
     async fn test_new() -> Result<(), ComError> {
         let controller = Controller::new().await;
         match controller {
-            Ok(val) => Ok(()),
-            Err(e) => Err(ComError::OperationFailed("Test".to_string())),
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
         }
     }
 
     #[cfg(iwd_installed)]
     #[tokio::test]
     async fn test_connect_iwd() -> Result<(), ComError> {
-        let mut controller = Controller::new().await;
+        let controller = Controller::new().await;
         match controller {
             Ok(mut cont) => match cont.connect_iwd().await {
-                Ok(iwd) => Ok(()),
-                Err(e) => {
+                Ok(_) => Ok(()),
+                Err(_) => {
                     println!("iwd is not found");
                     Ok(())
                 }
             },
-            Err(e) => Err(ComError::OperationFailed(
+            Err(_) => Err(ComError::OperationFailed(
                 "Controller could not be initalised".to_string(),
             )),
         }
