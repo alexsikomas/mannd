@@ -37,7 +37,7 @@ Check if `wpa_supplicant` is running with the correct flags already by using:
 ps aux | grep wpa_supplicant
 ```
 
-Note: below `interface` is used as a placeholder you should expect your main interface name their.
+Note: below `interface` is used as a placeholder you should expect your main interface name there.
 
 Correct output:
 ```bash
