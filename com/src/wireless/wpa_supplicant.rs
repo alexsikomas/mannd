@@ -23,8 +23,10 @@ pub struct WpaSupplicant {
     service: String,
     path: String,
     conn: Connection,
+    networks: HashMap<String, OwnedObjectPath>,
 }
 
+#[derive(Debug, Clone)]
 pub struct WpaBss {
     bssid: Vec<u8>,
     ssid: Vec<u8>,
@@ -46,8 +48,11 @@ impl WifiAdapter for WpaSupplicant {
         psk: String,
         security: Security,
     ) -> Result<(), ComError> {
-        todo!()
+        let mut body: HashMap<String, OwnedValue> = HashMap::new();
+        let network_path = self.call_interface_method::<_, OwnedObjectPath>("AddNetwork", body);
+        Ok(())
     }
+
     async fn disconnect(&self) -> Result<(), ComError> {
         self.call_interface_method::<_, ()>("Disconnect", &())
             .await?;
@@ -56,6 +61,7 @@ impl WifiAdapter for WpaSupplicant {
     async fn status(&self) -> Result<String, ComError> {
         todo!()
     }
+
     async fn list_configured_networks(&self) -> Result<Vec<String>, ComError> {
         let networks = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
@@ -64,6 +70,7 @@ impl WifiAdapter for WpaSupplicant {
         let network_strings: Vec<String> = networks.iter().map(|n| n.to_string()).collect();
         Ok(network_strings)
     }
+
     async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ComError> {
         todo!()
     }
@@ -73,10 +80,13 @@ impl WpaSupplicant {
     pub fn new(conn: Connection) -> Result<Self, ComError> {
         let service = String::from("fi.w1.wpa_supplicant1");
         let path = String::from("/fi/w1/wpa_supplicant1/Interfaces/0");
+        let networks: HashMap<String, OwnedObjectPath> = HashMap::new();
+
         Ok(Self {
             conn,
             service,
             path,
+            networks,
         })
     }
 
@@ -135,21 +145,40 @@ impl WpaSupplicant {
         Ok(stream)
     }
 
-    /// Returns when the scan is complete
-    pub async fn scan(&self) -> Result<(), ComError> {
+    pub async fn scan(&self, wait: bool) -> Result<(), ComError> {
         let mut dict: HashMap<String, OwnedValue> = HashMap::new();
 
         dict.insert("Type".to_string(), Value::new("active").try_to_owned()?);
         self.call_interface_method::<_, ()>("Scan", dict).await?;
 
-        let mut scan_signal = self.get_interface_signal("ScanDone").await?;
-        let message = scan_signal.next().await;
+        if wait {
+            let mut scan_signal = self.get_interface_signal("ScanDone").await?;
+            let message = scan_signal.next().await;
+        }
 
         Ok(())
     }
 
-    pub async fn nearby_networks(&self) -> Result<Vec<String>, ComError> {
-        Ok(self.get_interface_prop::<Vec<String>>("Networks").await?)
+    pub async fn nearby_networks(&mut self) -> Result<(), ComError> {
+        let networks = self
+            .get_interface_prop::<Vec<OwnedObjectPath>>("BSSs")
+            .await?;
+
+        for network in networks {
+            println!("{:?}", network.clone());
+            let proxy = Proxy::new(
+                &self.conn,
+                self.service.clone(),
+                network.clone(),
+                "fi.w1.wpa_supplicant1.BSS",
+            )
+            .await?;
+            let encoded = get_prop_from_proxy::<Vec<u8>>(&proxy, "SSID").await?;
+            let ssid = String::from_utf8_lossy(&encoded);
+            self.networks.insert(ssid.into_owned(), network);
+        }
+        println!("{:?}", self.networks);
+        Ok(())
     }
 
     pub async fn get_network_info(&self, bss_path: OwnedObjectPath) -> Result<WpaBss, ComError> {
@@ -183,11 +212,13 @@ mod tests {
     #[tokio::test]
     async fn test_wpa_scan() -> Result<(), ComError> {
         let conn = Connection::system().await.unwrap();
-        let wpa = WpaSupplicant::new(conn)?;
+        let mut wpa = WpaSupplicant::new(conn)?;
         let mac = wpa.get_interface_prop::<Vec<u8>>("MACAddress").await?;
         wpa.list_configured_networks().await?;
 
-        wpa.scan().await?;
+        wpa.scan(false).await?;
+        let network = wpa.nearby_networks().await?;
+
         Ok(())
     }
 }

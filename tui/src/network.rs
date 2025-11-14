@@ -21,7 +21,7 @@ pub enum NetworkAction {
     ForceWifiNetlink,
 }
 
-pub enum NetworkUpdate {
+pub enum StateUpdate {
     Select(usize),
     Update,
     Deselect,
@@ -36,59 +36,57 @@ pub struct NetworkState {
     pub aps: Vec<AccessPoint>,
 }
 
-pub async fn network_handle(
-    net_action_rx: &mut Receiver<NetworkAction>,
-    net_update_tx: Sender<NetworkUpdate>,
-) {
-    if let Ok(mut controller) = Controller::new().await {
-        controller.determine_adapter().await;
-        while let Some(action) = net_action_rx.recv().await {
-            match action {
-                NetworkAction::Scan => {
-                    if let Ok(()) = controller.scan().await {
-                        if let Ok(aps) = controller.get_networks().await {
-                            let _ = net_update_tx.send(NetworkUpdate::UpdateAps(aps)).await;
-                        }
-                    }
+/// Returns true if we are quitting the application
+pub async fn handle_action(
+    controller: &mut Controller,
+    state_update: &Sender<StateUpdate>,
+    action: NetworkAction,
+) -> bool {
+    match action {
+        NetworkAction::Scan => {
+            if let Ok(()) = controller.scan().await {
+                if let Ok(aps) = controller.get_networks().await {
+                    let _ = state_update.send(StateUpdate::UpdateAps(aps)).await;
                 }
-                NetworkAction::Connect(ssid, psk, sec) => {
-                    if let Ok(()) = controller.ssid_connect(ssid, psk, sec).await {
-                        info!("Connection to network was successful");
-                    } else {
-                        tracing::error!("Connection to network was not successful.");
-                    }
-                }
-                NetworkAction::Disconnect => {
-                    if let Ok(()) = controller.disconenct().await {
-                        info!("Disconnected from a network");
-                    } else {
-                    }
-                }
-                NetworkAction::GetKnownNetworks => {
-                    if let Ok(known_aps) = controller.get_known_networks().await {
-                        // At this point some of the networks will still be reachable
-                        // we don't have self so can't do check here
-                        let _ = net_update_tx
-                            .send(NetworkUpdate::AddKnownNetworks(known_aps))
-                            .await;
-                    }
-                }
-                NetworkAction::Forget(ssid, sec) => {
-                    if let Ok(()) = controller.remove_network(ssid, sec).await {
-                        update_networks(&mut controller, &net_update_tx).await;
-                    }
-                }
-                NetworkAction::Exit => if let Ok(()) = controller.exit().await {},
-                NetworkAction::ForceIwd => {}
-                NetworkAction::ForceWpa => {}
-                _ => {}
-            };
+            }
         }
-    }
-}
-
-async fn update_networks(controller: &mut Controller, net_update_tx: &Sender<NetworkUpdate>) {
-    if let Ok(aps) = controller.get_networks().await {
-        let _ = net_update_tx.send(NetworkUpdate::UpdateAps(aps)).await;
-    }
+        NetworkAction::Connect(ssid, psk, sec) => {
+            if let Ok(()) = controller.ssid_connect(ssid, psk, sec).await {
+                info!("Connection to network was successful");
+            } else {
+                tracing::error!("Connection to network was not successful.");
+            }
+        }
+        NetworkAction::Disconnect => {
+            if let Ok(()) = controller.disconenct().await {
+                info!("Disconnected from a network");
+            } else {
+            }
+        }
+        NetworkAction::GetKnownNetworks => {
+            if let Ok(known_aps) = controller.get_known_networks().await {
+                // At this point some of the networks will still be reachable
+                // we don't have self so can't do check here
+                let _ = state_update
+                    .send(StateUpdate::AddKnownNetworks(known_aps))
+                    .await;
+            }
+        }
+        NetworkAction::Forget(ssid, sec) => {
+            if let Ok(()) = controller.remove_network(ssid, sec).await {
+                if let Ok(aps) = controller.get_networks().await {
+                    let _ = state_update.send(StateUpdate::UpdateAps(aps)).await;
+                }
+            }
+        }
+        NetworkAction::Exit => {
+            if let Ok(()) = controller.exit().await {
+                return true;
+            }
+        }
+        NetworkAction::ForceIwd => {}
+        NetworkAction::ForceWpa => {}
+        _ => {}
+    };
+    false
 }

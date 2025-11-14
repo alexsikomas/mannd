@@ -1,11 +1,12 @@
 use std::time::Duration;
 
+use com::{controller::Controller, signals::SignalUpdate};
 use crossterm::event::{self, Event};
 use tokio::sync::mpsc::{self, Receiver};
 
 use crate::{
     error::TuiError,
-    network::{network_handle, NetworkAction, NetworkUpdate},
+    network::{handle_action, NetworkAction, StateUpdate},
     state::{
         ConnectionAction, ConnectionState, FocusedConnection, PromptState, SelectableList, State,
     },
@@ -39,19 +40,32 @@ impl App {
         // to network thread
         let (net_action_tx, mut net_action_rx) = mpsc::channel::<NetworkAction>(32);
         // from network thread
-        let (net_update_tx, mut net_update_rx) = mpsc::channel::<NetworkUpdate>(32);
+        let (state_update_tx, mut state_update_rx) = mpsc::channel::<StateUpdate>(32);
 
         let mut terminal = ratatui::init();
 
         // networking thread
+        // Signal <-> Network -> UI Update
+        //
+        // A signal update leads to a network update i.e. if networks are
+        // loaded and we get a signal then this leads to getting the
+        // network values via a network update
         tokio::spawn(async move {
-            network_handle(&mut net_action_rx, net_update_tx).await;
+            let (signal_tx, signal_rx) = mpsc::channel::<SignalUpdate>(32);
+            if let Ok(mut controller) = Controller::new().await {
+                tokio::select! {
+                    Some(action) = net_action_rx.recv() => {
+                        handle_action(&mut controller, &state_update_tx, action).await;
+                    }
+                };
+                // handle_action(&mut controller, net_update_tx, network_action).await;
+            }
         });
 
         terminal.draw(|f| render(f, &state))?;
 
         while state.is_running {
-            handle_net_state_msg(&mut state, &mut net_update_rx);
+            handle_net_state_msg(&mut state, &mut state_update_rx);
 
             if event::poll(Duration::from_millis(100))? {
                 if let Ok(Event::Key(key)) = event::read() {
@@ -122,16 +136,16 @@ impl App {
     }
 }
 
-fn handle_net_state_msg(state: &mut AppState, net_update_rx: &mut Receiver<NetworkUpdate>) {
+fn handle_net_state_msg(state: &mut AppState, net_update_rx: &mut Receiver<StateUpdate>) {
     if let Ok(msg) = net_update_rx.try_recv() {
         match msg {
-            NetworkUpdate::Select(i) => {
+            StateUpdate::Select(i) => {
                 // state.network.selected = Some(i);
             }
-            NetworkUpdate::Deselect => {
+            StateUpdate::Deselect => {
                 // state.network.selected = None;
             }
-            NetworkUpdate::UpdateAps(aps) => {
+            StateUpdate::UpdateAps(aps) => {
                 // state.network.aps = aps.clone();
                 match &state.view_state {
                     State::Connection(conn_state) => {
@@ -166,10 +180,10 @@ fn handle_net_state_msg(state: &mut AppState, net_update_rx: &mut Receiver<Netwo
                     _ => {}
                 }
             }
-            NetworkUpdate::AddKnownNetworks(aps) => {
+            StateUpdate::AddKnownNetworks(aps) => {
                 // state.view_state = State::Connection(state.)
             }
-            NetworkUpdate::Update => {}
+            StateUpdate::Update => {}
         };
         state.redraw = true;
     };
