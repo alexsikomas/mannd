@@ -2,7 +2,7 @@ use std::{borrow::Cow, fmt::Debug, net::Ipv4Addr};
 
 use crate::{
     error::ComError,
-    utils::get_name,
+    utils::{format_mac_address, get_name},
     wireless::defs::{
         attr::{Attrs, Nl80211Attr},
         bss::Bss,
@@ -324,7 +324,7 @@ impl Netlink {
             let mac = interface
                 .mac
                 .as_ref()
-                .map_or_else(|| "N/A".to_string(), |v| Self::format_mac_address(v));
+                .map_or_else(|| "N/A".to_string(), |v| format_mac_address(v));
             println!(" MAC Address:     {}", mac);
 
             let name = interface
@@ -362,7 +362,7 @@ impl Netlink {
             println!("Interface [{}]:\n", i + 1);
 
             if let Some(bssid) = &station.bssid {
-                println!(" Station BSSID: {}", Self::format_mac_address(bssid))
+                println!(" Station BSSID: {}", format_mac_address(bssid))
             }
 
             if let Some(v) = station.average_signal {
@@ -448,7 +448,7 @@ impl Netlink {
             }
 
             if let Some(id) = &bss.bssid {
-                println!(" BSSID: {}", Self::format_mac_address(id))
+                println!(" BSSID: {}", format_mac_address(id))
             }
 
             if let Some(freq) = bss.frequency {
@@ -476,16 +476,6 @@ impl Netlink {
             }
         }
         println!("--------------------------------------------------");
-    }
-
-    fn format_mac_address(mac: &[u8]) -> String {
-        if mac.is_empty() {
-            return "N/A".to_string();
-        }
-        mac.iter()
-            .map(|b| format!("{:02X}", b))
-            .collect::<Vec<String>>()
-            .join(":")
     }
 }
 

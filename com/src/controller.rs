@@ -1,3 +1,4 @@
+use futures::StreamExt;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -14,7 +15,7 @@ use crate::{
     },
 };
 use tracing::{error, info, instrument};
-use zbus::Connection;
+use zbus::{proxy::SignalStream, Connection};
 
 // Netlink not used here as I'm not implementing WPA authentication
 #[derive(Debug)]
@@ -230,6 +231,12 @@ impl Controller {
 
     pub async fn info(&self, ssid: String) -> Result<(), ComError> {
         Ok(())
+    }
+
+    pub async fn poll_signal_stream<'a>(signals: &mut Vec<SignalStream<'a>>) {
+        for signal in signals {
+            if let Some(msg) = signal.next().await {}
+        }
     }
 }
 

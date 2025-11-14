@@ -98,3 +98,13 @@ pub async fn get_index(interface: &'static str) -> Result<u32, ComError> {
     }
     Ok(index)
 }
+
+pub fn format_mac_address(mac: &[u8]) -> String {
+    if mac.is_empty() {
+        return "N/A".to_string();
+    }
+    mac.iter()
+        .map(|b| format!("{:02X}", b))
+        .collect::<Vec<String>>()
+        .join(":")
+}

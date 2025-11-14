@@ -257,7 +257,7 @@ impl Iwd {
 
     pub async fn scan(&mut self) -> Result<(), ComError> {
         let proxy = self.get_interface_proxy("Station").await?;
-        if get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
+        if !get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
             proxy.call_noreply("Scan", &()).await?;
         }
         Ok(())
