@@ -156,10 +156,10 @@ impl WpaSupplicant {
         self.call_interface_method::<_, ()>("Scan", dict).await?;
 
         let mut scan_signal = self.get_interface_signal("ScanDone").await?;
-        signal_tx.send(SignalUpdate::Add(scan_signal)).await;
-        info!("SENT SIGNAL UPDATE!");
-
-        Ok(())
+        match signal_tx.send(SignalUpdate::Add(scan_signal)).await {
+            Ok(()) => Ok(()),
+            Err(_) => Err(ComError::SignalSend("in wpa_supplicant scan".to_string())),
+        }
     }
 
     pub async fn nearby_networks(&mut self) -> Result<(), ComError> {
