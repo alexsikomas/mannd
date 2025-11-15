@@ -59,15 +59,19 @@ impl App {
 
             if let Ok(mut controller) = Controller::new().await {
                 controller.determine_adapter().await;
-                tokio::select! {
-                    Some(action) = net_action_rx.recv() => {
-                        handle_action(&mut controller, &state_update_tx, &signal_tx, action).await;
-                    }
-                    Some(update) = signal_rx.recv() => {
-                        signal_manager.handle_update(update);
-                    }
-                    _ = signal_manager.recv() => {}
-                };
+                loop {
+                    tokio::select! {
+                        Some(action) = net_action_rx.recv() => {
+                            if handle_action(&mut controller, &state_update_tx, &signal_tx, action).await {
+                                break;
+                            }
+                        }
+                        Some(update) = signal_rx.recv() => {
+                            signal_manager.handle_update(update);
+                        }
+                        _ = signal_manager.recv() => {}
+                    };
+                }
             }
         });
 

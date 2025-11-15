@@ -4,33 +4,35 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum ComError {
     #[error("Netlink Message Error: {0}")]
-    NeliMsg(#[from] neli::err::MsgError),
+    NeliMsg(neli::err::MsgError),
     #[error("Netlink Deserialisation Error: {0}")]
-    NeliDe(#[from] neli::err::DeError),
+    NeliDe(neli::err::DeError),
     #[error("Netlink Serialisation Error: {0}")]
-    NeliSer(#[from] neli::err::SerError),
+    NeliSer(neli::err::SerError),
     #[error("Netlink Builder Error: {0}")]
-    NeliBuilder(#[from] neli::err::BuilderError),
+    NeliBuilder(neli::err::BuilderError),
     #[error("Netlink Router Error: {0}")]
     NeliRouter(Box<dyn ThreadSafeError>),
     #[error("Netlink Socket Error: {0}")]
-    NeliSocket(#[from] neli::err::SocketError),
+    NeliSocket(neli::err::SocketError),
     #[error("Rt Builder Error: {0}")]
-    RtBuilder(#[from] neli::rtnl::RtattrBuilderError),
+    RtBuilder(neli::rtnl::RtattrBuilderError),
     #[error("Ifinfomsg error: {0}")]
-    Ifinfomsg(#[from] neli::rtnl::IfinfomsgBuilderError),
+    Ifinfomsg(neli::rtnl::IfinfomsgBuilderError),
     #[error("Ifaddr error: {0}")]
-    Ifaddrmsgbuilder(#[from] neli::rtnl::IfaddrmsgBuilderError),
+    Ifaddrmsgbuilder(neli::rtnl::IfaddrmsgBuilderError),
     #[error("nlattrbuilder error: {0}")]
-    Nlmsgbuilder(#[from] neli::genl::NlattrBuilderError),
+    Nlmsgbuilder(neli::genl::NlattrBuilderError),
     #[error("AttrType Builder Error: {0}")]
-    AttrTypeBuilder(#[from] neli::genl::AttrTypeBuilderError),
+    AttrTypeBuilder(neli::genl::AttrTypeBuilderError),
     #[error("Rtm Builder Error: {0}")]
-    RtmMsgBuilder(#[from] neli::rtnl::RtmsgBuilderError),
+    RtmMsgBuilder(neli::rtnl::RtmsgBuilderError),
     #[error("Nlmsg Builder Error: {0}")]
-    NlmsgBuilder(#[from] neli::nl::NlmsghdrBuilderError),
+    NlmsgBuilder(neli::nl::NlmsghdrBuilderError),
     #[error("Genlmsg Builder Error: {0}")]
-    GenlmsgBuilder(#[from] neli::genl::GenlmsghdrBuilderError),
+    GenlmsgBuilder(neli::genl::GenlmsghdrBuilderError),
+    #[error("Signal failed to send over channel: {0}")]
+    SignalSend(String),
 
     #[error("Network could not be found!")]
     NetworkNotFound,
@@ -49,15 +51,15 @@ pub enum ComError {
     FileNotFound(String),
     // io errors
     #[error("IO Error: {0}")]
-    IoError(#[from] std::io::Error),
+    IoError(std::io::Error),
 
     // zbus errors
     #[error("Zbus Error: {0}")]
-    Zbus(#[from] zbus::Error),
+    Zbus(zbus::Error),
     #[error("Freedesktop Error from Zbus: {0}")]
-    ZbusFreedesktop(#[from] zbus::fdo::Error),
+    ZbusFreedesktop(zbus::fdo::Error),
     #[error("Zbus zvariant Error: {0}")]
-    Zvariant(#[from] zbus::zvariant::Error),
+    Zvariant(zbus::zvariant::Error),
 }
 
 impl<T, P> From<neli::err::RouterError<T, P>> for ComError
@@ -77,3 +79,84 @@ pub trait NeliError {
 pub trait ThreadSafeError: std::error::Error + Send + Sync + 'static {}
 
 impl<T> ThreadSafeError for T where T: std::error::Error + Send + Sync + 'static {}
+
+macro_rules! error_with_tracing {
+    ($from_type:ty, $enum_variant:ident, $log_message:literal) => {
+        impl From<$from_type> for ComError {
+            fn from(err: $from_type) -> Self {
+                tracing::error!($log_message, err);
+                ComError::$enum_variant(err)
+            }
+        }
+    };
+}
+
+error_with_tracing!(neli::err::MsgError, NeliMsg, "Netlink Message Error: {}");
+error_with_tracing!(
+    neli::err::DeError,
+    NeliDe,
+    "Netlink Deserialisation Error: {}"
+);
+error_with_tracing!(
+    neli::err::SerError,
+    NeliSer,
+    "Netlink Serialisation Error: {}"
+);
+error_with_tracing!(
+    neli::err::BuilderError,
+    NeliBuilder,
+    "Netlink Builder Error: {}"
+);
+error_with_tracing!(
+    neli::err::SocketError,
+    NeliSocket,
+    "Netlink Socket Error: {}"
+);
+error_with_tracing!(
+    neli::rtnl::RtattrBuilderError,
+    RtBuilder,
+    "Rt Builder Error: {}"
+);
+error_with_tracing!(
+    neli::rtnl::IfinfomsgBuilderError,
+    Ifinfomsg,
+    "Ifinfomsg error: {}"
+);
+error_with_tracing!(
+    neli::rtnl::IfaddrmsgBuilderError,
+    Ifaddrmsgbuilder,
+    "Ifaddr error: {}"
+);
+error_with_tracing!(
+    neli::genl::NlattrBuilderError,
+    Nlmsgbuilder,
+    "nlattrbuilder error: {}"
+);
+error_with_tracing!(
+    neli::genl::AttrTypeBuilderError,
+    AttrTypeBuilder,
+    "AttrType Builder Error: {}"
+);
+error_with_tracing!(
+    neli::rtnl::RtmsgBuilderError,
+    RtmMsgBuilder,
+    "Rtm Builder Error: {}"
+);
+error_with_tracing!(
+    neli::nl::NlmsghdrBuilderError,
+    NlmsgBuilder,
+    "Nlmsg Builder Error: {}"
+);
+error_with_tracing!(
+    neli::genl::GenlmsghdrBuilderError,
+    GenlmsgBuilder,
+    "Genlmsg Builder Error: {}"
+);
+error_with_tracing!(std::io::Error, IoError, "IO Error: {}");
+error_with_tracing!(zbus::Error, Zbus, "Zbus Error: {}");
+error_with_tracing!(
+    zbus::fdo::Error,
+    ZbusFreedesktop,
+    "Freedesktop Error from Zbus: {}"
+);
+error_with_tracing!(zbus::zvariant::Error, Zvariant, "Zbus zvariant Error: {}");

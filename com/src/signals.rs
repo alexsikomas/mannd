@@ -35,7 +35,7 @@ impl<'a> SignalManager<'a> {
     pub async fn recv(&mut self) {
         for mut signal in &mut self.signals {
             while let Some(msg) = signal.next().await {
-                info!("{:?}", msg);
+                info!("The signal recieved was: {:?}", msg);
             }
         }
     }
