@@ -1,7 +1,11 @@
+use std::sync::mpsc::Sender;
+
 use futures::StreamExt;
 use tokio::sync::mpsc::Receiver;
 use tracing::info;
 use zbus::proxy::SignalStream;
+
+use crate::state::network::NetworkAction;
 
 pub struct SignalManager<'a> {
     pub signals: Vec<SignalStream<'a>>,
@@ -33,10 +37,15 @@ impl<'a> SignalManager<'a> {
     }
 
     pub async fn recv(&mut self) {
-        for mut signal in &mut self.signals {
+        let mut messages = vec![];
+        for signal in &mut self.signals {
             while let Some(msg) = signal.next().await {
                 info!("The signal recieved was: {:?}", msg);
+                messages.push(msg);
             }
         }
+        if !messages.is_empty() {}
     }
+
+    pub async fn process_messages(&self, tx: Sender<NetworkAction>) {}
 }

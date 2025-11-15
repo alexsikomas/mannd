@@ -14,7 +14,7 @@ use zbus::{
 
 use crate::{
     error::ComError,
-    signals::SignalUpdate,
+    state::signals::SignalUpdate,
     wireless::{
         common::{get_prop_from_proxy, Security},
         WifiAdapter,
