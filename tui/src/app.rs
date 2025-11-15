@@ -44,6 +44,7 @@ impl App {
         let (net_action_tx, mut net_action_rx) = mpsc::channel::<NetworkAction>(32);
         // from network thread
         let (state_update_tx, mut state_update_rx) = mpsc::channel::<StateUpdate>(32);
+        let signal_net_action = net_action_tx.clone();
 
         let mut terminal = ratatui::init();
 
@@ -62,14 +63,14 @@ impl App {
                 loop {
                     tokio::select! {
                         Some(action) = net_action_rx.recv() => {
-                            if handle_action(&mut controller, &state_update_tx, &signal_tx, action).await {
+                            if handle_action(&mut controller, state_update_tx.clone(), signal_tx.clone(), action).await {
                                 break;
                             }
                         }
                         Some(update) = signal_rx.recv() => {
                             signal_manager.handle_update(update);
                         }
-                        _ = signal_manager.recv() => {}
+                        _ = signal_manager.recv(signal_net_action.clone()) => {}
                     };
                 }
             }

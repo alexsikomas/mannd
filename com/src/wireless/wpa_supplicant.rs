@@ -149,7 +149,7 @@ impl WpaSupplicant {
     }
 
     #[tracing::instrument]
-    pub async fn scan<'a>(&self, signal_tx: &Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
+    pub async fn scan<'a>(&self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
         let mut dict: HashMap<String, OwnedValue> = HashMap::new();
 
         dict.insert("Type".to_string(), Value::new("active").try_to_owned()?);
