@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::Deserialize;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc::Sender, RwLock};
 use tracing::{info, instrument};
 use zbus::{
     fdo::ObjectManagerProxy,
@@ -13,6 +13,7 @@ use zbus::{
 
 use crate::{
     error::ComError,
+    signals::SignalUpdate,
     wireless::{
         agent::{AgentState, IwdAgent, IwdAgentMsg},
         common::{get_prop_from_proxy, AccessPoint, Security},
@@ -255,7 +256,7 @@ impl Iwd {
         .await?)
     }
 
-    pub async fn scan(&mut self) -> Result<(), ComError> {
+    pub async fn scan<'a>(&mut self, signal_tx: &Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
         let proxy = self.get_interface_proxy("Station").await?;
         if !get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
             proxy.call_noreply("Scan", &()).await?;

@@ -3,6 +3,8 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use tokio::sync::mpsc::Sender;
+use tracing::info;
 use zbus::{
     names::MemberName,
     proxy::SignalStream,
@@ -12,6 +14,7 @@ use zbus::{
 
 use crate::{
     error::ComError,
+    signals::SignalUpdate,
     wireless::{
         common::{get_prop_from_proxy, Security},
         WifiAdapter,
@@ -145,16 +148,16 @@ impl WpaSupplicant {
         Ok(stream)
     }
 
-    pub async fn scan(&self, wait: bool) -> Result<(), ComError> {
+    #[tracing::instrument]
+    pub async fn scan<'a>(&self, signal_tx: &Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
         let mut dict: HashMap<String, OwnedValue> = HashMap::new();
 
         dict.insert("Type".to_string(), Value::new("active").try_to_owned()?);
         self.call_interface_method::<_, ()>("Scan", dict).await?;
 
-        if wait {
-            let mut scan_signal = self.get_interface_signal("ScanDone").await?;
-            let message = scan_signal.next().await;
-        }
+        let mut scan_signal = self.get_interface_signal("ScanDone").await?;
+        signal_tx.send(SignalUpdate::Add(scan_signal)).await;
+        info!("SENT SIGNAL UPDATE!");
 
         Ok(())
     }
@@ -204,6 +207,24 @@ impl WpaSupplicant {
             rates,
         })
     }
+
+    pub async fn is_active(conn: &Connection) -> Result<bool, ComError> {
+        let proxy = Proxy::new(
+            conn,
+            "fi.w1.wpa_supplicant1",
+            "/fi/w1/wpa_supplicant1/Interfaces/0",
+            "fi.w1.wpa_supplicant1.Interface",
+        )
+        .await?;
+
+        let status = get_prop_from_proxy::<String>(&proxy, "State").await?;
+
+        match status.as_str() {
+            "completed" | "scanning" | "authenticating" | "associating" | "associated"
+            | "4way_handshake" | "group_handshake" => Ok(true),
+            _ => Ok(false),
+        }
+    }
 }
 
 mod tests {
@@ -216,7 +237,6 @@ mod tests {
         let mac = wpa.get_interface_prop::<Vec<u8>>("MACAddress").await?;
         wpa.list_configured_networks().await?;
 
-        wpa.scan(false).await?;
         let network = wpa.nearby_networks().await?;
 
         Ok(())

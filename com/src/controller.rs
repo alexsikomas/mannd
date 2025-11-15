@@ -1,10 +1,11 @@
 use futures::StreamExt;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::{
     error::ComError,
     netlink::Netlink,
+    signals::SignalUpdate,
     systemd::systemctl,
     wireless::{
         agent::{AgentState, IwdAgent},
@@ -46,6 +47,7 @@ impl Controller {
 
     /// Sets wifi to be either iwd, wpa or netlink
     pub async fn determine_adapter(&mut self) {
+        info!("Determining adapter");
         match &self.connection {
             Some(conn) => {
                 let ctl = systemctl::Systemctl::new(conn.clone());
@@ -53,14 +55,17 @@ impl Controller {
                     Some(v) => {
                         if v {
                             let _ = self.connect_iwd().await;
+                            info!("iwd connected");
                             return;
                         }
                     }
                     _ => {}
                 }
 
-                match ctl.is_service_active("wpa_supplicant".to_string()).await {
-                    Some(v) => {
+                // if each interface is managed induvidually this can be complex to
+                // find in systemd through dbus, so we use a different method
+                match WpaSupplicant::is_active(&conn).await {
+                    Ok(v) => {
                         if v {
                             let _ = self.connect_wpa().await;
                             return;
@@ -68,6 +73,7 @@ impl Controller {
                     }
                     _ => {}
                 }
+                tracing::error!("Neither iwd or wpa found!");
             }
             None => {
                 tracing::error!("Connection has yet to be set in the controller!");
@@ -113,10 +119,10 @@ impl Controller {
         }
     }
 
-    pub async fn scan(&mut self) -> Result<(), ComError> {
+    pub async fn scan<'a>(&mut self, signal_tx: &Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
         match &mut self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
-                match iwd.scan().await {
+                match iwd.scan(signal_tx).await {
                     Ok(_) => {
                         info!("Scan succeeded.");
                     }
@@ -124,6 +130,10 @@ impl Controller {
                         tracing::error!("There was an error while scanning!\n{}", com);
                     }
                 }
+                Ok(())
+            }
+            Some(WirelessAdapter::Wpa(wpa)) => {
+                wpa.scan(signal_tx).await?;
                 Ok(())
             }
             _ => Err(ComError::NetworkNotFound),
