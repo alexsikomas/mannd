@@ -2,14 +2,14 @@ use std::time::Duration;
 
 use com::{
     controller::Controller,
-    signals::{SignalManager, SignalUpdate},
+    state::network::{handle_action, NetworkAction, StateUpdate},
+    state::signals::{SignalManager, SignalUpdate},
 };
 use crossterm::event::{self, Event};
 use tokio::sync::mpsc::{self, Receiver};
 
 use crate::{
     error::TuiError,
-    network::{handle_action, NetworkAction, StateUpdate},
     state::{
         ConnectionAction, ConnectionState, FocusedConnection, PromptState, SelectableList, State,
     },

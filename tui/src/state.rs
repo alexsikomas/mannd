@@ -2,7 +2,8 @@ use com::wireless::common::{AccessPoint, Security};
 use crossterm::event::KeyCode;
 use tracing::info;
 
-use crate::{app::UpdateAction, network::NetworkAction};
+use crate::app::UpdateAction;
+use com::state::network::NetworkAction;
 
 pub enum State {
     MainMenu(SelectableList<MainMenuSelection>),

@@ -1,12 +1,11 @@
-use com::{
-    controller::Controller,
-    signals::SignalUpdate,
-    wireless::common::{AccessPoint, Security},
-};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 use tracing::info;
 
-use crate::app::AppState;
+use crate::{
+    controller::Controller,
+    state::signals::SignalUpdate,
+    wireless::common::{AccessPoint, Security},
+};
 
 #[derive(Debug)]
 pub enum NetworkAction {

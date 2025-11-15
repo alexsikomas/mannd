@@ -13,7 +13,7 @@ use zbus::{
 
 use crate::{
     error::ComError,
-    signals::SignalUpdate,
+    state::signals::SignalUpdate,
     wireless::{
         agent::{AgentState, IwdAgent, IwdAgentMsg},
         common::{get_prop_from_proxy, AccessPoint, Security},

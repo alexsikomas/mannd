@@ -5,7 +5,7 @@ use tokio::sync::{mpsc::Sender, RwLock};
 use crate::{
     error::ComError,
     netlink::Netlink,
-    signals::SignalUpdate,
+    state::signals::{self, SignalUpdate},
     systemd::systemctl,
     wireless::{
         agent::{AgentState, IwdAgent},
