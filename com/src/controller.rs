@@ -119,7 +119,7 @@ impl Controller {
         }
     }
 
-    pub async fn scan<'a>(&mut self, signal_tx: &Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
+    pub async fn scan<'a>(&mut self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
         match &mut self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 match iwd.scan(signal_tx).await {

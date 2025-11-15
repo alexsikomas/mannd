@@ -256,7 +256,7 @@ impl Iwd {
         .await?)
     }
 
-    pub async fn scan<'a>(&mut self, signal_tx: &Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
+    pub async fn scan<'a>(&mut self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
         let proxy = self.get_interface_proxy("Station").await?;
         if !get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
             proxy.call_noreply("Scan", &()).await?;
