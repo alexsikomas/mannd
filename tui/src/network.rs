@@ -1,5 +1,6 @@
 use com::{
     controller::Controller,
+    signals::SignalUpdate,
     wireless::common::{AccessPoint, Security},
 };
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -37,14 +38,15 @@ pub struct NetworkState {
 }
 
 /// Returns true if we are quitting the application
-pub async fn handle_action(
+pub async fn handle_action<'a>(
     controller: &mut Controller,
     state_update: &Sender<StateUpdate>,
+    signal_tx: &Sender<SignalUpdate<'a>>,
     action: NetworkAction,
 ) -> bool {
     match action {
         NetworkAction::Scan => {
-            if let Ok(()) = controller.scan().await {
+            if let Ok(()) = controller.scan(signal_tx).await {
                 if let Ok(aps) = controller.get_networks().await {
                     let _ = state_update.send(StateUpdate::UpdateAps(aps)).await;
                 }

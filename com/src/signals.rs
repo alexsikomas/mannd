@@ -1,4 +1,5 @@
 use futures::StreamExt;
+use tokio::sync::mpsc::Receiver;
 use tracing::info;
 use zbus::proxy::SignalStream;
 
@@ -31,7 +32,7 @@ impl<'a> SignalManager<'a> {
         }
     }
 
-    pub async fn poll_event(&mut self) {
+    pub async fn recv(&mut self) {
         for mut signal in &mut self.signals {
             while let Some(msg) = signal.next().await {
                 info!("{:?}", msg);

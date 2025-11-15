@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use com::{controller::Controller, signals::SignalUpdate};
+use com::{
+    controller::Controller,
+    signals::{SignalManager, SignalUpdate},
+};
 use crossterm::event::{self, Event};
 use tokio::sync::mpsc::{self, Receiver};
 
@@ -51,14 +54,20 @@ impl App {
         // loaded and we get a signal then this leads to getting the
         // network values via a network update
         tokio::spawn(async move {
-            let (signal_tx, signal_rx) = mpsc::channel::<SignalUpdate>(32);
+            let (signal_tx, mut signal_rx) = mpsc::channel::<SignalUpdate>(32);
+            let mut signal_manager = SignalManager::new();
+
             if let Ok(mut controller) = Controller::new().await {
+                controller.determine_adapter().await;
                 tokio::select! {
                     Some(action) = net_action_rx.recv() => {
-                        handle_action(&mut controller, &state_update_tx, action).await;
+                        handle_action(&mut controller, &state_update_tx, &signal_tx, action).await;
                     }
+                    Some(update) = signal_rx.recv() => {
+                        signal_manager.handle_update(update);
+                    }
+                    _ = signal_manager.recv() => {}
                 };
-                // handle_action(&mut controller, net_update_tx, network_action).await;
             }
         });
 
