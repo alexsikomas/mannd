@@ -141,16 +141,18 @@ impl Controller {
     }
     pub async fn get_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
         match &mut self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => {
-                let imv = iwd.get_networks().await;
-                match imv {
-                    Ok(v) => Ok(v),
-                    Err(e) => {
-                        error!("ERROR! {:?}", e);
-                        Err(ComError::NetworkNotFound)
-                    }
-                }
-            }
+            Some(WirelessAdapter::Iwd(iwd)) => match iwd.get_networks().await {
+                Ok(v) => Ok(v),
+                Err(e) => Err(ComError::OperationFailed(
+                    "Error while getting scanned networks!".to_string(),
+                )),
+            },
+            Some(WirelessAdapter::Wpa(wpa)) => match wpa.nearby_networks().await {
+                Ok(v) => Ok(v),
+                Err(e) => Err(ComError::OperationFailed(
+                    "Error while getting scanned networks!".to_string(),
+                )),
+            },
             _ => Err(ComError::NetworkNotFound),
         }
     }

@@ -5,16 +5,15 @@ use tracing::info;
 use crate::app::UpdateAction;
 use com::state::network::NetworkAction;
 
+//* State
+//*
+//* Controls what should happen on keypress and
+//* what the viewer should see
 pub enum State {
     MainMenu(SelectableList<MainMenuSelection>),
     Connection(ConnectionState),
     Vpn,
     Config,
-}
-
-#[derive(Debug)]
-pub enum PromptState {
-    Connect(ConnectionPrompt),
 }
 
 pub enum MainMenuSelection {
@@ -35,116 +34,6 @@ impl MainMenuSelection {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum ConnectionAction {
-    Scan,
-    Connect,
-    Disconnect,
-    // Info,
-    Forget,
-}
-
-#[derive(PartialEq, Eq)]
-pub enum FocusedConnection {
-    Networks,
-    Actions,
-}
-
-pub struct ConnectionState {
-    pub networks: SelectableList<AccessPoint>,
-    pub actions: SelectableList<ConnectionAction>,
-    pub focused_list: FocusedConnection,
-}
-
-impl ConnectionState {
-    pub fn new(aps: Vec<AccessPoint>) -> Self {
-        Self {
-            networks: SelectableList::new(aps),
-            actions: SelectableList::new(vec![ConnectionAction::Scan]),
-            focused_list: FocusedConnection::Actions,
-        }
-    }
-}
-
-impl ConnectionAction {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Scan => "Scan",
-            Self::Connect => "Connect",
-            Self::Disconnect => "Disconnect",
-            // Self::Info => "Info",
-            Self::Forget => "Forget",
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum ConnectionPromptSelect {
-    Password,
-    Connect,
-    Back,
-}
-
-#[derive(Debug)]
-pub struct ConnectionPrompt {
-    pub ssid: String,
-    pub password: String,
-    pub select: ConnectionPromptSelect,
-}
-
-impl ConnectionPrompt {
-    fn new(ssid: String) -> Self {
-        Self {
-            ssid,
-            password: String::new(),
-            select: ConnectionPromptSelect::Password,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SelectableList<T> {
-    pub items: Vec<T>,
-    pub selected: usize,
-}
-
-impl<T> SelectableList<T> {
-    pub fn new(v: Vec<T>) -> Self {
-        Self {
-            items: v,
-            selected: 0,
-        }
-    }
-
-    fn next(&mut self) {
-        if self.items.len() == 0 {
-            return;
-        }
-
-        if self.selected == self.items.len() - 1 {
-            self.selected = 0;
-        } else {
-            self.selected += 1;
-        }
-    }
-
-    fn prev(&mut self) {
-        if self.items.len() == 0 {
-            return;
-        }
-
-        if self.selected == 0 {
-            self.selected = self.items.len() - 1;
-        } else {
-            self.selected -= 1;
-        }
-    }
-
-    pub fn get_selected_value(&self) -> &T {
-        &self.items[self.selected]
-    }
-}
-
 impl State {
     pub fn main_menu() -> Self {
         State::MainMenu(SelectableList::new(vec![
@@ -159,6 +48,8 @@ impl State {
         State::Connection(ConnectionState::new(vec![]))
     }
 
+    /// Main handler for input, delagates some work to helper
+    /// functions to contain menu specific logic
     pub fn handle_input(&mut self, key: KeyCode) -> Option<UpdateAction> {
         if key == KeyCode::Esc {
             match &self {
@@ -179,7 +70,8 @@ impl State {
                     match list.get_selected_value() {
                         MainMenuSelection::Connection => {
                             *self = State::connection();
-                            return Some(UpdateAction::Network(NetworkAction::Scan));
+                            // get known networks instead
+                            // return Some(UpdateAction::Network(NetworkAction::Scan));
                         }
                         MainMenuSelection::Vpn => {}
                         MainMenuSelection::Config => {}
@@ -286,6 +178,39 @@ impl State {
     }
 }
 
+//* Prompt
+//*
+//* Displays a prompt visually on
+//* top of the current view
+#[derive(Debug)]
+pub enum PromptState {
+    Connect(ConnectionPrompt),
+}
+
+#[derive(Debug)]
+pub enum ConnectionPromptSelect {
+    Password,
+    Connect,
+    Back,
+}
+
+#[derive(Debug)]
+pub struct ConnectionPrompt {
+    pub ssid: String,
+    pub password: String,
+    pub select: ConnectionPromptSelect,
+}
+
+impl ConnectionPrompt {
+    fn new(ssid: String) -> Self {
+        Self {
+            ssid,
+            password: String::new(),
+            select: ConnectionPromptSelect::Password,
+        }
+    }
+}
+
 impl PromptState {
     pub fn handle_input(&mut self, key: KeyCode) -> Option<UpdateAction> {
         match key {
@@ -355,26 +280,94 @@ impl PromptState {
     }
 }
 
-// impl ConnectionState {
-//     pub fn next(&mut self) {
-//         match self.focused_list {
-//             FocusedConnection::Networks => {
-//                 self.networks.next();
-//             }
-//             FocusedConnection::Actions => {
-//                 self.actions.next();
-//             }
-//         }
-//     }
-//
-//     pub fn previous(&mut self) {
-//         match self.focused_list {
-//             FocusedConnection::Networks => {
-//                 self.networks.prev();
-//             }
-//             FocusedConnection::Actions => {
-//                 self.actions.prev();
-//             }
-//         }
-//     }
-// }
+//* Connection
+//*
+//* Possible actions the user can take in the connection
+//* menu and how the data should be stored
+#[derive(Clone, Debug)]
+pub enum ConnectionAction {
+    Scan,
+    Connect,
+    Disconnect,
+    // Info,
+    Forget,
+}
+
+#[derive(PartialEq, Eq)]
+pub enum FocusedConnection {
+    Networks,
+    Actions,
+}
+
+pub struct ConnectionState {
+    pub networks: SelectableList<AccessPoint>,
+    pub actions: SelectableList<ConnectionAction>,
+    pub focused_list: FocusedConnection,
+}
+
+impl ConnectionState {
+    pub fn new(aps: Vec<AccessPoint>) -> Self {
+        Self {
+            networks: SelectableList::new(aps),
+            actions: SelectableList::new(vec![ConnectionAction::Scan]),
+            focused_list: FocusedConnection::Actions,
+        }
+    }
+}
+
+impl ConnectionAction {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Scan => "Scan",
+            Self::Connect => "Connect",
+            Self::Disconnect => "Disconnect",
+            // Self::Info => "Info",
+            Self::Forget => "Forget",
+        }
+    }
+}
+
+//* Generic data structure used to keep
+//* track of menu items
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SelectableList<T> {
+    pub items: Vec<T>,
+    pub selected: usize,
+}
+
+impl<T> SelectableList<T> {
+    pub fn new(v: Vec<T>) -> Self {
+        Self {
+            items: v,
+            selected: 0,
+        }
+    }
+
+    fn next(&mut self) {
+        if self.items.len() == 0 {
+            return;
+        }
+
+        if self.selected == self.items.len() - 1 {
+            self.selected = 0;
+        } else {
+            self.selected += 1;
+        }
+    }
+
+    fn prev(&mut self) {
+        if self.items.len() == 0 {
+            return;
+        }
+
+        if self.selected == 0 {
+            self.selected = self.items.len() - 1;
+        } else {
+            self.selected -= 1;
+        }
+    }
+
+    pub fn get_selected_value(&self) -> &T {
+        &self.items[self.selected]
+    }
+}

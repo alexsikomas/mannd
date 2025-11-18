@@ -62,7 +62,7 @@ impl<'a> SignalManager<'a> {
             info!("PROCESSING: {:?}", method);
             match method.as_str() {
                 "ScanDone" => {
-                    tx.send(NetworkAction::GetKnownNetworks);
+                    tx.send(NetworkAction::GetAllNetworks).await;
                     self.handle_update(SignalUpdate::Remove(msg.0));
                 }
                 _ => {}
