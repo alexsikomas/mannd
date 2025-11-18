@@ -1,7 +1,7 @@
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_stream::{StreamExt, StreamMap};
 use tracing::info;
-use zbus::{proxy::SignalStream, Message};
+use zbus::{names::MemberName, proxy::SignalStream, Message};
 
 use crate::state::network::NetworkAction;
 
@@ -55,7 +55,18 @@ impl<'a> SignalManager<'a> {
         self.signals.next().await
     }
 
-    pub async fn process_messages(&self, message: (usize, Message), tx: Sender<NetworkAction>) {
-        info!("Processing");
+    pub async fn process_iwd_msg(&mut self, msg: (usize, Message), tx: Sender<NetworkAction>) {}
+    pub async fn process_wpa_msg(&mut self, msg: (usize, Message), tx: Sender<NetworkAction>) {
+        let body = msg.1.body();
+        if let Some(method) = body.message().header().member() {
+            info!("PROCESSING: {:?}", method);
+            match method.as_str() {
+                "ScanDone" => {
+                    tx.send(NetworkAction::GetKnownNetworks);
+                    self.handle_update(SignalUpdate::Remove(msg.0));
+                }
+                _ => {}
+            };
+        }
     }
 }

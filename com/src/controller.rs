@@ -250,6 +250,15 @@ impl Controller {
     }
 }
 
+impl WirelessAdapter {
+    pub fn daemon_type(&self) -> u32 {
+        match self {
+            WirelessAdapter::Iwd(_) => 1,
+            WirelessAdapter::Wpa(_) => 2,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
