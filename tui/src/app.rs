@@ -72,8 +72,8 @@ impl App {
                         Some(update) = signal_rx.recv() => {
                             signal_manager.handle_update(update);
                         }
-                        Some(messages) = signal_manager.recv() => {
-                            signal_manager.process_messages(messages, signal_net_action.clone()).await;
+                        Some(msg) = signal_manager.recv() => {
+                            signal_manager.process_messages(msg, signal_net_action.clone()).await;
                         }
                     };
                 }

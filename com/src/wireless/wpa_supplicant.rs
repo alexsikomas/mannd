@@ -1,4 +1,14 @@
 //! Reference: https://w1.fi/wpa_supplicant/devel/dbus.html#dbus_network
+//!
+//! Regarding call_interface methods:
+//! Not a huge fan of needing these two methods
+//! but alas if you try to use .call() expecting
+//! () you will get an error...
+//!
+//! The alternative was making this more general
+//! with flags, but that requires another
+//! dependency, so for now I've settled on this.
+
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -113,6 +123,25 @@ impl WpaSupplicant {
         Ok(res)
     }
 
+    pub async fn call_interface_method_noreply<T>(
+        &self,
+        method_name: &'static str,
+        body: T,
+    ) -> Result<(), ComError>
+    where
+        T: serde::ser::Serialize + zvariant::DynamicType,
+    {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            "fi.w1.wpa_supplicant1.Interface",
+        )
+        .await?;
+        proxy.call_noreply(method_name, &body).await?;
+        Ok(())
+    }
+
     pub async fn get_interface_prop<'a, T>(&self, prop: &'static str) -> Result<T, ComError>
     where
         T: TryFrom<Value<'a>>,
@@ -153,7 +182,7 @@ impl WpaSupplicant {
         let mut dict: HashMap<String, OwnedValue> = HashMap::new();
 
         dict.insert("Type".to_string(), Value::new("active").try_to_owned()?);
-        self.call_interface_method::<_, ()>("Scan", dict).await?;
+        self.call_interface_method_noreply("Scan", dict).await?;
 
         let mut scan_signal = self.get_interface_signal("ScanDone").await?;
         match signal_tx.send(SignalUpdate::Add(scan_signal)).await {
