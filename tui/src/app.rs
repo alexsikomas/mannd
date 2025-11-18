@@ -61,6 +61,7 @@ impl App {
 
             if let Ok(mut controller) = Controller::new().await {
                 controller.determine_adapter().await;
+                let daemon = controller.wifi.as_ref().unwrap().daemon_type();
                 loop {
                     tokio::select! {
                         Some(action) = net_action_rx.recv() => {
@@ -73,7 +74,19 @@ impl App {
                             signal_manager.handle_update(update);
                         }
                         Some(msg) = signal_manager.recv() => {
-                            signal_manager.process_messages(msg, signal_net_action.clone()).await;
+                            match daemon {
+                                // iwd
+                                1 => {
+                                    signal_manager.process_iwd_msg(msg, signal_net_action.clone()).await;
+                                }
+                                // wpa
+                                2 => {
+                                    signal_manager.process_wpa_msg(msg, signal_net_action.clone()).await;
+                                }
+                                _ => {
+                                    break;
+                                }
+                            }
                         }
                     };
                 }

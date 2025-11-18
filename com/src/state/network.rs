@@ -10,6 +10,7 @@ use crate::{
 #[derive(Debug)]
 pub enum NetworkAction {
     Scan,
+    GetAllNetworks,
     GetKnownNetworks,
     Connect(String, String, Security),
     Forget(String, Security),
@@ -44,11 +45,10 @@ pub async fn handle_action<'a>(
     action: NetworkAction,
 ) -> bool {
     match action {
-        NetworkAction::Scan => {
-            if let Ok(()) = controller.scan(signal_tx.clone()).await {
-                if let Ok(aps) = controller.get_networks().await {
-                    let _ = state_update.send(StateUpdate::UpdateAps(aps)).await;
-                }
+        NetworkAction::Scan => if let Ok(()) = controller.scan(signal_tx.clone()).await {},
+        NetworkAction::GetAllNetworks => {
+            if let Ok(aps) = controller.get_networks().await {
+                let _ = state_update.send(StateUpdate::UpdateAps(aps)).await;
             }
         }
         NetworkAction::Connect(ssid, psk, sec) => {
