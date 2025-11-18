@@ -9,7 +9,7 @@
 //! with flags, but that requires another
 //! dependency, so for now I've settled on this.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -26,7 +26,7 @@ use crate::{
     error::ComError,
     state::signals::SignalUpdate,
     wireless::{
-        common::{get_prop_from_proxy, Security},
+        common::{get_prop_from_proxy, AccessPoint, Security},
         WifiAdapter,
     },
 };
@@ -36,6 +36,8 @@ pub struct WpaSupplicant {
     service: String,
     path: String,
     conn: Connection,
+    // We keep track of this because by converting
+    // to `AccessPoint` we lose the ObjectPath
     networks: HashMap<String, OwnedObjectPath>,
 }
 
@@ -179,6 +181,7 @@ impl WpaSupplicant {
 
     #[tracing::instrument]
     pub async fn scan<'a>(&self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
+        info!("Scan function call");
         let mut dict: HashMap<String, OwnedValue> = HashMap::new();
 
         dict.insert("Type".to_string(), Value::new("active").try_to_owned()?);
@@ -191,13 +194,18 @@ impl WpaSupplicant {
         }
     }
 
-    pub async fn nearby_networks(&mut self) -> Result<(), ComError> {
+    pub async fn nearby_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
         let networks = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("BSSs")
             .await?;
 
+        // to be returned
+        let mut aps: Vec<AccessPoint> = vec![];
+        let mut seen: HashSet<String> = HashSet::new();
+
+        self.networks.clear();
+
         for network in networks {
-            println!("{:?}", network.clone());
             let proxy = Proxy::new(
                 &self.conn,
                 self.service.clone(),
@@ -205,12 +213,26 @@ impl WpaSupplicant {
                 "fi.w1.wpa_supplicant1.BSS",
             )
             .await?;
+            // ssid may appear multiple times if router broadcasts
+            // ap at different freqs
             let encoded = get_prop_from_proxy::<Vec<u8>>(&proxy, "SSID").await?;
             let ssid = String::from_utf8_lossy(&encoded);
+
+            if seen.insert(ssid.to_string()) {
+                let ap = AccessPoint {
+                    ssid: ssid.clone().to_string(),
+                    security: Security::Psk,
+                    connected: false,
+                    known: false,
+                    nearby: true,
+                };
+                aps.push(ap);
+            }
+
             self.networks.insert(ssid.into_owned(), network);
         }
-        println!("{:?}", self.networks);
-        Ok(())
+
+        Ok(aps)
     }
 
     pub async fn get_network_info(&self, bss_path: OwnedObjectPath) -> Result<WpaBss, ComError> {

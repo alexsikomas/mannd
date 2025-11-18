@@ -19,16 +19,12 @@ pub enum NetworkAction {
     Disconnect,
     ForceIwd,
     ForceWpa,
-    ForceWifiNetlink,
 }
 
-pub enum StateUpdate {
-    Select(usize),
-    Update,
-    Deselect,
-    /// Unreachable known networks
+pub enum NetUpdate {
     AddKnownNetworks(Vec<AccessPoint>),
     UpdateAps(Vec<AccessPoint>),
+    UpdateApsHidden(Vec<AccessPoint>),
 }
 
 #[derive(Debug)]
@@ -40,7 +36,7 @@ pub struct NetworkState {
 /// Returns true if we are quitting the application
 pub async fn handle_action<'a>(
     controller: &mut Controller,
-    state_update: Sender<StateUpdate>,
+    state_update: Sender<NetUpdate>,
     signal_tx: Sender<SignalUpdate<'a>>,
     action: NetworkAction,
 ) -> bool {
@@ -48,7 +44,7 @@ pub async fn handle_action<'a>(
         NetworkAction::Scan => if let Ok(()) = controller.scan(signal_tx.clone()).await {},
         NetworkAction::GetAllNetworks => {
             if let Ok(aps) = controller.get_networks().await {
-                let _ = state_update.send(StateUpdate::UpdateAps(aps)).await;
+                let _ = state_update.send(NetUpdate::UpdateAps(aps)).await;
             }
         }
         NetworkAction::Connect(ssid, psk, sec) => {
@@ -69,14 +65,14 @@ pub async fn handle_action<'a>(
                 // At this point some of the networks will still be reachable
                 // we don't have self so can't do check here
                 let _ = state_update
-                    .send(StateUpdate::AddKnownNetworks(known_aps))
+                    .send(NetUpdate::AddKnownNetworks(known_aps))
                     .await;
             }
         }
         NetworkAction::Forget(ssid, sec) => {
             if let Ok(()) = controller.remove_network(ssid, sec).await {
                 if let Ok(aps) = controller.get_networks().await {
-                    let _ = state_update.send(StateUpdate::UpdateAps(aps)).await;
+                    let _ = state_update.send(NetUpdate::UpdateAps(aps)).await;
                 }
             }
         }

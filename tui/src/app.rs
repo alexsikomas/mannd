@@ -3,8 +3,10 @@ use tracing::info;
 
 use com::{
     controller::Controller,
-    state::network::{handle_action, NetworkAction, StateUpdate},
-    state::signals::{SignalManager, SignalUpdate},
+    state::{
+        network::{handle_action, NetUpdate, NetworkAction},
+        signals::{SignalManager, SignalUpdate},
+    },
 };
 use crossterm::event::{self, Event};
 use tokio::sync::mpsc::{self, Receiver};
@@ -44,7 +46,7 @@ impl App {
         // to network thread
         let (net_action_tx, mut net_action_rx) = mpsc::channel::<NetworkAction>(32);
         // from network thread
-        let (state_update_tx, mut state_update_rx) = mpsc::channel::<StateUpdate>(32);
+        let (state_update_tx, mut state_update_rx) = mpsc::channel::<NetUpdate>(32);
         let signal_net_action = net_action_tx.clone();
 
         let mut terminal = ratatui::init();
@@ -167,16 +169,10 @@ impl App {
     }
 }
 
-fn handle_net_state_msg(state: &mut AppState, net_update_rx: &mut Receiver<StateUpdate>) {
+fn handle_net_state_msg(state: &mut AppState, net_update_rx: &mut Receiver<NetUpdate>) {
     if let Ok(msg) = net_update_rx.try_recv() {
         match msg {
-            StateUpdate::Select(i) => {
-                // state.network.selected = Some(i);
-            }
-            StateUpdate::Deselect => {
-                // state.network.selected = None;
-            }
-            StateUpdate::UpdateAps(aps) => {
+            NetUpdate::UpdateAps(aps) => {
                 // state.network.aps = aps.clone();
                 match &state.view_state {
                     State::Connection(conn_state) => {
@@ -211,10 +207,10 @@ fn handle_net_state_msg(state: &mut AppState, net_update_rx: &mut Receiver<State
                     _ => {}
                 }
             }
-            StateUpdate::AddKnownNetworks(aps) => {
+            NetUpdate::AddKnownNetworks(aps) => {
                 // state.view_state = State::Connection(state.)
             }
-            StateUpdate::Update => {}
+            NetUpdate::UpdateApsHidden(aps) => {}
         };
         state.redraw = true;
     };
