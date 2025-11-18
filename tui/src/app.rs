@@ -1,4 +1,5 @@
 use std::time::Duration;
+use tracing::info;
 
 use com::{
     controller::Controller,
@@ -67,10 +68,13 @@ impl App {
                                 break;
                             }
                         }
+                        // add new signals to listen for
                         Some(update) = signal_rx.recv() => {
                             signal_manager.handle_update(update);
                         }
-                        _ = signal_manager.recv(signal_net_action.clone()) => {}
+                        Some(messages) = signal_manager.recv() => {
+                            signal_manager.process_messages(messages, signal_net_action.clone()).await;
+                        }
                     };
                 }
             }
