@@ -315,6 +315,7 @@ dependencies = [
  "bindgen",
  "caps",
  "cc",
+ "derive_builder",
  "futures",
  "futures-timer",
  "neli",

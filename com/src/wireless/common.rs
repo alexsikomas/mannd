@@ -1,15 +1,7 @@
+use derive_builder::Builder;
 use zbus::{zvariant::Value, Connection};
 
 use crate::error::ComError;
-
-#[derive(Debug, Clone)]
-pub struct AccessPoint {
-    pub ssid: String, // name
-    pub security: Security,
-    pub known: bool,
-    pub connected: bool,
-    pub nearby: bool,
-}
 
 #[derive(Debug, Clone)]
 pub enum Security {
@@ -24,6 +16,17 @@ impl std::fmt::Display for Security {
             Security::Open => write!(f, "open"),
             Security::Psk => write!(f, "psk"),
             Security::Ieee8021x => write!(f, "8021x"),
+        }
+    }
+}
+
+impl Security {
+    pub fn from_str(str: &str) -> Option<Self> {
+        match str {
+            "open" => Some(Security::Open),
+            "psk" => Some(Security::Psk),
+            "8021x" => Some(Security::Ieee8021x),
+            _ => None,
         }
     }
 }
@@ -74,4 +77,21 @@ where
 pub fn ssid_to_hex(ssid: String) -> String {
     let bytes = ssid.as_bytes();
     bytes.into_iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+#[derive(Builder, Debug, Clone)]
+#[builder(pattern = "owned")]
+pub struct AccessPoint {
+    pub ssid: String,
+    pub security: Security,
+    pub known: bool,
+    pub connected: bool,
+    pub nearby: bool,
+    // OPTIONAL ARGUMENTS:
+    /// In some cases an empty string does
+    /// not imply a hidden network depending
+    /// on the type of request i.e beacon
+    /// frame vs probe
+    #[builder(setter(into, strip_option), default)]
+    pub hidden: Option<bool>,
 }

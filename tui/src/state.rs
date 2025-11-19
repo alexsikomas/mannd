@@ -114,9 +114,7 @@ impl State {
         match &conn_state.focused_list {
             FocusedConnection::Actions => match key {
                 KeyCode::Up => {
-                    info!("{:?}", conn_state.actions);
                     conn_state.actions.prev();
-                    info!("{:?}", conn_state.actions);
                 }
                 KeyCode::Down => {
                     conn_state.actions.next();

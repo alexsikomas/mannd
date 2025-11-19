@@ -16,7 +16,7 @@ use crate::{
     state::signals::SignalUpdate,
     wireless::{
         agent::{AgentState, IwdAgent, IwdAgentMsg},
-        common::{get_prop_from_proxy, AccessPoint, Security},
+        common::{get_prop_from_proxy, AccessPoint, AccessPointBuilder, Security},
         WifiAdapter,
     },
 };
@@ -260,6 +260,8 @@ impl Iwd {
         let proxy = self.get_interface_proxy("Station").await?;
         if !get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
             proxy.call_noreply("Scan", &()).await?;
+            let signal = proxy.receive_signal("PropertiesChanged").await?;
+            signal_tx.send(SignalUpdate::Add(signal)).await;
         }
         Ok(())
     }
@@ -271,34 +273,28 @@ impl Iwd {
 
         let mut access_points: Vec<AccessPoint> = vec![];
         for ap in aps {
-            let proxy = zbus::proxy::Proxy::new(
-                &self.conn,
-                self.service.clone(),
-                ap.0.as_str(),
-                "net.connman.iwd.Network",
-            )
-            .await?;
-
             // FIX: very janky
-            let ssid = self
+            let ap_info = self
                 .get_ap_info(String::from(ap.0.as_str().split("/").last().unwrap()))
                 .await?;
-            access_points.push(ssid);
+            access_points.push(ap_info);
         }
 
         Ok(access_points)
     }
 
+    // FIX: This code is not something I would write anymore, check with iwd
+    // device if this was done for a reason or just bad
     pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
         let mut known_networks: Vec<AccessPoint> = vec![];
         let proxy = ObjectManagerProxy::new(&self.conn, self.service.clone(), "/").await?;
         for (path, interface) in proxy.get_managed_objects().await? {
             if let Some(known_network_props) = interface.get("net.connman.iwd.KnownNetwork") {
-                let mut name: String = "".to_string();
+                let mut ssid: String = "".to_string();
                 let mut security: Security = Security::Psk;
 
-                if let Some(net_name) = known_network_props.get("Name") {
-                    name = net_name.downcast_ref::<String>().unwrap_or("".to_string());
+                if let Some(name) = known_network_props.get("Name") {
+                    ssid = name.downcast_ref::<String>().unwrap_or("".to_string());
                 }
                 if let Some(net_security) = known_network_props.get("Type") {
                     let security_str = net_security.downcast_ref::<&str>().unwrap_or("psk");
@@ -318,13 +314,15 @@ impl Iwd {
                     }
                 }
 
-                known_networks.push(AccessPoint {
-                    ssid: name,
-                    security,
-                    known: true,
-                    connected: false,
-                    nearby: false,
-                });
+                let ap = AccessPointBuilder::default()
+                    .ssid(ssid)
+                    .security(security)
+                    .known(true)
+                    .connected(false)
+                    .nearby(false)
+                    .build()?;
+
+                known_networks.push(ap);
             }
         }
         Ok(known_networks)
@@ -341,17 +339,8 @@ impl Iwd {
 
         let ssid = get_prop_from_proxy::<String>(&proxy, "Name").await?;
         let security: Security;
-        match get_prop_from_proxy::<String>(&proxy, "Type")
-            .await?
-            .as_str()
-        {
-            "psk" => security = Security::Psk,
-            "open" => security = Security::Open,
-            "8021x" => security = Security::Ieee8021x,
-            _ => {
-                return Err(ComError::InvalidSecurityType);
-            }
-        }
+        let security_str = get_prop_from_proxy::<String>(&proxy, "Type").await?;
+        let security = Security::from_str(security_str.as_str()).unwrap();
 
         let mut known = false;
 
@@ -365,13 +354,15 @@ impl Iwd {
 
         let connected = get_prop_from_proxy::<bool>(&proxy, "Connected").await?;
 
-        Ok(AccessPoint {
-            ssid,
-            security,
-            known,
-            connected,
-            nearby: true,
-        })
+        let ap = AccessPointBuilder::default()
+            .ssid(ssid)
+            .security(security)
+            .known(known)
+            .connected(connected)
+            .nearby(true)
+            .build()?;
+
+        Ok(ap)
     }
 
     pub async fn get_modes(&self) -> Result<Vec<String>, ComError> {

@@ -60,6 +60,9 @@ pub enum ComError {
     ZbusFreedesktop(zbus::fdo::Error),
     #[error("Zbus zvariant Error: {0}")]
     Zvariant(zbus::zvariant::Error),
+
+    #[error("Error while builder access point struct: {0}")]
+    AccessPointBuilder(crate::wireless::common::AccessPointBuilderError),
 }
 
 impl<T, P> From<neli::err::RouterError<T, P>> for ComError
@@ -159,4 +162,11 @@ error_with_tracing!(
     ZbusFreedesktop,
     "Freedesktop Error from Zbus: {}"
 );
+
 error_with_tracing!(zbus::zvariant::Error, Zvariant, "Zbus zvariant Error: {}");
+
+error_with_tracing!(
+    crate::wireless::common::AccessPointBuilderError,
+    AccessPointBuilder,
+    "Error building ap: {}"
+);

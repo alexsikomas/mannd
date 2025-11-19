@@ -1,6 +1,9 @@
-<h1 align="center">
-    mannd
-</h1>
+<div align="center">
+    <h1 style="border-bottom: none; margin-bottom: 1px;">
+        mannd
+    </h1>
+<a href="https://freerangesoftware.org"><img src="https://freerangesoftware.org/assets/frs-badge.png" alt="This Software is Free Range" height="25px" style="border-radius:0.25em;"/></a>
+</div>
 
 ## Why mannd?
 `systemd-networkd` is a powerful and lightweight networking daemon, but managing Wi-Fi or on-the-fly VPN connections often requires manual configurations or switching between various userspace tools like `iwctl` and `wg-quick`. `mannd` aims to condense the process into just one TUI, similar to `nmtui`.
@@ -27,7 +30,9 @@ Before you can use `mannd`, you must have the following installed on your system
 
 `mannd` expects that a `.network` rule already exists for allowing you to connect to the Internet via Wi-Fi.
 
-### wpa_supplicant
+<details>
+<summary><strong>Setup with wpa_supplicant</strong></summary>
+
 `mannd` communicates with `wpa_supplicant` through the D-Bus control interface, this has to be explicitly enabled on your main Wi-Fi adapter. This is not always the default.
 
 Find your main interface name with: `ip a`
@@ -68,6 +73,7 @@ Finally run:
 sudo systemctl daemon-reload
 sudo systemctl restart wpa_supplicant@interface.service
 ```
+</details>
 
 ### Installation
 #### Source
