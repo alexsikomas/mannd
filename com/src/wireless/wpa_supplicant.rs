@@ -26,7 +26,7 @@ use crate::{
     error::ComError,
     state::signals::SignalUpdate,
     wireless::{
-        common::{get_prop_from_proxy, AccessPoint, Security},
+        common::{get_prop_from_proxy, AccessPoint, AccessPointBuilder, Security},
         WifiAdapter,
     },
 };
@@ -219,13 +219,14 @@ impl WpaSupplicant {
             let ssid = String::from_utf8_lossy(&encoded);
 
             if seen.insert(ssid.to_string()) {
-                let ap = AccessPoint {
-                    ssid: ssid.clone().to_string(),
-                    security: Security::Psk,
-                    connected: false,
-                    known: false,
-                    nearby: true,
-                };
+                let ap = AccessPointBuilder::default()
+                    .ssid(ssid.clone().to_string())
+                    .security(Security::Psk)
+                    .connected(false)
+                    .known(false)
+                    .nearby(true)
+                    .build()?;
+
                 aps.push(ap);
             }
 
