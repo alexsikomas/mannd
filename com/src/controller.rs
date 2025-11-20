@@ -239,12 +239,6 @@ impl Controller {
     pub async fn info(&self, ssid: String) -> Result<(), ComError> {
         Ok(())
     }
-
-    pub async fn poll_signal_stream<'a>(signals: &mut Vec<SignalStream<'a>>) {
-        for signal in signals {
-            if let Some(msg) = signal.next().await {}
-        }
-    }
 }
 
 impl WirelessAdapter {

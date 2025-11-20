@@ -2,8 +2,8 @@
 //!
 //! Regarding call_interface methods:
 //! Not a huge fan of needing these two methods
-//! but alas if you try to use .call() expecting
-//! () you will get an error...
+//! but if you try to use .call() expecting ()
+//! you will get an error...
 //!
 //! The alternative was making this more general
 //! with flags, but that requires another
@@ -34,14 +34,15 @@ pub struct WpaSupplicant {
     conn: Connection,
     // We keep track of this because by converting
     // to `AccessPoint` we lose the ObjectPath
-    networks: HashMap<String, OwnedObjectPath>,
+    networks: HashMap<Vec<u8>, OwnedObjectPath>,
 }
 
 #[derive(Debug, Clone)]
 pub struct WpaBss {
     bssid: Vec<u8>,
     ssid: Vec<u8>,
-    rsn: HashMap<String, OwnedValue>,
+    security: Security,
+    // rsn: HashMap<String, OwnedValue>,
     // wpa: HashMap<String, OwnedValue>,
     // wps: HashMap<String, OwnedValue>,
     /// mhz
@@ -56,7 +57,7 @@ impl WpaSupplicant {
     pub fn new(conn: Connection) -> Result<Self, ComError> {
         let service = String::from("fi.w1.wpa_supplicant1");
         let path = String::from("/fi/w1/wpa_supplicant1/Interfaces/0");
-        let networks: HashMap<String, OwnedObjectPath> = HashMap::new();
+        let networks: HashMap<Vec<u8>, OwnedObjectPath> = HashMap::new();
 
         Ok(Self {
             conn,
@@ -78,7 +79,7 @@ impl WpaSupplicant {
     }
 
     pub async fn disconnect(&self) -> Result<(), ComError> {
-        self.call_interface_method::<_, ()>("Disconnect", &())
+        self.call_interface_method_noreply("Disconnect", &())
             .await?;
         Ok(())
     }
@@ -101,7 +102,10 @@ impl WpaSupplicant {
     }
 
     pub async fn scan<'a>(&self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
-        info!("Scan function call");
+        if self.get_interface_prop::<bool>("Scanning").await? {
+            return Ok(());
+        }
+
         let mut dict: HashMap<String, OwnedValue> = HashMap::new();
 
         dict.insert("Type".to_string(), Value::new("active").try_to_owned()?);
@@ -126,22 +130,15 @@ impl WpaSupplicant {
         self.networks.clear();
 
         for network in networks {
-            let proxy = Proxy::new(
-                &self.conn,
-                self.service.clone(),
-                network.clone(),
-                "fi.w1.wpa_supplicant1.BSS",
-            )
-            .await?;
             // ssid may appear multiple times if router broadcasts
             // ap at different freqs
-            let encoded = get_prop_from_proxy::<Vec<u8>>(&proxy, "SSID").await?;
-            let ssid = String::from_utf8_lossy(&encoded);
+            let bss = self.get_network_info(network.clone()).await?;
+            let ssid_str = String::from_utf8_lossy(&bss.ssid).to_string();
 
-            if seen.insert(ssid.to_string()) {
+            if seen.insert(ssid_str.clone()) {
                 let ap = AccessPointBuilder::default()
-                    .ssid(ssid.clone().to_string())
-                    .security(Security::Psk)
+                    .ssid(ssid_str)
+                    .security(bss.security)
                     .connected(false)
                     .known(false)
                     .nearby(true)
@@ -150,7 +147,7 @@ impl WpaSupplicant {
                 aps.push(ap);
             }
 
-            self.networks.insert(ssid.into_owned(), network);
+            self.networks.insert(bss.bssid, network);
         }
 
         Ok(aps)
@@ -167,14 +164,16 @@ impl WpaSupplicant {
 
         let bssid = get_prop_from_proxy::<Vec<u8>>(&proxy, "BSSID").await?;
         let ssid = get_prop_from_proxy::<Vec<u8>>(&proxy, "SSID").await?;
-        let rsn = get_prop_from_proxy::<HashMap<String, OwnedValue>>(&proxy, "RSN").await?;
         let freq = get_prop_from_proxy::<u16>(&proxy, "Frequency").await?;
         let rates = get_prop_from_proxy::<Vec<u32>>(&proxy, "Rates").await?;
+
+        let rsn = get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "RSN").await?;
+        let security = Self::get_security(rsn);
 
         Ok(WpaBss {
             bssid,
             ssid,
-            rsn,
+            security,
             freq,
             rates,
         })
@@ -240,7 +239,44 @@ impl WpaSupplicant {
         Ok(())
     }
 
-    pub async fn get_interface_prop<'a, T>(&self, prop: &'static str) -> Result<T, ComError>
+    fn get_security<'a>(rsn: HashMap<String, Value<'a>>) -> Security {
+        let mut security = Security::Open;
+
+        // eap and psk can't be mixed (afaik)
+        // so we only need to check one if it contains
+        // 'psk' or 'eap'
+        'sec: {
+            // WEP/WPA1 network
+            if rsn.is_empty() {
+                break 'sec;
+            }
+
+            if let Some(arr) = rsn.get("KeyMgmt") {
+                if let Ok(sec_types) = arr.clone().downcast::<Vec<String>>() {
+                    // if this occurs it will assume the network
+                    // is open, unless I can find that this is
+                    // possible I'll keep it as is
+                    if sec_types.is_empty() {
+                        break 'sec;
+                    }
+                    security = if sec_types.first().unwrap().contains("psk") {
+                        Security::Psk
+                    } else {
+                        Security::Ieee8021x
+                    };
+                } else {
+                    tracing::error!(
+                        "Could not cast 'KeyMgmt' to an array of strings, which it should be."
+                    );
+                }
+            } else {
+                tracing::error!("RSN non-empty but KeyMgmt not found!");
+            }
+        }
+        security
+    }
+
+    async fn get_interface_prop<'a, T>(&self, prop: &'static str) -> Result<T, ComError>
     where
         T: TryFrom<Value<'a>>,
         <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
@@ -255,7 +291,7 @@ impl WpaSupplicant {
         return Ok(get_prop_from_proxy::<T>(&proxy, prop).await?);
     }
 
-    pub async fn get_interface_signal<'a, M>(
+    async fn get_interface_signal<'a, M>(
         &self,
         signal_name: M,
     ) -> Result<SignalStream<'a>, ComError>
