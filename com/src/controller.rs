@@ -12,10 +12,9 @@ use crate::{
         common::{AccessPoint, Security},
         iwd::Iwd,
         wpa_supplicant::WpaSupplicant,
-        WifiAdapter,
     },
 };
-use tracing::{error, info, instrument};
+use tracing::{error, info};
 use zbus::{proxy::SignalStream, Connection};
 
 // Netlink not used here as I'm not implementing WPA authentication
@@ -33,7 +32,6 @@ pub struct Controller {
 }
 
 impl Controller {
-    #[instrument]
     pub async fn new() -> Result<Self, ComError> {
         // This is mostly a temporary connection
         let connection = Some(Connection::system().await?);
@@ -81,7 +79,6 @@ impl Controller {
         }
     }
 
-    #[instrument]
     async fn connect_iwd(&mut self) -> Result<(), ComError> {
         let agent_state = Arc::new(RwLock::new(AgentState::new()));
         let conn = zbus::connection::Builder::system()?
@@ -92,7 +89,6 @@ impl Controller {
         match Iwd::new(conn.clone(), agent_state.clone()).await {
             Ok(iwd) => {
                 self.connection = Some(conn);
-                iwd.register_agent().await?;
                 self.wifi = Some(WirelessAdapter::Iwd(iwd));
                 Ok(())
             }
@@ -100,7 +96,6 @@ impl Controller {
         }
     }
 
-    #[instrument]
     async fn connect_wpa(&mut self) -> Result<(), ComError> {
         match &self.connection {
             Some(conn) => match WpaSupplicant::new(conn.clone()) {

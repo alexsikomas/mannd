@@ -11,7 +11,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use async_trait::async_trait;
 use futures::StreamExt;
 use tokio::sync::mpsc::Sender;
 use tracing::info;
@@ -25,10 +24,7 @@ use zbus::{
 use crate::{
     error::ComError,
     state::signals::SignalUpdate,
-    wireless::{
-        common::{get_prop_from_proxy, AccessPoint, AccessPointBuilder, Security},
-        WifiAdapter,
-    },
+    wireless::common::{get_prop_from_proxy, AccessPoint, AccessPointBuilder, Security},
 };
 
 #[derive(Debug, Clone)]
@@ -55,42 +51,7 @@ pub struct WpaBss {
     // signal: i16,
 }
 
-#[async_trait]
-impl WifiAdapter for WpaSupplicant {
-    async fn connect_network(
-        &self,
-        ssid: String,
-        psk: String,
-        security: Security,
-    ) -> Result<(), ComError> {
-        let mut body: HashMap<String, OwnedValue> = HashMap::new();
-        let network_path = self.call_interface_method::<_, OwnedObjectPath>("AddNetwork", body);
-        Ok(())
-    }
-
-    async fn disconnect(&self) -> Result<(), ComError> {
-        self.call_interface_method::<_, ()>("Disconnect", &())
-            .await?;
-        Ok(())
-    }
-    async fn status(&self) -> Result<String, ComError> {
-        todo!()
-    }
-
-    async fn list_configured_networks(&self) -> Result<Vec<String>, ComError> {
-        let networks = self
-            .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
-            .await?;
-
-        let network_strings: Vec<String> = networks.iter().map(|n| n.to_string()).collect();
-        Ok(network_strings)
-    }
-
-    async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ComError> {
-        todo!()
-    }
-}
-
+// To be used externally
 impl WpaSupplicant {
     pub fn new(conn: Connection) -> Result<Self, ComError> {
         let service = String::from("fi.w1.wpa_supplicant1");
@@ -105,81 +66,40 @@ impl WpaSupplicant {
         })
     }
 
-    pub async fn call_interface_method<T, U>(
+    pub async fn connect_network(
         &self,
-        method_name: &'static str,
-        body: T,
-    ) -> Result<U, ComError>
-    where
-        T: serde::ser::Serialize + zvariant::DynamicType,
-        U: for<'a> zvariant::DynamicDeserialize<'a>,
-    {
-        let proxy = Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            self.path.clone(),
-            "fi.w1.wpa_supplicant1.Interface",
-        )
-        .await?;
-        let res: U = proxy.call(method_name, &body).await?;
-        Ok(res)
-    }
-
-    pub async fn call_interface_method_noreply<T>(
-        &self,
-        method_name: &'static str,
-        body: T,
-    ) -> Result<(), ComError>
-    where
-        T: serde::ser::Serialize + zvariant::DynamicType,
-    {
-        let proxy = Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            self.path.clone(),
-            "fi.w1.wpa_supplicant1.Interface",
-        )
-        .await?;
-        proxy.call_noreply(method_name, &body).await?;
+        ssid: String,
+        psk: String,
+        security: Security,
+    ) -> Result<(), ComError> {
+        let mut body: HashMap<String, OwnedValue> = HashMap::new();
+        let network_path = self.call_interface_method::<_, OwnedObjectPath>("AddNetwork", body);
         Ok(())
     }
 
-    pub async fn get_interface_prop<'a, T>(&self, prop: &'static str) -> Result<T, ComError>
-    where
-        T: TryFrom<Value<'a>>,
-        <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
-    {
-        let proxy = Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            self.path.clone(),
-            "fi.w1.wpa_supplicant1.Interface",
-        )
-        .await?;
-        return Ok(get_prop_from_proxy::<T>(&proxy, prop).await?);
+    pub async fn disconnect(&self) -> Result<(), ComError> {
+        self.call_interface_method::<_, ()>("Disconnect", &())
+            .await?;
+        Ok(())
     }
 
-    pub async fn get_interface_signal<'a, M>(
-        &self,
-        signal_name: M,
-    ) -> Result<SignalStream<'a>, ComError>
-    where
-        M: TryInto<MemberName<'a>>,
-        M::Error: Into<zbus::Error>,
-    {
-        let proxy = Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            self.path.clone(),
-            "fi.w1.wpa_supplicant1.Interface",
-        )
-        .await?;
-
-        let stream = proxy.receive_signal(signal_name).await?;
-        Ok(stream)
+    pub async fn status(&self) -> Result<String, ComError> {
+        todo!()
     }
 
-    #[tracing::instrument]
+    pub async fn list_configured_networks(&self) -> Result<Vec<String>, ComError> {
+        let networks = self
+            .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
+            .await?;
+
+        let network_strings: Vec<String> = networks.iter().map(|n| n.to_string()).collect();
+        Ok(network_strings)
+    }
+
+    pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ComError> {
+        todo!()
+    }
+
     pub async fn scan<'a>(&self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
         info!("Scan function call");
         let mut dict: HashMap<String, OwnedValue> = HashMap::new();
@@ -276,6 +196,83 @@ impl WpaSupplicant {
             | "4way_handshake" | "group_handshake" => Ok(true),
             _ => Ok(false),
         }
+    }
+}
+
+// Helper functions
+impl WpaSupplicant {
+    async fn call_interface_method<T, U>(
+        &self,
+        method_name: &'static str,
+        body: T,
+    ) -> Result<U, ComError>
+    where
+        T: serde::ser::Serialize + zvariant::DynamicType,
+        U: for<'a> zvariant::DynamicDeserialize<'a>,
+    {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            "fi.w1.wpa_supplicant1.Interface",
+        )
+        .await?;
+        let res: U = proxy.call(method_name, &body).await?;
+        Ok(res)
+    }
+
+    async fn call_interface_method_noreply<T>(
+        &self,
+        method_name: &'static str,
+        body: T,
+    ) -> Result<(), ComError>
+    where
+        T: serde::ser::Serialize + zvariant::DynamicType,
+    {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            "fi.w1.wpa_supplicant1.Interface",
+        )
+        .await?;
+        proxy.call_noreply(method_name, &body).await?;
+        Ok(())
+    }
+
+    pub async fn get_interface_prop<'a, T>(&self, prop: &'static str) -> Result<T, ComError>
+    where
+        T: TryFrom<Value<'a>>,
+        <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
+    {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            "fi.w1.wpa_supplicant1.Interface",
+        )
+        .await?;
+        return Ok(get_prop_from_proxy::<T>(&proxy, prop).await?);
+    }
+
+    pub async fn get_interface_signal<'a, M>(
+        &self,
+        signal_name: M,
+    ) -> Result<SignalStream<'a>, ComError>
+    where
+        M: TryInto<MemberName<'a>>,
+        M::Error: Into<zbus::Error>,
+    {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            "fi.w1.wpa_supplicant1.Interface",
+        )
+        .await?;
+
+        let stream = proxy.receive_signal(signal_name).await?;
+        Ok(stream)
     }
 }
 

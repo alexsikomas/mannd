@@ -1,14 +1,14 @@
 use std::sync::OnceLock;
 
 use ratatui::{
-    Frame,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, BorderType, Borders},
+    Frame,
 };
 use serde::Deserialize;
 use toml::Value;
-use tracing::{info, instrument};
+use tracing::info;
 
 use crate::{
     app::AppState,
@@ -22,7 +22,6 @@ use crate::{
 pub static THEME: OnceLock<Theme> = OnceLock::new();
 
 impl Theme {
-    #[instrument]
     /// Reads config toml from a predefined location and sets the
     /// global value of `THEME`
     pub fn new() -> Result<(), Box<dyn std::error::Error>> {
