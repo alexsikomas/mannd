@@ -174,6 +174,7 @@ fn handle_net_state_msg(state: &mut AppState, net_update_rx: &mut Receiver<NetUp
         match msg {
             NetUpdate::UpdateAps(aps) => {
                 // state.network.aps = aps.clone();
+                info!("{:?}", aps);
                 match &state.view_state {
                     State::Connection(conn_state) => {
                         if conn_state.networks.items.is_empty() {
