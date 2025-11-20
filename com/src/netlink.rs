@@ -28,7 +28,7 @@ use neli::{
     types::{GenlBuffer, RtBuffer},
     utils::Groups,
 };
-use tracing::{info, instrument};
+use tracing::info;
 
 pub struct Netlink {
     router: NlRouter,
@@ -46,7 +46,6 @@ impl Debug for Netlink {
 }
 
 impl Netlink {
-    #[instrument]
     pub async fn connect_wireless() -> Result<Self, ComError> {
         let (router, handle) = NlRouter::connect(NlFamily::Generic, None, Groups::empty()).await?;
         let family_id = router.resolve_genl_family(NL_80211_GENL_NAME).await?;
@@ -69,7 +68,6 @@ impl Netlink {
         })
     }
 
-    #[instrument]
     async fn nl_info<T>(
         &mut self,
         interface_index: Option<i32>,
@@ -139,7 +137,6 @@ impl Netlink {
     }
 
     /// Used to send commands
-    #[instrument]
     async fn nl_action(
         &mut self,
         interface_index: Option<i32>,
