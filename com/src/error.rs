@@ -63,6 +63,8 @@ pub enum ComError {
 
     #[error("Error while builder access point struct: {0}")]
     AccessPointBuilder(crate::wireless::common::AccessPointBuilderError),
+    #[error("Invalid password length")]
+    PasswordLength,
 }
 
 impl<T, P> From<neli::err::RouterError<T, P>> for ComError

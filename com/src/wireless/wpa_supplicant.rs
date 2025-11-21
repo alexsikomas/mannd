@@ -1,5 +1,8 @@
 //! Reference: https://w1.fi/wpa_supplicant/devel/dbus.html#dbus_network
 //!
+//! When getting networks after a scan there will be duplicate SSIDs
+//! because wpa_supplicant shows the different possible freqs.
+//!
 //! Regarding call_interface methods:
 //! Not a huge fan of needing these two methods
 //! but if you try to use .call() expecting ()
@@ -32,9 +35,9 @@ pub struct WpaSupplicant {
     service: String,
     path: String,
     conn: Connection,
-    // We keep track of this because by converting
-    // to `AccessPoint` we lose the ObjectPath
-    networks: HashMap<Vec<u8>, OwnedObjectPath>,
+    // this will cause collisions if multiple SSIDs
+    // clash because they will be assumed to be related
+    networks: HashMap<String, Vec<WpaBss>>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,7 +60,7 @@ impl WpaSupplicant {
     pub fn new(conn: Connection) -> Result<Self, ComError> {
         let service = String::from("fi.w1.wpa_supplicant1");
         let path = String::from("/fi/w1/wpa_supplicant1/Interfaces/0");
-        let networks: HashMap<Vec<u8>, OwnedObjectPath> = HashMap::new();
+        let networks: HashMap<String, Vec<WpaBss>> = HashMap::new();
 
         Ok(Self {
             conn,
@@ -67,14 +70,27 @@ impl WpaSupplicant {
         })
     }
 
-    pub async fn connect_network(
-        &self,
-        ssid: String,
-        psk: String,
-        security: Security,
-    ) -> Result<(), ComError> {
+    pub async fn connect_network(&self, ssid: String, psk: String) -> Result<(), ComError> {
+        if psk.len() < 8 || psk.len() > 63 {
+            return Err(ComError::PasswordLength);
+        }
+        // let networks = self.networks.get(&ssid).unwrap();
+
+        info!("CONNECTING");
         let mut body: HashMap<String, OwnedValue> = HashMap::new();
-        let network_path = self.call_interface_method::<_, OwnedObjectPath>("AddNetwork", body);
+        body.insert(
+            "ssid".to_string(),
+            Value::new(format!("\"{}\"", ssid)).try_to_owned()?,
+        );
+        body.insert(
+            "psk".to_string(),
+            Value::new(format!("\"{}\"", psk)).try_to_owned()?,
+        );
+
+        let network_path = self
+            .call_interface_method::<_, OwnedObjectPath>("AddNetwork", body)
+            .await?;
+        info!("OBJECT PATH: {:?}", network_path);
         Ok(())
     }
 
@@ -137,17 +153,18 @@ impl WpaSupplicant {
 
             if seen.insert(ssid_str.clone()) {
                 let ap = AccessPointBuilder::default()
-                    .ssid(ssid_str)
-                    .security(bss.security)
+                    .ssid(ssid_str.clone())
+                    .security(bss.security.clone())
                     .connected(false)
                     .known(false)
                     .nearby(true)
                     .build()?;
 
                 aps.push(ap);
+                self.networks.insert(ssid_str, vec![bss]);
+            } else {
+                self.networks.entry(ssid_str).or_default().push(bss);
             }
-
-            self.networks.insert(bss.bssid, network);
         }
 
         Ok(aps)
@@ -188,13 +205,14 @@ impl WpaSupplicant {
         )
         .await?;
 
-        let status = get_prop_from_proxy::<String>(&proxy, "State").await?;
+        // let status = get_prop_from_proxy::<String>(&proxy, "State").await?;
 
-        match status.as_str() {
-            "completed" | "scanning" | "authenticating" | "associating" | "associated"
-            | "4way_handshake" | "group_handshake" => Ok(true),
-            _ => Ok(false),
-        }
+        // match status.as_str() {
+        //     "completed" | "scanning" | "authenticating" | "associating" | "associated"
+        //     | "4way_handshake" | "group_handshake" => Ok(true),
+        //     _ => Ok(false),
+        // }
+        Ok(true)
     }
 }
 
