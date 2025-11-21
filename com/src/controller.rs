@@ -163,7 +163,7 @@ impl Controller {
                 iwd.connect_network(ssid, psk, security).await?;
             }
             Some(WirelessAdapter::Wpa(wpa)) => {
-                wpa.connect_network(ssid, psk, security).await?;
+                wpa.connect_network(ssid, psk).await?;
             }
             None => {
                 tracing::error!("Tried to connect to network without an initalised adapter?");

@@ -63,6 +63,7 @@ impl App {
 
             if let Ok(mut controller) = Controller::new().await {
                 controller.determine_adapter().await;
+                info!("{:?}", controller.wifi);
                 let daemon = controller.wifi.as_ref().unwrap().daemon_type();
                 loop {
                     tokio::select! {
