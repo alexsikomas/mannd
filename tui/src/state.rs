@@ -311,6 +311,25 @@ impl ConnectionState {
             focused_list: FocusedConnection::Actions,
         }
     }
+
+    pub fn refresh_actions(&mut self) {
+        if matches!(self.focused_list, FocusedConnection::Networks) {
+            let mut action_list = vec![ConnectionAction::Scan];
+
+            if let Some(network) = &self.networks.items.get(self.networks.selected) {
+                if !network.connected {
+                    action_list.push(ConnectionAction::Connect);
+                } else {
+                    // action_list.push(ConnectionAction::Info);
+                    action_list.push(ConnectionAction::Disconnect);
+                }
+                if network.known {
+                    action_list.push(ConnectionAction::Forget);
+                }
+            }
+            self.actions = SelectableList::new(action_list);
+        }
+    }
 }
 
 impl ConnectionAction {

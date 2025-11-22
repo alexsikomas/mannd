@@ -24,6 +24,11 @@ pub enum WirelessAdapter {
     Wpa(WpaSupplicant),
 }
 
+pub enum DaemonType {
+    Iwd,
+    Wpa,
+}
+
 #[derive(Debug)]
 pub struct Controller {
     pub wifi: Option<WirelessAdapter>,
@@ -239,13 +244,12 @@ impl Controller {
     pub async fn info(&self, ssid: String) -> Result<(), ComError> {
         Ok(())
     }
-}
 
-impl WirelessAdapter {
-    pub fn daemon_type(&self) -> u32 {
-        match self {
-            WirelessAdapter::Iwd(_) => 1,
-            WirelessAdapter::Wpa(_) => 2,
+    pub fn daemon_type(&self) -> Option<DaemonType> {
+        match self.wifi {
+            Some(WirelessAdapter::Iwd(_)) => Some(DaemonType::Iwd),
+            Some(WirelessAdapter::Wpa(_)) => Some(DaemonType::Wpa),
+            _ => None,
         }
     }
 }
