@@ -1,11 +1,71 @@
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::info;
 
 use crate::{
-    controller::Controller,
-    state::signals::SignalUpdate,
+    controller::{Controller, DaemonType},
+    state::signals::{SignalManager, SignalUpdate},
     wireless::common::{AccessPoint, Security},
 };
+
+pub struct NetworkActor {}
+
+impl NetworkActor {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    pub async fn run(
+        &mut self,
+        mut action_rx: Receiver<NetworkAction>,
+        action_tx: Sender<NetworkAction>,
+        state_tx: Sender<NetUpdate>,
+    ) {
+        // networking thread
+        // Signal <-> Network -> UI Update
+        //
+        // A signal update leads to a network update i.e. if networks are
+        // loaded and we get a signal then this leads to getting the
+        // network values via a network update
+        let (signal_tx, mut signal_rx) = mpsc::channel::<SignalUpdate>(32);
+        let mut signal_manager = SignalManager::new();
+
+        if let Ok(mut controller) = Controller::new().await {
+            controller.determine_adapter().await;
+            info!("{:?}", controller.wifi);
+            let daemon = controller.daemon_type();
+            loop {
+                tokio::select! {
+                    Some(action) = action_rx.recv() => {
+                        if handle_action(&mut controller, state_tx.clone(), signal_tx.clone(), action).await {
+                            break;
+                        }
+                    }
+                    // add new signals to listen for
+                    Some(update) = signal_rx.recv() => {
+                        signal_manager.handle_update(update);
+                    }
+                    Some(msg) = signal_manager.recv() => {
+                        match daemon {
+                            // iwd
+                            Some(DaemonType::Iwd) => {
+                                signal_manager.process_iwd_msg(msg, action_tx.clone()).await;
+                            }
+                            // wpa
+                            Some(DaemonType::Wpa) => {
+                                signal_manager.process_wpa_msg(msg, action_tx.clone()).await;
+                            }
+                            _ => {
+                                break;
+                            }
+                        }
+                    }
+                };
+            }
+        } else {
+            tracing::error!("Fatal: Controller not initalised!");
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum NetworkAction {
