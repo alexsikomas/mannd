@@ -31,8 +31,10 @@ impl NetworkActor {
 
         if let Ok(mut controller) = Controller::new().await {
             controller.determine_adapter().await;
-            info!("{:?}", controller.wifi);
-            let daemon = controller.daemon_type();
+            let daemon = controller.daemon_type().inspect(|d| {
+                state_tx.send(NetUpdate::SetDaemon(d.clone()));
+            });
+
             loop {
                 tokio::select! {
                     Some(action) = action_rx.recv() => {
@@ -85,6 +87,8 @@ pub enum NetUpdate {
     AddKnownNetworks(Vec<AccessPoint>),
     UpdateAps(Vec<AccessPoint>),
     UpdateApsHidden(Vec<AccessPoint>),
+    ConnectFailed(String),
+    SetDaemon(DaemonType),
 }
 
 #[derive(Debug)]
@@ -108,10 +112,14 @@ pub async fn handle_action<'a>(
             }
         }
         NetworkAction::Connect(ssid, psk, sec) => {
-            if let Ok(()) = controller.ssid_connect(ssid, psk, sec).await {
-                info!("Connection to network was successful");
-            } else {
-                tracing::error!("Connection to network was not successful.");
+            match controller.ssid_connect(ssid, psk, sec).await {
+                Ok(()) => {
+                    info!("Connection to network was successful");
+                }
+                Err(e) => {
+                    tracing::error!("Connection to network was not successful.");
+                    state_update.send(NetUpdate::ConnectFailed(e.to_string()));
+                }
             }
         }
         NetworkAction::Disconnect => {

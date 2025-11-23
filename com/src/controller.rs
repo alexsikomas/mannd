@@ -24,6 +24,7 @@ pub enum WirelessAdapter {
     Wpa(WpaSupplicant),
 }
 
+#[derive(Debug, Clone)]
 pub enum DaemonType {
     Iwd,
     Wpa,

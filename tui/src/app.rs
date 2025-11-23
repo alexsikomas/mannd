@@ -25,6 +25,7 @@ pub struct App;
 pub struct AppState {
     is_running: bool,
     redraw: bool,
+    pub wifi_daemon: Option<DaemonType>,
     pub view_state: State,
     // for prompts inside of a view state
     pub prompt_view: Option<PromptState>,
@@ -34,6 +35,9 @@ impl AppState {
     fn new() -> Self {
         Self {
             view_state: State::main_menu(),
+            // 8021x will have different auth in wpa vs iwd
+            // so we need to keep track of it
+            wifi_daemon: None,
             is_running: true,
             redraw: true,
             prompt_view: None,
@@ -120,45 +124,48 @@ async fn handle_key_event(
 fn handle_net_state_msg(state: &mut AppState, msg: NetUpdate) {
     match msg {
         NetUpdate::UpdateAps(aps) => {
-            // state.network.aps = aps.clone();
-            info!("{:?}", aps);
-            match &state.view_state {
+            match &mut state.view_state {
                 State::Connection(conn_state) => {
-                    if conn_state.networks.items.is_empty() {
-                        state.view_state = State::Connection(ConnectionState::new(aps));
-                    } else {
-                        let selected_network = conn_state.networks.get_selected_value();
-                        let cached_actions = conn_state.actions.clone();
-
-                        let mut new_state = ConnectionState::new(aps);
-
-                        let index = new_state
-                            .networks
-                            .items
-                            .iter()
-                            .position(|v| v.ssid == selected_network.ssid);
-
-                        match index {
-                            Some(val) => {
-                                new_state.networks.selected = val;
-                                new_state.actions = cached_actions;
-                            }
-                            None => {
-                                // since non-empty
-                                new_state.networks.selected = 0;
-                            }
-                        }
-
-                        state.view_state = State::Connection(new_state);
-                    }
+                    conn_state.update_aps(aps);
+                    // if conn_state.networks.items.is_empty() {
+                    //     state.view_state = State::Connection(ConnectionState::new(aps));
+                    // } else {
+                    //     let selected_network = conn_state.networks.get_selected_value();
+                    //     let cached_actions = conn_state.actions.clone();
+                    //
+                    //     let mut new_state = ConnectionState::new(aps);
+                    //
+                    //     let index = new_state
+                    //         .networks
+                    //         .items
+                    //         .iter()
+                    //         .position(|v| v.ssid == selected_network.ssid);
+                    //
+                    //     match index {
+                    //         Some(val) => {
+                    //             new_state.networks.selected = val;
+                    //             new_state.actions = cached_actions;
+                    //         }
+                    //         None => {
+                    //             // since non-empty
+                    //             new_state.networks.selected = 0;
+                    //         }
+                    //     }
+                    //
+                    //     state.view_state = State::Connection(new_state);
+                    // }
                 }
                 _ => {}
             }
+        }
+        NetUpdate::SetDaemon(d) => {
+            state.wifi_daemon = Some(d);
         }
         NetUpdate::AddKnownNetworks(aps) => {
             // state.view_state = State::Connection(state.)
         }
         NetUpdate::UpdateApsHidden(aps) => {}
+        NetUpdate::ConnectFailed(reason) => {}
     };
     state.redraw = true;
 }

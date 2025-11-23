@@ -74,7 +74,8 @@ impl WpaSupplicant {
     }
 
     pub async fn connect_network(&self, ssid: String, psk: String) -> Result<(), ComError> {
-        if psk.len() < 8 || psk.len() > 63 {
+        let psk_len = psk.len();
+        if (psk_len < 8 || psk_len > 63) && psk_len != 0 {
             return Err(ComError::PasswordLength);
         }
         // let networks = self.networks.get(&ssid).unwrap();
@@ -88,18 +89,29 @@ impl WpaSupplicant {
         .await?;
 
         let mut body: HashMap<String, OwnedValue> = HashMap::new();
-        body.insert("ssid".to_string(), Value::new(ssid).try_to_owned()?);
-        body.insert("psk".to_string(), Value::new(psk).try_to_owned()?);
+        body.insert("ssid".into(), Value::new(ssid).try_to_owned()?);
+        if psk_len == 0 {
+            body.insert("key_mgmt".into(), Value::new("NONE").try_to_owned()?);
+        } else {
+            body.insert("psk".into(), Value::new(psk).try_to_owned()?);
+        }
 
         let network_path = self
             .call_interface_method::<_, OwnedObjectPath>("AddNetwork", body)
             .await?;
 
-        self.call_interface_method_noreply("SelectNetwork", network_path)
+        self.call_interface_method_noreply("SelectNetwork", network_path.clone())
             .await?;
 
         let mut stream = proxy.receive_signal("PropertiesChanged").await?;
-        self.check_connection(stream).await
+        match self.check_connection(stream).await {
+            Err(e) => {
+                self.call_interface_method_noreply("RemoveNetwork", network_path)
+                    .await?;
+                Err(e)
+            }
+            _ => Ok(()),
+        }
     }
 
     pub async fn disconnect(&self) -> Result<(), ComError> {
