@@ -330,6 +330,24 @@ impl ConnectionState {
             self.actions = SelectableList::new(action_list);
         }
     }
+
+    pub fn update_aps(&mut self, aps: Vec<AccessPoint>) {
+        if self.networks.items.is_empty() {
+            self.networks.items = aps;
+            return;
+        }
+
+        let selected_ssid = self.networks.get_selected_value().ssid.clone();
+
+        self.networks.items = aps;
+
+        self.networks.selected = self
+            .networks
+            .items
+            .iter()
+            .position(|v| v.ssid == selected_ssid)
+            .unwrap_or(0);
+    }
 }
 
 impl ConnectionAction {
