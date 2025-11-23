@@ -71,7 +71,7 @@ impl State {
                         MainMenuSelection::Connection => {
                             *self = State::connection();
                             // get known networks instead
-                            // return Some(UpdateAction::Network(NetworkAction::Scan));
+                            return Some(UpdateAction::Network(NetworkAction::GetKnownNetworks));
                         }
                         MainMenuSelection::Vpn => {}
                         MainMenuSelection::Config => {}
@@ -129,12 +129,12 @@ impl State {
                     ConnectionAction::Connect => {
                         let selected = conn_state.networks.get_selected_value();
 
-                        if selected.known || matches!(selected.security, Security::Open) {
+                        if selected.known? || matches!(selected.security, Some(Security::Open)) {
                             // connect function does not need any password if already known
                             return Some(UpdateAction::Network(NetworkAction::Connect(
                                 selected.ssid.clone(),
                                 "".to_string(),
-                                selected.security.clone(),
+                                Security::Open,
                             )));
                         }
 
@@ -152,7 +152,7 @@ impl State {
                         let selected = conn_state.networks.get_selected_value();
                         return Some(UpdateAction::Network(NetworkAction::Forget(
                             selected.ssid.clone(),
-                            selected.security.clone(),
+                            selected.security.clone().unwrap(),
                         )));
                     }
                     _ => {}
@@ -317,13 +317,13 @@ impl ConnectionState {
             let mut action_list = vec![ConnectionAction::Scan];
 
             if let Some(network) = &self.networks.items.get(self.networks.selected) {
-                if !network.connected {
+                if network.connected.is_some_and(|c| !c) {
                     action_list.push(ConnectionAction::Connect);
                 } else {
                     // action_list.push(ConnectionAction::Info);
                     action_list.push(ConnectionAction::Disconnect);
                 }
-                if network.known {
+                if network.known.is_some_and(|k| k) {
                     action_list.push(ConnectionAction::Forget);
                 }
             }

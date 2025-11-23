@@ -233,38 +233,24 @@ impl Iwd {
         for (path, interface) in proxy.get_managed_objects().await? {
             if let Some(known_network_props) = interface.get("net.connman.iwd.KnownNetwork") {
                 let mut ssid: String = "".to_string();
-                let mut security: Security = Security::Psk;
 
                 if let Some(name) = known_network_props.get("Name") {
                     ssid = name.downcast_ref::<String>().unwrap_or("".to_string());
                 }
-                if let Some(net_security) = known_network_props.get("Type") {
-                    let security_str = net_security.downcast_ref::<&str>().unwrap_or("psk");
-                    match security_str {
-                        "open" => {
-                            security = Security::Open;
-                        }
-                        "psk" => {
-                            security = Security::Psk;
-                        }
-                        "8021x" => {
-                            security = Security::Ieee8021x;
-                        }
-                        _ => {
-                            security = Security::Psk;
-                        }
-                    }
-                }
 
-                let ap = AccessPointBuilder::default()
+                let mut ap_builder = AccessPointBuilder::default()
                     .ssid(ssid)
-                    .security(security)
                     .known(true)
                     .connected(false)
-                    .nearby(false)
-                    .build()?;
+                    .nearby(false);
 
-                known_networks.push(ap);
+                if let Some(net_security) = known_network_props.get("Type") {
+                    let security_str = net_security.downcast_ref::<&str>().unwrap_or("psk");
+                    let security = Security::from_str(security_str).unwrap();
+                    ap_builder = ap_builder.security(security);
+                }
+
+                known_networks.push(ap_builder.build()?);
             }
         }
         Ok(known_networks)
