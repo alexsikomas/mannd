@@ -154,7 +154,6 @@ impl<'a> Widget for Connection<'a> {
         .flex(Flex::Center)
         .split(selection_area);
 
-        info!("{:?}", self.actions);
         // Action labels (right)
         for (i, item) in self.actions.items.iter().enumerate() {
             if i >= selection_chunks.len() {

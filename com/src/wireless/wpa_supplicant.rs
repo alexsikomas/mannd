@@ -12,10 +12,13 @@
 //! with flags, but that requires another
 //! dependency, so for now I've settled on this.
 
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::{Duration, Instant},
+};
 
 use futures::StreamExt;
-use tokio::sync::mpsc::Sender;
+use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::info;
 use zbus::{
     names::MemberName,
@@ -76,22 +79,27 @@ impl WpaSupplicant {
         }
         // let networks = self.networks.get(&ssid).unwrap();
 
-        info!("CONNECTING");
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            "fi.w1.wpa_supplicant1.Interface",
+        )
+        .await?;
+
         let mut body: HashMap<String, OwnedValue> = HashMap::new();
-        body.insert(
-            "ssid".to_string(),
-            Value::new(format!("\"{}\"", ssid)).try_to_owned()?,
-        );
-        body.insert(
-            "psk".to_string(),
-            Value::new(format!("\"{}\"", psk)).try_to_owned()?,
-        );
+        body.insert("ssid".to_string(), Value::new(ssid).try_to_owned()?);
+        body.insert("psk".to_string(), Value::new(psk).try_to_owned()?);
 
         let network_path = self
             .call_interface_method::<_, OwnedObjectPath>("AddNetwork", body)
             .await?;
-        info!("OBJECT PATH: {:?}", network_path);
-        Ok(())
+
+        self.call_interface_method_noreply("SelectNetwork", network_path)
+            .await?;
+
+        let mut stream = proxy.receive_signal("PropertiesChanged").await?;
+        self.check_connection(stream).await
     }
 
     pub async fn disconnect(&self) -> Result<(), ComError> {
@@ -292,6 +300,58 @@ impl WpaSupplicant {
             }
         }
         security
+    }
+
+    async fn check_connection<'a>(&self, mut stream: SignalStream<'a>) -> Result<(), ComError> {
+        let start = Instant::now();
+        let max_wait = Duration::from_secs(15);
+
+        // If first connected to a network then expect a disconnected first
+        // SUCCESS: authenticating -> associating -> 4-way-handshake -> completed
+        // FAILURE: associating -> 4-way-handshake -> disconnected (incorrect password)
+        // FAILURE: scanning -> scanning -> scanning -> ... (cannot find network)
+        loop {
+            match timeout(Duration::from_secs(1), stream.next()).await {
+                Ok(Some(msg)) => {
+                    let res: HashMap<String, OwnedValue> = msg.body().deserialize()?;
+                    if let Some(state) = res.get("State") {
+                        let state_str = state.downcast_ref::<&str>().unwrap_or("Unknown");
+                        info!("WPA STATE: {}", state_str);
+                        match state_str {
+                            "completed" => {
+                                info!("Connected successfully!");
+                                return Ok(());
+                            }
+                            "disconnected" => {
+                                // since success also uses disconnected we check
+                                // how long we have been going first
+                                if start.elapsed().as_secs() > 2 {
+                                    return Err(ComError::ConnectionFailed(
+                                        "WPA rejected network request, check password".into(),
+                                    ));
+                                }
+                            }
+                            "inactive" => {
+                                return Err(ComError::ConnectionFailed(
+                                    "Interface is inactive!".into(),
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Ok(None) => {
+                    return Err(ComError::OperationFailed(
+                        "DBus stream ended unexpectedly.".into(),
+                    ));
+                }
+                Err(_) => {
+                    if start.elapsed() > max_wait {
+                        return Err(ComError::Timeout);
+                    }
+                }
+            }
+        }
     }
 
     async fn get_interface_prop<'a, T>(&self, prop: &'static str) -> Result<T, ComError>

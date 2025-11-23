@@ -65,6 +65,8 @@ pub enum ComError {
     AccessPointBuilder(crate::wireless::common::AccessPointBuilderError),
     #[error("Invalid password length")]
     PasswordLength,
+    #[error("Connection timeout")]
+    Timeout,
 }
 
 impl<T, P> From<neli::err::RouterError<T, P>> for ComError
