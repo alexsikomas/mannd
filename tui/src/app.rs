@@ -123,47 +123,22 @@ async fn handle_key_event(
 
 fn handle_net_state_msg(state: &mut AppState, msg: NetUpdate) {
     match msg {
-        NetUpdate::UpdateAps(aps) => {
-            match &mut state.view_state {
-                State::Connection(conn_state) => {
-                    conn_state.update_aps(aps);
-                    // if conn_state.networks.items.is_empty() {
-                    //     state.view_state = State::Connection(ConnectionState::new(aps));
-                    // } else {
-                    //     let selected_network = conn_state.networks.get_selected_value();
-                    //     let cached_actions = conn_state.actions.clone();
-                    //
-                    //     let mut new_state = ConnectionState::new(aps);
-                    //
-                    //     let index = new_state
-                    //         .networks
-                    //         .items
-                    //         .iter()
-                    //         .position(|v| v.ssid == selected_network.ssid);
-                    //
-                    //     match index {
-                    //         Some(val) => {
-                    //             new_state.networks.selected = val;
-                    //             new_state.actions = cached_actions;
-                    //         }
-                    //         None => {
-                    //             // since non-empty
-                    //             new_state.networks.selected = 0;
-                    //         }
-                    //     }
-                    //
-                    //     state.view_state = State::Connection(new_state);
-                    // }
-                }
-                _ => {}
+        NetUpdate::UpdateAps(aps) => match &mut state.view_state {
+            State::Connection(conn_state) => {
+                conn_state.update_aps(aps);
             }
-        }
+            _ => {}
+        },
         NetUpdate::SetDaemon(d) => {
             state.wifi_daemon = Some(d);
         }
-        NetUpdate::AddKnownNetworks(aps) => {
-            // state.view_state = State::Connection(state.)
-        }
+        NetUpdate::AddKnownNetworks(aps) => match &mut state.view_state {
+            State::Connection(conn_state) => {
+                info!("GETTING KNOWN NETWORKS: {:?}", aps);
+                conn_state.update_aps(aps);
+            }
+            _ => {}
+        },
         NetUpdate::UpdateApsHidden(aps) => {}
         NetUpdate::ConnectFailed(reason) => {}
     };

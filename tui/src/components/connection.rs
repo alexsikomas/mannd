@@ -97,21 +97,23 @@ impl<'a> Widget for Connection<'a> {
                 } else {
                     fg_col = theme.info.color();
                 }
-            } else if self.networks.items[i].connected {
+            } else if self.networks.items[i].connected.is_some_and(|c| c) {
                 fg_col = theme.success.color();
-            } else if self.networks.items[i].known {
+            } else if self.networks.items[i].known.is_some_and(|k| k) {
                 fg_col = theme.tertiary.color();
             }
 
-            match network.security {
-                Security::Psk => {
-                    text.push_str("  ");
-                }
-                Security::Open => {
-                    text.push_str(" (Open)");
-                }
-                Security::Ieee8021x => {
-                    text.push_str(" (802.1x)");
+            if let Some(sec) = &network.security {
+                match sec {
+                    Security::Psk => {
+                        text.push_str("  ");
+                    }
+                    Security::Open => {
+                        text.push_str(" (Open)");
+                    }
+                    Security::Ieee8021x => {
+                        text.push_str(" (802.1x)");
+                    }
                 }
             }
             // select hover for options like connect

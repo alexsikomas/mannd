@@ -1,5 +1,10 @@
 //! Reference: https://w1.fi/wpa_supplicant/devel/dbus.html#dbus_network
 //!
+//! The WpaBss struct has a lot of optional types mainly because it
+//! differs significantly to what is provided from a scan vs a connected
+//! network. Check the differences between properties in a .Network vs
+//! .BSS
+//!
 //! When getting networks after a scan there will be duplicate SSIDs
 //! because wpa_supplicant shows the different possible freqs.
 //!
@@ -45,17 +50,13 @@ pub struct WpaSupplicant {
 
 #[derive(Debug, Clone)]
 pub struct WpaBss {
-    bssid: Vec<u8>,
-    ssid: Vec<u8>,
-    security: Security,
-    // rsn: HashMap<String, OwnedValue>,
-    // wpa: HashMap<String, OwnedValue>,
-    // wps: HashMap<String, OwnedValue>,
+    ssid: String,
+    bssid: Option<Vec<u8>>,
+    security: Option<Security>,
     /// mhz
-    freq: u16,
+    freq: Option<u16>,
     /// bits per second
-    rates: Vec<u32>,
-    // signal: i16,
+    rates: Option<Vec<u32>>,
 }
 
 // To be used externally
@@ -124,13 +125,17 @@ impl WpaSupplicant {
         todo!()
     }
 
-    pub async fn list_configured_networks(&self) -> Result<Vec<String>, ComError> {
+    pub async fn list_configured_networks(&self) -> Result<Vec<AccessPoint>, ComError> {
         let networks = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
             .await?;
 
-        let network_strings: Vec<String> = networks.iter().map(|n| n.to_string()).collect();
-        Ok(network_strings)
+        let aps: Vec<AccessPoint> = vec![];
+        for network in networks {
+            let ap = self.get_network_info(network).await?;
+        }
+
+        Ok(aps)
     }
 
     pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ComError> {
@@ -168,29 +173,58 @@ impl WpaSupplicant {
         for network in networks {
             // ssid may appear multiple times if router broadcasts
             // ap at different freqs
-            let bss = self.get_network_info(network.clone()).await?;
-            let ssid_str = String::from_utf8_lossy(&bss.ssid).to_string();
+            let bss = self.get_bss_info(network.clone()).await?;
 
-            if seen.insert(ssid_str.clone()) {
+            if seen.insert(bss.ssid.clone()) {
                 let ap = AccessPointBuilder::default()
-                    .ssid(ssid_str.clone())
-                    .security(bss.security.clone())
+                    .ssid(bss.ssid.clone())
+                    .security(bss.security.clone().unwrap())
                     .connected(false)
                     .known(false)
                     .nearby(true)
                     .build()?;
 
                 aps.push(ap);
-                self.networks.insert(ssid_str, vec![bss]);
+                self.networks.insert(bss.ssid.clone(), vec![bss]);
             } else {
-                self.networks.entry(ssid_str).or_default().push(bss);
+                self.networks.entry(bss.ssid.clone()).or_default().push(bss);
             }
         }
 
         Ok(aps)
     }
 
-    pub async fn get_network_info(&self, bss_path: OwnedObjectPath) -> Result<WpaBss, ComError> {
+    /// Used for networks which have already been connected to by wpa supplicant
+    pub async fn get_network_info(&self, net_path: OwnedObjectPath) -> Result<WpaBss, ComError> {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            net_path,
+            "fi.w1.wpa_supplicant1.Network",
+        )
+        .await?;
+        // the bssid can only be found via .Interface path
+
+        let mut properties =
+            get_prop_from_proxy::<HashMap<String, OwnedValue>>(&proxy, "Properties").await?;
+
+        let ssid = properties
+            .remove("ssid")
+            .unwrap_or(Value::new("Unknown").try_into_owned()?);
+        let ssid = ssid.to_string();
+
+        Ok(WpaBss {
+            ssid,
+            bssid: None,
+            security: None,
+            freq: None,
+            rates: None,
+        })
+    }
+
+    /// Used for networks which are nearby by may
+    /// not have been connected to yet
+    pub async fn get_bss_info(&self, bss_path: OwnedObjectPath) -> Result<WpaBss, ComError> {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -199,17 +233,19 @@ impl WpaSupplicant {
         )
         .await?;
 
-        let bssid = get_prop_from_proxy::<Vec<u8>>(&proxy, "BSSID").await?;
-        let ssid = get_prop_from_proxy::<Vec<u8>>(&proxy, "SSID").await?;
-        let freq = get_prop_from_proxy::<u16>(&proxy, "Frequency").await?;
-        let rates = get_prop_from_proxy::<Vec<u32>>(&proxy, "Rates").await?;
+        let bssid = Some(get_prop_from_proxy::<Vec<u8>>(&proxy, "BSSID").await?);
+        let ssid_vec = get_prop_from_proxy::<Vec<u8>>(&proxy, "SSID").await?;
+        let ssid = String::from_utf8_lossy(&ssid_vec).to_string();
+
+        let freq = Some(get_prop_from_proxy::<u16>(&proxy, "Frequency").await?);
+        let rates = Some(get_prop_from_proxy::<Vec<u32>>(&proxy, "Rates").await?);
 
         let rsn = get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "RSN").await?;
-        let security = Self::get_security(rsn);
+        let security = Some(Self::get_security(rsn));
 
         Ok(WpaBss {
-            bssid,
             ssid,
+            bssid,
             security,
             freq,
             rates,

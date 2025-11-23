@@ -83,11 +83,15 @@ pub fn ssid_to_hex(ssid: String) -> String {
 #[builder(pattern = "owned")]
 pub struct AccessPoint {
     pub ssid: String,
-    pub security: Security,
-    pub known: bool,
-    pub connected: bool,
-    pub nearby: bool,
     // OPTIONAL ARGUMENTS:
+    #[builder(setter(into, strip_option), default)]
+    pub security: Option<Security>,
+    #[builder(setter(into, strip_option), default)]
+    pub known: Option<bool>,
+    #[builder(setter(into, strip_option), default)]
+    pub connected: Option<bool>,
+    #[builder(setter(into, strip_option), default)]
+    pub nearby: Option<bool>,
     /// In some cases an empty string does
     /// not imply a hidden network depending
     /// on the type of request i.e beacon
