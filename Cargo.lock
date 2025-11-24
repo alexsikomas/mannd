@@ -183,9 +183,9 @@ dependencies = [
 
 [[package]]
 name = "bitflags"
-version = "2.9.3"
+version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34efbcccd345379ca2868b2b2c9d3782e9cc58ba87bc7d79d5b53d9c9ae6f25d"
+checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
 
 [[package]]
 name = "blocking"
@@ -253,6 +253,7 @@ name = "com"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bitflags",
  "caps",
  "derive_builder",
  "futures",
@@ -1513,6 +1514,7 @@ version = "0.1.0"
 dependencies = [
  "com",
  "crossterm 0.29.0",
+ "derive_builder",
  "futures",
  "futures-timer",
  "ratatui",

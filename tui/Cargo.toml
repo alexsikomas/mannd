@@ -18,6 +18,7 @@ toml = { workspace = true }
 tracing = { workspace = true }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
+derive_builder = { workspace = true }
 
 [target.'cfg(target_os = "linux")']
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]

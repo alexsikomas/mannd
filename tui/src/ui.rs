@@ -13,7 +13,7 @@ use tracing::info;
 use crate::{
     app::AppState,
     components::{connection::Connection, main_menu::MainMenu},
-    state::State,
+    state::{UiData, View},
 };
 
 /// Theme global state, used to bypass needing to
@@ -60,7 +60,7 @@ impl Theme {
 
 /// Renders title, border and conditionally renders main content depending on
 /// state
-pub fn render<'a>(frame: &mut Frame<'a>, state: &AppState) {
+pub fn render<'a>(frame: &mut Frame<'a>, state: &UiData) {
     let outer_area = frame.area();
     let theme: &Theme;
     match THEME.get() {
@@ -107,17 +107,17 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &AppState) {
 
     // we give the widget only the necessary selections to
     // render
-    match &state.view_state {
-        State::MainMenu(list) => {
+    match &state.view {
+        View::MainMenu(list) => {
             let menu = MainMenu::new(&list);
             frame.render_widget(menu, inner_area);
         }
-        State::Connection(connection_state) => {
+        View::Connection(connection_state) => {
             let con = Connection::new(
-                &connection_state.networks,
+                &state.networks,
                 &connection_state.actions,
                 &connection_state.focused_list,
-                &state.prompt_view,
+                &state.prompt_stack,
             );
             frame.render_widget(con, inner_area);
         }
