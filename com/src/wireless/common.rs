@@ -1,4 +1,6 @@
+use bitflags::bitflags;
 use derive_builder::Builder;
+use tokio::fs::write;
 use zbus::{zvariant::Value, Connection};
 
 use crate::error::ComError;
@@ -8,6 +10,7 @@ pub enum Security {
     Open,
     Psk,
     Ieee8021x,
+    Unknown,
 }
 
 impl std::fmt::Display for Security {
@@ -16,17 +19,18 @@ impl std::fmt::Display for Security {
             Security::Open => write!(f, "open"),
             Security::Psk => write!(f, "psk"),
             Security::Ieee8021x => write!(f, "8021x"),
+            Security::Unknown => write!(f, ""),
         }
     }
 }
 
 impl Security {
-    pub fn from_str(str: &str) -> Option<Self> {
+    pub fn from_str(str: &str) -> Self {
         match str {
-            "open" => Some(Security::Open),
-            "psk" => Some(Security::Psk),
-            "8021x" => Some(Security::Ieee8021x),
-            _ => None,
+            "open" => Security::Open,
+            "psk" => Security::Psk,
+            "8021x" => Security::Ieee8021x,
+            _ => Security::Unknown,
         }
     }
 }
@@ -79,23 +83,21 @@ pub fn ssid_to_hex(ssid: String) -> String {
     bytes.into_iter().map(|b| format!("{:02x}", b)).collect()
 }
 
+bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct NetworkFlags: u8 {
+        const KNOWN = 0b00000001;
+        const CONNECTED = 0b00000010;
+        const NEARBY = 0b00000100;
+        const HIDDEN = 0b00001000;
+    }
+}
+
 #[derive(Builder, Debug, Clone)]
 #[builder(pattern = "owned")]
 pub struct AccessPoint {
     pub ssid: String,
-    // OPTIONAL ARGUMENTS:
-    #[builder(setter(into, strip_option), default)]
-    pub security: Option<Security>,
-    #[builder(setter(into, strip_option), default)]
-    pub known: Option<bool>,
-    #[builder(setter(into, strip_option), default)]
-    pub connected: Option<bool>,
-    #[builder(setter(into, strip_option), default)]
-    pub nearby: Option<bool>,
-    /// In some cases an empty string does
-    /// not imply a hidden network depending
-    /// on the type of request i.e beacon
-    /// frame vs probe
-    #[builder(setter(into, strip_option), default)]
-    pub hidden: Option<bool>,
+    pub security: Security,
+    #[builder(default = NetworkFlags::empty())]
+    pub flags: NetworkFlags,
 }

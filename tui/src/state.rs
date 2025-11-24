@@ -1,21 +1,41 @@
-use com::wireless::common::{AccessPoint, Security};
-use crossterm::event::KeyCode;
+use com::{
+    controller::DaemonType,
+    wireless::common::{AccessPoint, Security},
+};
+use crossterm::event::{KeyCode, KeyEvent};
+use derive_builder::Builder;
 use tracing::info;
 
 use crate::app::UpdateAction;
 use com::state::network::NetworkAction;
 
-//* State
-//*
-//* Controls what should happen on keypress and
-//* what the viewer should see
-pub enum State {
-    MainMenu(SelectableList<MainMenuSelection>),
-    Connection(ConnectionState),
-    Vpn,
-    Config,
+/// Data used for UI, may be sent to threads through
+/// channels
+#[derive(Builder, Debug)]
+#[builder(pattern = "owned")]
+pub struct UiData {
+    #[builder(default = "vec![]")]
+    inqut_queue: Vec<KeyEvent>,
+
+    // Only ConnectionState needs the selected part but
+    // it might cause less headache being able to access
+    // here
+    #[builder(default = "SelectableList::new(vec![])")]
+    pub networks: SelectableList<AccessPoint>,
+
+    #[builder(default = "View::main_menu()")]
+    pub view: View,
+
+    // for prompts inside of a view state
+    #[builder(default = "vec![]")]
+    pub prompt_stack: Vec<PromptState>,
+    #[builder(setter(into, strip_option), default)]
+    pub wifi_daemon: Option<DaemonType>,
 }
 
+pub fn input_system(data: &mut UiData) {}
+
+#[derive(Debug)]
 pub enum MainMenuSelection {
     Connection,
     Vpn,
@@ -34,9 +54,21 @@ impl MainMenuSelection {
     }
 }
 
-impl State {
+//* View
+//*
+//* Controls what should happen on keypress and
+//* what the viewer should see
+#[derive(Debug)]
+pub enum View {
+    MainMenu(SelectableList<MainMenuSelection>),
+    Connection(ConnectionState),
+    Vpn,
+    Config,
+}
+
+impl View {
     pub fn main_menu() -> Self {
-        State::MainMenu(SelectableList::new(vec![
+        View::MainMenu(SelectableList::new(vec![
             MainMenuSelection::Connection,
             MainMenuSelection::Vpn,
             MainMenuSelection::Config,
@@ -45,134 +77,7 @@ impl State {
     }
 
     pub fn connection() -> Self {
-        State::Connection(ConnectionState::new(vec![]))
-    }
-
-    /// Main handler for input, delagates some work to helper
-    /// functions to contain menu specific logic
-    pub fn handle_input(&mut self, key: KeyCode) -> Option<UpdateAction> {
-        if key == KeyCode::Esc {
-            match &self {
-                State::MainMenu(_) => {
-                    return Some(UpdateAction::Exit);
-                }
-                State::Connection(conn_state) => {
-                    *self = State::main_menu();
-                }
-                _ => {}
-            }
-            return None;
-        }
-
-        match self {
-            Self::MainMenu(list) => {
-                if key == KeyCode::Enter {
-                    match list.get_selected_value() {
-                        MainMenuSelection::Connection => {
-                            *self = State::connection();
-                            // get known networks instead
-                            return Some(UpdateAction::Network(NetworkAction::GetKnownNetworks));
-                        }
-                        MainMenuSelection::Vpn => {}
-                        MainMenuSelection::Config => {}
-                        MainMenuSelection::Exit => return Some(UpdateAction::Exit),
-                        _ => {}
-                    }
-                    return None;
-                }
-                return Self::handle_main_menu_input(list, key);
-            }
-            Self::Connection(conn_state) => {
-                return Self::handle_connection_input(conn_state, key);
-            }
-            Self::Vpn => {}
-            Self::Config => {}
-        }
-        None
-    }
-
-    fn handle_main_menu_input(
-        list: &mut SelectableList<MainMenuSelection>,
-        key: KeyCode,
-    ) -> Option<UpdateAction> {
-        match key {
-            KeyCode::Up => {
-                list.prev();
-            }
-            KeyCode::Down => {
-                list.next();
-            }
-            _ => {}
-        };
-        None
-    }
-
-    fn handle_connection_input(
-        conn_state: &mut ConnectionState,
-        key: KeyCode,
-    ) -> Option<UpdateAction> {
-        match &conn_state.focused_list {
-            FocusedConnection::Actions => match key {
-                KeyCode::Up => {
-                    conn_state.actions.prev();
-                }
-                KeyCode::Down => {
-                    conn_state.actions.next();
-                }
-                KeyCode::Left => {
-                    conn_state.focused_list = FocusedConnection::Networks;
-                }
-                KeyCode::Enter => match conn_state.actions.get_selected_value() {
-                    ConnectionAction::Scan => {
-                        return Some(UpdateAction::Network(NetworkAction::Scan));
-                    }
-                    ConnectionAction::Connect => {
-                        let selected = conn_state.networks.get_selected_value();
-
-                        if selected.known? || matches!(selected.security, Some(Security::Open)) {
-                            // connect function does not need any password if already known
-                            return Some(UpdateAction::Network(NetworkAction::Connect(
-                                selected.ssid.clone(),
-                                "".to_string(),
-                                Security::Open,
-                            )));
-                        }
-
-                        return Some(UpdateAction::OpenPrompt(PromptState::Connect(
-                            ConnectionPrompt::new(selected.ssid.clone()),
-                        )));
-                    }
-                    // ConnectionAction::Info => {
-                    // return Some(UpdateAction::Network(NetworkAction::Info));
-                    // }
-                    ConnectionAction::Disconnect => {
-                        return Some(UpdateAction::Network(NetworkAction::Disconnect));
-                    }
-                    ConnectionAction::Forget => {
-                        let selected = conn_state.networks.get_selected_value();
-                        return Some(UpdateAction::Network(NetworkAction::Forget(
-                            selected.ssid.clone(),
-                            selected.security.clone().unwrap(),
-                        )));
-                    }
-                    _ => {}
-                },
-                _ => {}
-            },
-            FocusedConnection::Networks => match key {
-                KeyCode::Up => {
-                    conn_state.networks.prev();
-                }
-                KeyCode::Down => {
-                    conn_state.networks.next();
-                }
-                KeyCode::Right | KeyCode::Enter => {
-                    conn_state.focused_list = FocusedConnection::Actions;
-                }
-                _ => {}
-            },
-        };
-        None
+        View::Connection(ConnectionState::new(vec![]))
     }
 }
 
@@ -192,89 +97,19 @@ pub enum ConnectionPromptSelect {
     Back,
 }
 
-#[derive(Debug)]
+#[derive(Builder, Debug)]
+#[builder(pattern = "owned")]
 pub struct ConnectionPrompt {
     pub ssid: String,
+    #[builder(default = "String::new()")]
     pub password: String,
+    #[builder(default = "ConnectionPromptSelect::Password")]
     pub select: ConnectionPromptSelect,
 }
 
 impl ConnectionPrompt {
     fn new(ssid: String) -> Self {
-        Self {
-            ssid,
-            password: String::new(),
-            select: ConnectionPromptSelect::Password,
-        }
-    }
-}
-
-impl PromptState {
-    pub fn handle_input(&mut self, key: KeyCode) -> Option<UpdateAction> {
-        match key {
-            KeyCode::Esc => {
-                return Some(UpdateAction::ExitPrompt);
-            }
-            _ => {}
-        };
-
-        match self {
-            PromptState::Connect(conn) => match key {
-                KeyCode::Enter => match conn.select {
-                    ConnectionPromptSelect::Connect => {
-                        return Some(UpdateAction::Network(NetworkAction::Connect(
-                            conn.ssid.clone(),
-                            conn.password.clone(),
-                            Security::Psk,
-                        )));
-                    }
-                    ConnectionPromptSelect::Back => {
-                        return Some(UpdateAction::ExitPrompt);
-                    }
-                    _ => {}
-                },
-                KeyCode::Backspace => {
-                    if conn.password.len() > 0
-                        && matches!(conn.select, ConnectionPromptSelect::Password)
-                    {
-                        conn.password.pop();
-                    }
-                }
-                KeyCode::Up => match conn.select {
-                    ConnectionPromptSelect::Password => {
-                        conn.select = ConnectionPromptSelect::Connect;
-                    }
-                    _ => {
-                        conn.select = ConnectionPromptSelect::Password;
-                    }
-                },
-                KeyCode::Down => match conn.select {
-                    ConnectionPromptSelect::Password => {
-                        conn.select = ConnectionPromptSelect::Connect;
-                    }
-                    _ => {
-                        conn.select = ConnectionPromptSelect::Password;
-                    }
-                },
-                KeyCode::Left | KeyCode::Right => match conn.select {
-                    ConnectionPromptSelect::Password => {}
-                    ConnectionPromptSelect::Connect => {
-                        conn.select = ConnectionPromptSelect::Back;
-                    }
-                    ConnectionPromptSelect::Back => {
-                        conn.select = ConnectionPromptSelect::Connect;
-                    }
-                },
-                KeyCode::Char(c) => match conn.select {
-                    ConnectionPromptSelect::Password => {
-                        conn.password.push(c);
-                    }
-                    _ => {}
-                },
-                _ => {}
-            },
-        };
-        None
+        ConnectionPromptBuilder::default().build().unwrap()
     }
 }
 
@@ -291,62 +126,24 @@ pub enum ConnectionAction {
     Forget,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum FocusedConnection {
     Networks,
     Actions,
 }
 
+#[derive(Builder, Debug)]
+#[builder(pattern = "owned")]
 pub struct ConnectionState {
-    pub networks: SelectableList<AccessPoint>,
+    #[builder(default = "SelectableList::new(vec![ConnectionAction::Scan])")]
     pub actions: SelectableList<ConnectionAction>,
+    #[builder(default = "FocusedConnection::Actions")]
     pub focused_list: FocusedConnection,
 }
 
 impl ConnectionState {
     pub fn new(aps: Vec<AccessPoint>) -> Self {
-        Self {
-            networks: SelectableList::new(aps),
-            actions: SelectableList::new(vec![ConnectionAction::Scan]),
-            focused_list: FocusedConnection::Actions,
-        }
-    }
-
-    pub fn refresh_actions(&mut self) {
-        if matches!(self.focused_list, FocusedConnection::Networks) {
-            let mut action_list = vec![ConnectionAction::Scan];
-
-            if let Some(network) = &self.networks.items.get(self.networks.selected) {
-                if network.connected.is_some_and(|c| !c) {
-                    action_list.push(ConnectionAction::Connect);
-                } else {
-                    // action_list.push(ConnectionAction::Info);
-                    action_list.push(ConnectionAction::Disconnect);
-                }
-                if network.known.is_some_and(|k| k) {
-                    action_list.push(ConnectionAction::Forget);
-                }
-            }
-            self.actions = SelectableList::new(action_list);
-        }
-    }
-
-    pub fn update_aps(&mut self, aps: Vec<AccessPoint>) {
-        if self.networks.items.is_empty() {
-            self.networks.items = aps;
-            return;
-        }
-
-        let selected_ssid = self.networks.get_selected_value().ssid.clone();
-
-        self.networks.items = aps;
-
-        self.networks.selected = self
-            .networks
-            .items
-            .iter()
-            .position(|v| v.ssid == selected_ssid)
-            .unwrap_or(0);
+        ConnectionStateBuilder::default().build().unwrap()
     }
 }
 

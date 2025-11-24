@@ -15,7 +15,7 @@ use crate::{
     state::signals::SignalUpdate,
     wireless::{
         agent::{AgentState, IwdAgent, IwdAgentMsg},
-        common::{get_prop_from_proxy, AccessPoint, AccessPointBuilder, Security},
+        common::{get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security},
     },
 };
 
@@ -240,13 +240,11 @@ impl Iwd {
 
                 let mut ap_builder = AccessPointBuilder::default()
                     .ssid(ssid)
-                    .known(true)
-                    .connected(false)
-                    .nearby(false);
+                    .flags(NetworkFlags::KNOWN);
 
                 if let Some(net_security) = known_network_props.get("Type") {
                     let security_str = net_security.downcast_ref::<&str>().unwrap_or("psk");
-                    let security = Security::from_str(security_str).unwrap();
+                    let security = Security::from_str(security_str);
                     ap_builder = ap_builder.security(security);
                 }
 
@@ -324,26 +322,28 @@ impl Iwd {
         let ssid = get_prop_from_proxy::<String>(&proxy, "Name").await?;
         let security: Security;
         let security_str = get_prop_from_proxy::<String>(&proxy, "Type").await?;
-        let security = Security::from_str(security_str.as_str()).unwrap();
+        let security = Security::from_str(security_str.as_str());
+        let mut flags = NetworkFlags::NEARBY;
 
         let mut known = false;
 
         // let known_network: Option<OwnedObjectPath>;
-        match get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork").await {
-            Ok(_) => {
-                known = true;
-            }
-            _ => {}
-        }
+        get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork")
+            .await
+            .inspect(|b| {
+                flags = flags | NetworkFlags::KNOWN;
+            });
 
-        let connected = get_prop_from_proxy::<bool>(&proxy, "Connected").await?;
+        get_prop_from_proxy::<bool>(&proxy, "Connected")
+            .await
+            .inspect(|b| {
+                flags = flags | NetworkFlags::CONNECTED;
+            });
 
         let ap = AccessPointBuilder::default()
             .ssid(ssid)
             .security(security)
-            .known(known)
-            .connected(connected)
-            .nearby(true)
+            .flags(flags)
             .build()?;
 
         Ok(ap)

@@ -1,4 +1,4 @@
-use com::wireless::common::{AccessPoint, Security};
+use com::wireless::common::{AccessPoint, NetworkFlags, Security};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Flex, Layout, Rect},
@@ -18,7 +18,7 @@ pub struct Connection<'a> {
     networks: &'a SelectableList<AccessPoint>,
     actions: &'a SelectableList<ConnectionAction>,
     focused: &'a FocusedConnection,
-    prompt: &'a Option<PromptState>,
+    prompt_stack: &'a Vec<PromptState>,
 }
 
 impl<'a> Connection<'a> {
@@ -26,13 +26,13 @@ impl<'a> Connection<'a> {
         networks: &'a SelectableList<AccessPoint>,
         actions: &'a SelectableList<ConnectionAction>,
         focused: &'a FocusedConnection,
-        prompt: &'a Option<PromptState>,
+        prompt_stack: &'a Vec<PromptState>,
     ) -> Self {
         Self {
             networks,
             actions,
             focused,
-            prompt,
+            prompt_stack,
         }
     }
 }
@@ -97,25 +97,30 @@ impl<'a> Widget for Connection<'a> {
                 } else {
                     fg_col = theme.info.color();
                 }
-            } else if self.networks.items[i].connected.is_some_and(|c| c) {
+            } else if self.networks.items[i]
+                .flags
+                .contains(NetworkFlags::CONNECTED)
+            {
                 fg_col = theme.success.color();
-            } else if self.networks.items[i].known.is_some_and(|k| k) {
+            } else if self.networks.items[i].flags.contains(NetworkFlags::KNOWN) {
                 fg_col = theme.tertiary.color();
             }
 
-            if let Some(sec) = &network.security {
-                match sec {
-                    Security::Psk => {
-                        text.push_str("  ");
-                    }
-                    Security::Open => {
-                        text.push_str(" (Open)");
-                    }
-                    Security::Ieee8021x => {
-                        text.push_str(" (802.1x)");
-                    }
+            match &network.security {
+                Security::Psk => {
+                    text.push_str("  ");
+                }
+                Security::Open => {
+                    text.push_str(" (Open)");
+                }
+                Security::Ieee8021x => {
+                    text.push_str(" (802.1x)");
+                }
+                Security::Unknown => {
+                    continue;
                 }
             }
+
             // select hover for options like connect
             Paragraph::new(text)
                 .style(Style::new().fg(fg_col).bold())
@@ -123,20 +128,14 @@ impl<'a> Widget for Connection<'a> {
         }
 
         select_heading_style = Style::new().fg(theme.accent.color());
-        if *self.focused == FocusedConnection::Actions && self.prompt.is_none() {
-            select_heading_style = Style::new().fg(theme.accent.color()).bold();
-        }
+        // if *self.focused == FocusedConnection::Actions && self.prompt.is_none() {
+        //     select_heading_style = Style::new().fg(theme.accent.color()).bold();
+        // }
 
         let selection_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .borders(Borders::ALL)
-            .style(Style::new().fg(
-                if *self.focused == FocusedConnection::Actions && self.prompt.is_none() {
-                    theme.primary.color()
-                } else {
-                    theme.muted.color()
-                },
-            ))
+            .style(Style::new().fg(theme.muted.color()))
             .title_top(
                 Line::from(" Options ")
                     .centered()
@@ -186,20 +185,20 @@ impl<'a> Widget for Connection<'a> {
             paragraph.render(selection_chunks[i], buf);
         }
 
-        if let Some(prompt) = self.prompt {
-            match prompt {
-                PromptState::Connect(selected) => {
-                    let prompt_layout = Layout::vertical([Constraint::Percentage(40)])
-                        .flex(Flex::Center)
-                        .split(
-                            Layout::horizontal([Constraint::Percentage(30)])
-                                .flex(Flex::Center)
-                                .split(area)[0],
-                        );
-                    NetworkPrompt::new(&self.networks.items[self.networks.selected], selected)
-                        .render(prompt_layout[0], buf);
-                }
-            }
-        }
+        // if let Some(prompt) = self.prompt {
+        //     match prompt {
+        //         PromptState::Connect(selected) => {
+        //             let prompt_layout = Layout::vertical([Constraint::Percentage(40)])
+        //                 .flex(Flex::Center)
+        //                 .split(
+        //                     Layout::horizontal([Constraint::Percentage(30)])
+        //                         .flex(Flex::Center)
+        //                         .split(area)[0],
+        //                 );
+        //             NetworkPrompt::new(&self.networks.items[self.networks.selected], selected)
+        //                 .render(prompt_layout[0], buf);
+        //         }
+        //     }
+        // }
     }
 }
