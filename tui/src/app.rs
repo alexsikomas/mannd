@@ -6,7 +6,7 @@ use tracing::info;
 use com::{
     controller::{Controller, DaemonType},
     state::{
-        network::{handle_action, NetUpdate, NetworkAction, NetworkActor},
+        network::{NetUpdate, NetworkAction, NetworkActor, handle_action},
         signals::{SignalManager, SignalUpdate},
     },
     wireless::common::{AccessPoint, AccessPointBuilderError},
@@ -17,8 +17,8 @@ use tokio::sync::mpsc::{self, Receiver};
 use crate::{
     error::TuiError,
     state::{
-        ConnectionAction, ConnectionState, FocusedConnection, PromptState, SelectableList, UiData,
-        UiDataBuilder, View,
+        AppAction, ConnectionAction, ConnectionState, FocusedConnection, PromptState,
+        SelectableList, UiData, UiDataBuilder, View, handle_event,
     },
     ui::render,
 };
@@ -86,10 +86,8 @@ impl App {
                 }
                 Some(Ok(event)) = events.next() => {
                     state.redraw = true;
-                    match event {
-                        Event::Key(key) => {
-                        }
-                        _ => {}
+                    if let Some(action) = handle_event(event, &mut state.ui_data) {
+                        handle_app_action(action, &mut state);
                     }
                 }
                 else => break,
@@ -98,6 +96,14 @@ impl App {
 
         action_tx.send(NetworkAction::Exit).await;
         Ok(())
+    }
+}
+
+fn handle_app_action(action: AppAction, state: &mut AppState) {
+    match action {
+        AppAction::Exit => {
+            state.should_quit = true;
+        }
     }
 }
 
