@@ -1,6 +1,5 @@
 pub mod controller;
 pub mod error;
-pub mod netlink;
 pub mod state;
 pub mod systemd;
 pub mod utils;

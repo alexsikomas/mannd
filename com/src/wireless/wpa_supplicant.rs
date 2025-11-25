@@ -26,17 +26,20 @@ use futures::StreamExt;
 use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::info;
 use zbus::{
+    Connection, Proxy,
     names::MemberName,
     proxy::SignalStream,
     zvariant::{self, Dict, OwnedObjectPath, OwnedValue, Str, Value},
-    Connection, Proxy,
 };
 
 use crate::{
     error::ComError,
-    state::signals::SignalUpdate,
+    state::{
+        network::{ApConnectInfo, EapInfo},
+        signals::SignalUpdate,
+    },
     wireless::common::{
-        get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security,
+        AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy,
     },
 };
 
@@ -71,7 +74,7 @@ impl WpaSupplicant {
         })
     }
 
-    pub async fn connect_network(&self, ssid: String, psk: String) -> Result<(), ComError> {
+    pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ComError> {
         let psk_len = psk.len();
         if (psk_len < 8 || psk_len > 63) && psk_len != 0 {
             return Err(ComError::PasswordLength);
@@ -110,6 +113,10 @@ impl WpaSupplicant {
             }
             _ => Ok(()),
         }
+    }
+
+    pub async fn connect_network_eap(&self, ssid: String, eap: EapInfo) -> Result<(), ComError> {
+        Ok(())
     }
 
     pub async fn disconnect(&self) -> Result<(), ComError> {

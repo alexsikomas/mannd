@@ -1,7 +1,7 @@
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_stream::{StreamExt, StreamMap};
 use tracing::info;
-use zbus::{names::MemberName, proxy::SignalStream, Message};
+use zbus::{Message, names::MemberName, proxy::SignalStream};
 
 use crate::state::network::NetworkAction;
 
@@ -62,7 +62,7 @@ impl<'a> SignalManager<'a> {
             info!("PROCESSING: {:?}", method);
             match method.as_str() {
                 "ScanDone" => {
-                    tx.send(NetworkAction::GetAllNetworks).await;
+                    tx.send(NetworkAction::GetNearbyNetworks).await;
                     self.handle_update(SignalUpdate::Remove(msg.0));
                 }
                 _ => {}

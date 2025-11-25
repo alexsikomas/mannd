@@ -32,14 +32,14 @@ pub struct UiData {
 
 pub fn handle_event(event: Event, data: &mut UiData) -> Option<AppAction> {
     if let Event::Key(key) = event {
+        let back = data.view.handle_back(&key);
+        if back.is_some() {
+            return back;
+        }
+
         match &mut data.view {
             View::MainMenu(list) => {
-                if key.code.is_down() {
-                    list.next();
-                }
-                if key.code.is_up() {
-                    list.prev();
-                }
+                list.on_key(&key);
                 if key.code.is_enter() {
                     let selected = list.get_selected_value();
                     if selected == &MainMenuSelection::Exit {
@@ -58,6 +58,7 @@ pub fn handle_event(event: Event, data: &mut UiData) -> Option<AppAction> {
 }
 
 pub enum AppAction {
+    Network(NetworkAction),
     Exit,
 }
 
@@ -114,6 +115,21 @@ impl View {
 
     pub fn connection() -> Self {
         View::Connection(ConnectionState::new(vec![]))
+    }
+
+    fn handle_back(&mut self, key: &KeyEvent) -> Option<AppAction> {
+        if key.code.is_esc() {
+            match &self {
+                View::MainMenu(_) => {
+                    return Some(AppAction::Exit);
+                }
+                _ => {
+                    let mut new = Self::main_menu();
+                    *self = new;
+                }
+            };
+        }
+        None
     }
 }
 
@@ -237,5 +253,14 @@ impl<T> SelectableList<T> {
 
     pub fn get_selected_value(&self) -> &T {
         &self.items[self.selected]
+    }
+
+    fn on_key(&mut self, key: &KeyEvent) {
+        if key.code.is_down() {
+            self.next();
+        }
+        if key.code.is_up() {
+            self.prev();
+        }
     }
 }

@@ -1,3 +1,6 @@
+use std::path::PathBuf;
+
+use derive_builder::Builder;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::info;
 
@@ -72,15 +75,12 @@ impl NetworkActor {
 #[derive(Debug)]
 pub enum NetworkAction {
     Scan,
-    GetAllNetworks,
-    GetKnownNetworks,
-    Connect(String, String, Security),
+    GetNearbyNetworks,
+    GetConnectedNetworks,
+    Connect(ApConnectInfo),
     Forget(String, Security),
-    Info,
     Exit,
     Disconnect,
-    ForceIwd,
-    ForceWpa,
 }
 
 pub enum NetUpdate {
@@ -106,29 +106,27 @@ pub async fn handle_action<'a>(
 ) -> bool {
     match action {
         NetworkAction::Scan => if let Ok(()) = controller.scan(signal_tx.clone()).await {},
-        NetworkAction::GetAllNetworks => {
-            if let Ok(aps) = controller.get_networks().await {
+        NetworkAction::GetNearbyNetworks => {
+            if let Ok(aps) = controller.get_all_networks().await {
                 let _ = state_update.send(NetUpdate::UpdateAps(aps)).await;
             }
         }
-        NetworkAction::Connect(ssid, psk, sec) => {
-            match controller.ssid_connect(ssid, psk, sec).await {
-                Ok(()) => {
-                    info!("Connection to network was successful");
-                }
-                Err(e) => {
-                    tracing::error!("Connection to network was not successful.");
-                    state_update.send(NetUpdate::ConnectFailed(e.to_string()));
-                }
+        NetworkAction::Connect(info) => match controller.network_connect(info).await {
+            Ok(()) => {
+                info!("Connection to network was successful");
             }
-        }
+            Err(e) => {
+                tracing::error!("Connection to network was not successful.");
+                state_update.send(NetUpdate::ConnectFailed(e.to_string()));
+            }
+        },
         NetworkAction::Disconnect => {
             if let Ok(()) = controller.disconenct().await {
                 info!("Disconnected from a network");
             } else {
             }
         }
-        NetworkAction::GetKnownNetworks => {
+        NetworkAction::GetConnectedNetworks => {
             if let Ok(known_aps) = controller.get_known_networks().await {
                 // At this point some of the networks will still be reachable
                 // we don't have self so can't do check here
@@ -139,9 +137,9 @@ pub async fn handle_action<'a>(
         }
         NetworkAction::Forget(ssid, sec) => {
             if let Ok(()) = controller.remove_network(ssid, sec).await {
-                if let Ok(aps) = controller.get_networks().await {
-                    let _ = state_update.send(NetUpdate::UpdateAps(aps)).await;
-                }
+                //     if let Ok(aps) = controller.get_networks().await {
+                //         let _ = state_update.send(NetUpdate::UpdateAps(aps)).await;
+                //     }
             }
         }
         NetworkAction::Exit => {
@@ -149,9 +147,78 @@ pub async fn handle_action<'a>(
                 return true;
             }
         }
-        NetworkAction::ForceIwd => {}
-        NetworkAction::ForceWpa => {}
         _ => {}
     };
     false
+}
+
+/// For connecting to APs used by wpa and iwd
+#[derive(Builder, Debug, Clone)]
+pub struct ApConnectInfo {
+    pub ssid: String,
+    pub security: Security,
+    pub credentials: Credentials,
+}
+
+#[derive(Debug, Clone)]
+pub enum Credentials {
+    Password(String),
+    Eap(EapInfo),
+}
+
+#[derive(Builder, Debug, Clone)]
+pub struct EapInfo {
+    pub eap_method: EapMethod,
+    pub identity: String,
+    #[builder(default = "None")]
+    pub anonymous_identity: Option<String>,
+
+    // Optional because EAP-TLS uses certs instead.
+    pub password: Option<String>,
+    pub ca_cert: PathBuf,
+
+    // limits accepted certs
+    #[builder(default = "None")]
+    pub domain_match: Option<String>,
+
+    // Required for PEAP and TTLS
+    pub phase2: Option<PhaseTwo>,
+    // EAP-TLS
+    #[builder(default = "None")]
+    pub client_cert: Option<PathBuf>,
+    #[builder(default = "None")]
+    pub client_key: Option<PathBuf>,
+    // Used if client key is encrypted
+    #[builder(default = "None")]
+    pub client_key_password: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum PhaseTwo {
+    Eap(EapMethod),
+    // non-eap variants
+    Pap,
+    Chap,
+    Mschap,
+    Mschapv2,
+    // user can specify custom
+    Legacy(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum EapMethod {
+    TLS,
+    PEAP,
+    TTLS,
+    PWD,
+    SIM,
+    AKA,
+    // AKA'
+    AKA_PRIME,
+    MSCHAPV2,
+    GTC,
+    // methods below not in iwd
+    MD5,
+    FAST,
+    LEAP,
 }
