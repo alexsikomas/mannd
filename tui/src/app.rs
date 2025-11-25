@@ -104,6 +104,7 @@ fn handle_app_action(action: AppAction, state: &mut AppState) {
         AppAction::Exit => {
             state.should_quit = true;
         }
+        _ => {}
     }
 }
 

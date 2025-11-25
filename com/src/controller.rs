@@ -1,11 +1,13 @@
 use futures::StreamExt;
 use std::sync::Arc;
-use tokio::sync::{mpsc::Sender, RwLock};
+use tokio::sync::{RwLock, mpsc::Sender};
 
 use crate::{
     error::ComError,
-    netlink::Netlink,
-    state::signals::{self, SignalUpdate},
+    state::{
+        network::{ApConnectInfo, Credentials},
+        signals::{self, SignalUpdate},
+    },
     systemd::systemctl,
     wireless::{
         agent::{AgentState, IwdAgent},
@@ -15,36 +17,35 @@ use crate::{
     },
 };
 use tracing::{error, info};
-use zbus::{proxy::SignalStream, Connection};
+use zbus::{Connection, proxy::SignalStream};
 
-// Netlink not used here as I'm not implementing WPA authentication
-#[derive(Debug)]
-pub enum WirelessAdapter {
-    Iwd(Iwd),
-    Wpa(WpaSupplicant),
-}
-
+// used in outside functions
 #[derive(Debug, Clone)]
 pub enum DaemonType {
     Iwd,
     Wpa,
 }
 
+// used for matching in controller
+#[derive(Debug)]
+pub enum WirelessAdapter {
+    Iwd(Iwd),
+    Wpa(WpaSupplicant),
+}
+
 #[derive(Debug)]
 pub struct Controller {
     pub wifi: Option<WirelessAdapter>,
-    pub netlink: Netlink,
-    connection: Option<Connection>,
+    connection: Connection,
 }
 
+// Initialisations
 impl Controller {
     pub async fn new() -> Result<Self, ComError> {
-        // This is mostly a temporary connection
-        let connection = Some(Connection::system().await?);
+        let connection = Connection::system().await?;
 
         Ok(Self {
             wifi: None,
-            netlink: Netlink::connect_wireless().await?,
             connection,
         })
     }
@@ -52,37 +53,30 @@ impl Controller {
     /// Sets wifi to be either iwd, wpa or netlink
     pub async fn determine_adapter(&mut self) {
         info!("Determining adapter");
-        match &self.connection {
-            Some(conn) => {
-                let ctl = systemctl::Systemctl::new(conn.clone());
-                match ctl.is_service_active("iwd".to_string()).await {
-                    Some(v) => {
-                        if v {
-                            let _ = self.connect_iwd().await;
-                            info!("iwd connected");
-                            return;
-                        }
-                    }
-                    _ => {}
+        let ctl = systemctl::Systemctl::new(self.connection.clone());
+        match ctl.is_service_active("iwd".to_string()).await {
+            Some(v) => {
+                if v {
+                    let _ = self.connect_iwd().await;
+                    info!("iwd connected");
+                    return;
                 }
-
-                // if each interface is managed induvidually this can be complex to
-                // find in systemd through dbus, so we use a different method
-                match WpaSupplicant::is_active(&conn).await {
-                    Ok(v) => {
-                        if v {
-                            let _ = self.connect_wpa().await;
-                            return;
-                        }
-                    }
-                    _ => {}
-                }
-                tracing::error!("Neither iwd or wpa found!");
             }
-            None => {
-                tracing::error!("Connection has yet to be set in the controller!");
-            }
+            _ => {}
         }
+
+        // if each interface is managed induvidually this can be complex to
+        // find in systemd through dbus, so we use a different method
+        match WpaSupplicant::is_active(&self.connection).await {
+            Ok(v) => {
+                if v {
+                    let _ = self.connect_wpa().await;
+                    return;
+                }
+            }
+            _ => {}
+        }
+        tracing::error!("Neither iwd or wpa found!");
     }
 
     async fn connect_iwd(&mut self) -> Result<(), ComError> {
@@ -94,7 +88,7 @@ impl Controller {
 
         match Iwd::new(conn.clone(), agent_state.clone()).await {
             Ok(iwd) => {
-                self.connection = Some(conn);
+                self.connection = conn;
                 self.wifi = Some(WirelessAdapter::Iwd(iwd));
                 Ok(())
             }
@@ -103,23 +97,18 @@ impl Controller {
     }
 
     async fn connect_wpa(&mut self) -> Result<(), ComError> {
-        match &self.connection {
-            Some(conn) => match WpaSupplicant::new(conn.clone()) {
-                Ok(wpa) => {
-                    self.wifi = Some(WirelessAdapter::Wpa(wpa));
-                    Ok(())
-                }
-                Err(e) => Err(e),
-            },
-            None => {
-                tracing::error!("wpa_supplicant attempted to connect without a ZBus connection!");
-                Err(ComError::OperationFailed(
-                    "No ZBus Connection, check the logs.".to_string(),
-                ))
+        match WpaSupplicant::new(self.connection.clone()) {
+            Ok(wpa) => {
+                self.wifi = Some(WirelessAdapter::Wpa(wpa));
+                Ok(())
             }
+            Err(e) => Err(e),
         }
     }
+}
 
+// run actions
+impl Controller {
     pub async fn scan<'a>(&mut self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
         match &mut self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
@@ -140,41 +129,41 @@ impl Controller {
             _ => Err(ComError::NetworkNotFound),
         }
     }
-    pub async fn get_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
-        match &mut self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => match iwd.get_networks().await {
-                Ok(v) => Ok(v),
-                Err(e) => Err(ComError::OperationFailed(
-                    "Error while getting scanned networks!".to_string(),
-                )),
-            },
-            Some(WirelessAdapter::Wpa(wpa)) => match wpa.nearby_networks().await {
-                Ok(v) => Ok(v),
-                Err(e) => Err(ComError::OperationFailed(
-                    "Error while getting scanned networks!".to_string(),
-                )),
-            },
-            _ => Err(ComError::NetworkNotFound),
-        }
-    }
 
-    pub async fn ssid_connect(
-        &self,
-        ssid: String,
-        psk: String,
-        security: Security,
-    ) -> Result<(), ComError> {
-        match &self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => {
-                iwd.connect_network(ssid, psk, security).await?;
+    pub async fn network_connect(&self, info: ApConnectInfo) -> Result<(), ComError> {
+        match info.credentials {
+            Credentials::Password(psk) => {
+                match &self.wifi {
+                    Some(WirelessAdapter::Iwd(iwd)) => {
+                        iwd.connect_network_psk(info.ssid, psk).await?;
+                    }
+                    Some(WirelessAdapter::Wpa(wpa)) => {
+                        wpa.connect_network_psk(info.ssid, psk).await?;
+                    }
+                    None => {
+                        tracing::error!(
+                            "Tried to connect to network without an initalised adapter?"
+                        );
+                    }
+                };
             }
-            Some(WirelessAdapter::Wpa(wpa)) => {
-                wpa.connect_network(ssid, psk).await?;
+            Credentials::Eap(eap) => {
+                match &self.wifi {
+                    Some(WirelessAdapter::Iwd(iwd)) => {
+                        iwd.connect_network_eap(info.ssid, eap).await?;
+                    }
+                    Some(WirelessAdapter::Wpa(wpa)) => {
+                        wpa.connect_network_eap(info.ssid, eap).await?;
+                    }
+                    None => {
+                        tracing::error!(
+                            "Tried to connect to network without an initalised adapter?"
+                        );
+                    }
+                };
             }
-            None => {
-                tracing::error!("Tried to connect to network without an initalised adapter?");
-            }
-        };
+        }
+
         Ok(())
     }
 
@@ -195,25 +184,6 @@ impl Controller {
         };
         Ok(())
     }
-
-    pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
-        match &mut self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => match iwd.get_known_networks().await {
-                Ok(aps) => {
-                    return Ok(aps);
-                }
-                Err(e) => {
-                    return Err(e);
-                }
-            },
-            Some(WirelessAdapter::Wpa(wpa)) => {}
-            None => {}
-        }
-
-        // temp while wpa not implemented
-        Ok(vec![])
-    }
-
     pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ComError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => match iwd.remove_network(ssid, security).await {
@@ -241,9 +211,44 @@ impl Controller {
         };
         Ok(())
     }
+}
 
-    pub async fn info(&self, ssid: String) -> Result<(), ComError> {
-        Ok(())
+// get information
+impl Controller {
+    pub async fn get_all_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+        match &mut self.wifi {
+            Some(WirelessAdapter::Iwd(iwd)) => match iwd.get_networks().await {
+                Ok(v) => Ok(v),
+                Err(e) => Err(ComError::OperationFailed(
+                    "Error while getting scanned networks!".to_string(),
+                )),
+            },
+            Some(WirelessAdapter::Wpa(wpa)) => match wpa.nearby_networks().await {
+                Ok(v) => Ok(v),
+                Err(e) => Err(ComError::OperationFailed(
+                    "Error while getting scanned networks!".to_string(),
+                )),
+            },
+            _ => Err(ComError::NetworkNotFound),
+        }
+    }
+
+    pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+        match &mut self.wifi {
+            Some(WirelessAdapter::Iwd(iwd)) => match iwd.get_known_networks().await {
+                Ok(aps) => {
+                    return Ok(aps);
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            },
+            Some(WirelessAdapter::Wpa(wpa)) => {}
+            None => {}
+        }
+
+        // temp while wpa not implemented
+        Ok(vec![])
     }
 
     pub fn daemon_type(&self) -> Option<DaemonType> {

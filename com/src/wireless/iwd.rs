@@ -1,21 +1,24 @@
 use std::sync::Arc;
 
 use serde::Deserialize;
-use tokio::sync::{mpsc::Sender, RwLock};
+use tokio::sync::{RwLock, mpsc::Sender};
 use tracing::info;
 use zbus::{
+    Connection, Proxy,
     fdo::ObjectManagerProxy,
     names::OwnedUniqueName,
     zvariant::{self, ObjectPath, OwnedObjectPath, Type, Value},
-    Connection, Proxy,
 };
 
 use crate::{
     error::ComError,
-    state::signals::SignalUpdate,
+    state::{
+        network::{ApConnectInfo, Credentials, EapInfo},
+        signals::SignalUpdate,
+    },
     wireless::{
         agent::{AgentState, IwdAgent, IwdAgentMsg},
-        common::{get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security},
+        common::{AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy},
     },
 };
 
@@ -61,27 +64,21 @@ impl Iwd {
     ///
     /// Since iwd does not allow connecting via BSSID the connection band is determined by signal
     /// strength internally by iwd, this can be tweaked in the iwd configuration file
-    pub async fn connect_network(
-        &self,
-        ssid: String,
-        psk: String,
-        security: Security,
-    ) -> Result<(), ComError> {
+    pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ComError> {
         match self.agent_state.try_write() {
             Ok(mut writer) => {
-                writer.password = Some(psk);
+                writer.password = Some(psk.clone());
             }
             Err(e) => {
                 tracing::error!("Error trying to get lock on writer. {e}");
             }
         }
 
-        info!(
-            "Connecting to: {}/{}_{}",
-            self.path.clone(),
-            Self::ssid_to_hex(ssid.clone()),
-            security
-        );
+        let security = if psk.is_empty() {
+            Security::Open
+        } else {
+            Security::Psk
+        };
 
         let proxy = Proxy::new(
             &self.conn,
@@ -108,6 +105,10 @@ impl Iwd {
                 Err(ComError::OperationFailed(format!("{}", e)))
             }
         }
+    }
+
+    pub async fn connect_network_eap(&self, ssid: String, eap: EapInfo) -> Result<(), ComError> {
+        Ok(())
     }
 
     /// Disconnects from the current WiFi network, does not remove the network
