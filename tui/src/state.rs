@@ -2,7 +2,7 @@ use com::{
     controller::DaemonType,
     wireless::common::{AccessPoint, Security},
 };
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{Event, KeyCode, KeyEvent};
 use derive_builder::Builder;
 use tracing::info;
 
@@ -14,9 +14,6 @@ use com::state::network::NetworkAction;
 #[derive(Builder, Debug)]
 #[builder(pattern = "owned")]
 pub struct UiData {
-    #[builder(default = "vec![]")]
-    inqut_queue: Vec<KeyEvent>,
-
     // Only ConnectionState needs the selected part but
     // it might cause less headache being able to access
     // here
@@ -33,9 +30,38 @@ pub struct UiData {
     pub wifi_daemon: Option<DaemonType>,
 }
 
-pub fn input_system(data: &mut UiData) {}
+pub fn handle_event(event: Event, data: &mut UiData) -> Option<AppAction> {
+    if let Event::Key(key) = event {
+        match &mut data.view {
+            View::MainMenu(list) => {
+                if key.code.is_down() {
+                    list.next();
+                }
+                if key.code.is_up() {
+                    list.prev();
+                }
+                if key.code.is_enter() {
+                    let selected = list.get_selected_value();
+                    if selected == &MainMenuSelection::Exit {
+                        return Some(AppAction::Exit);
+                    } else {
+                        data.view = selected.to_view();
+                    }
+                }
+            }
+            View::Connection(state) => {}
+            View::Vpn => {}
+            View::Config => {}
+        };
+    }
+    None
+}
 
-#[derive(Debug)]
+pub enum AppAction {
+    Exit,
+}
+
+#[derive(Debug, PartialEq)]
 pub enum MainMenuSelection {
     Connection,
     Vpn,
@@ -50,6 +76,16 @@ impl MainMenuSelection {
             Self::Vpn => "VPN",
             Self::Config => "Config",
             Self::Exit => "Exit",
+        }
+    }
+
+    fn to_view(&self) -> View {
+        match self {
+            MainMenuSelection::Connection => View::Connection(ConnectionState::new(vec![])),
+            MainMenuSelection::Vpn => View::Vpn,
+            MainMenuSelection::Config => View::Config,
+            // okay because exit code checked first so this shouldn't be run
+            MainMenuSelection::Exit => View::MainMenu(SelectableList::new(vec![])),
         }
     }
 }
