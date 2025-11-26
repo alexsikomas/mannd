@@ -203,13 +203,20 @@ impl Iwd {
         let proxy = self.get_interface_proxy("Station").await?;
         if !get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
             proxy.call_noreply("Scan", &()).await?;
+            let proxy = Proxy::new(
+                &self.conn,
+                self.service.clone(),
+                self.path.clone(),
+                "org.freedesktop.DBus.Properties",
+            )
+            .await?;
             let signal = proxy.receive_signal("PropertiesChanged").await?;
             signal_tx.send(SignalUpdate::Add(signal)).await;
         }
         Ok(())
     }
 
-    pub async fn get_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+    pub async fn nearby_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
         let proxy = self.get_interface_proxy("Station").await?;
         let aps = proxy.call_method("GetOrderedNetworks", &()).await?.body();
         let aps: Vec<(OwnedObjectPath, i16)> = aps.deserialize()?;
@@ -311,6 +318,7 @@ impl Iwd {
         )
         .await?)
     }
+
     async fn get_ap_info(&self, network: String) -> Result<AccessPoint, ComError> {
         let proxy = zbus::Proxy::new(
             &self.conn,
@@ -320,26 +328,32 @@ impl Iwd {
         )
         .await?;
 
+        info!("Getting ap info");
         let ssid = get_prop_from_proxy::<String>(&proxy, "Name").await?;
+        info!("ssid: {}", ssid);
         let security: Security;
         let security_str = get_prop_from_proxy::<String>(&proxy, "Type").await?;
+        info!("sec: {:?}", security_str);
         let security = Security::from_str(security_str.as_str());
         let mut flags = NetworkFlags::NEARBY;
 
         let mut known = false;
 
         // let known_network: Option<OwnedObjectPath>;
-        get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork")
-            .await
-            .inspect(|b| {
+        match get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork").await {
+            Ok(_) => {
                 flags = flags | NetworkFlags::KNOWN;
-            });
+            }
+            // not actually an error the field is just optional
+            Err(_) => {}
+        };
 
         get_prop_from_proxy::<bool>(&proxy, "Connected")
             .await
             .inspect(|b| {
+                info!("connected: {:?}", b);
                 flags = flags | NetworkFlags::CONNECTED;
-            });
+            })?;
 
         let ap = AccessPointBuilder::default()
             .ssid(ssid)

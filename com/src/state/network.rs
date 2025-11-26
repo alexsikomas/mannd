@@ -21,7 +21,7 @@ impl NetworkActor {
         &mut self,
         mut action_rx: Receiver<NetworkAction>,
         action_tx: Sender<NetworkAction>,
-        state_tx: Sender<NetUpdate>,
+        state_tx: Sender<NetworkState>,
     ) {
         // networking thread
         // Signal <-> Network -> UI Update
@@ -35,7 +35,7 @@ impl NetworkActor {
         if let Ok(mut controller) = Controller::new().await {
             controller.determine_adapter().await;
             let daemon = controller.daemon_type().inspect(|d| {
-                state_tx.send(NetUpdate::SetDaemon(d.clone()));
+                state_tx.send(NetworkState::SetDaemon(d.clone()));
             });
 
             loop {
@@ -47,6 +47,7 @@ impl NetworkActor {
                     }
                     // add new signals to listen for
                     Some(update) = signal_rx.recv() => {
+                        info!("New signal received");
                         signal_manager.handle_update(update);
                     }
                     Some(msg) = signal_manager.recv() => {
@@ -83,24 +84,16 @@ pub enum NetworkAction {
     Disconnect,
 }
 
-pub enum NetUpdate {
-    AddKnownNetworks(Vec<AccessPoint>),
-    UpdateAps(Vec<AccessPoint>),
-    UpdateApsHidden(Vec<AccessPoint>),
+pub enum NetworkState {
+    UpdateNetworks(Vec<AccessPoint>),
     ConnectFailed(String),
     SetDaemon(DaemonType),
-}
-
-#[derive(Debug)]
-pub struct NetworkState {
-    pub selected: Option<usize>,
-    pub aps: Vec<AccessPoint>,
 }
 
 /// Returns true if we are quitting the application
 pub async fn handle_action<'a>(
     controller: &mut Controller,
-    state_update: Sender<NetUpdate>,
+    state_update: Sender<NetworkState>,
     signal_tx: Sender<SignalUpdate<'a>>,
     action: NetworkAction,
 ) -> bool {
@@ -108,7 +101,7 @@ pub async fn handle_action<'a>(
         NetworkAction::Scan => if let Ok(()) = controller.scan(signal_tx.clone()).await {},
         NetworkAction::GetNearbyNetworks => {
             if let Ok(aps) = controller.get_all_networks().await {
-                let _ = state_update.send(NetUpdate::UpdateAps(aps)).await;
+                let _ = state_update.send(NetworkState::UpdateNetworks(aps)).await;
             }
         }
         NetworkAction::Connect(info) => match controller.network_connect(info).await {
@@ -117,7 +110,7 @@ pub async fn handle_action<'a>(
             }
             Err(e) => {
                 tracing::error!("Connection to network was not successful.");
-                state_update.send(NetUpdate::ConnectFailed(e.to_string()));
+                state_update.send(NetworkState::ConnectFailed(e.to_string()));
             }
         },
         NetworkAction::Disconnect => {
@@ -131,7 +124,7 @@ pub async fn handle_action<'a>(
                 // At this point some of the networks will still be reachable
                 // we don't have self so can't do check here
                 let _ = state_update
-                    .send(NetUpdate::AddKnownNetworks(known_aps))
+                    .send(NetworkState::UpdateNetworks(known_aps))
                     .await;
             }
         }

@@ -6,19 +6,19 @@ use tracing::info;
 use com::{
     controller::{Controller, DaemonType},
     state::{
-        network::{NetUpdate, NetworkAction, NetworkActor, handle_action},
+        network::{NetworkAction, NetworkActor, NetworkState, handle_action},
         signals::{SignalManager, SignalUpdate},
     },
     wireless::common::{AccessPoint, AccessPointBuilderError},
 };
 use crossterm::event::{self, Event, EventStream};
-use tokio::sync::mpsc::{self, Receiver};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::{
     error::TuiError,
     state::{
-        AppAction, ConnectionAction, ConnectionState, FocusedConnection, PromptState,
-        SelectableList, UiData, UiDataBuilder, View, handle_event,
+        ConnectionAction, ConnectionState, FocusedConnection, PromptState, SelectableList, UiData,
+        UiDataBuilder, View, handle_event,
     },
     ui::render,
 };
@@ -60,14 +60,16 @@ impl App {
         };
 
         // to network thread
-        let (action_tx, mut action_rx) = mpsc::channel::<NetworkAction>(32);
+        let (action_tx, action_rx) = mpsc::channel::<NetworkAction>(32);
         // from network thread
-        let (state_tx, mut state_rx) = mpsc::channel::<NetUpdate>(32);
+        let (state_tx, mut state_rx) = mpsc::channel::<NetworkState>(32);
 
-        let net_thread_act_tx = action_tx.clone();
+        // we pass the sender to network due to how signals
+        // work
+        let action_tx_clone = action_tx.clone();
         tokio::spawn(async move {
             NetworkActor::new()
-                .run(action_rx, net_thread_act_tx, state_tx)
+                .run(action_rx, action_tx_clone, state_tx)
                 .await;
         });
 
@@ -87,7 +89,7 @@ impl App {
                 Some(Ok(event)) = events.next() => {
                     state.redraw = true;
                     if let Some(action) = handle_event(event, &mut state.ui_data) {
-                        handle_app_action(action, &mut state);
+                        handle_app_action(action, &mut state, &action_tx).await;
                     }
                 }
                 else => break,
@@ -99,8 +101,29 @@ impl App {
     }
 }
 
-fn handle_app_action(action: AppAction, state: &mut AppState) {
+async fn handle_state_update(state: &mut AppState, msg: NetworkState) {
+    match msg {
+        NetworkState::UpdateNetworks(aps) => {
+            state.ui_data.networks = SelectableList::new(aps);
+        }
+        NetworkState::SetDaemon(daemon) => {
+            state.ui_data.wifi_daemon = Some(daemon);
+        }
+        NetworkState::ConnectFailed(reason) => {
+            todo!()
+        }
+    }
+}
+
+async fn handle_app_action(
+    action: AppAction,
+    state: &mut AppState,
+    net_tx: &Sender<NetworkAction>,
+) {
     match action {
+        AppAction::Network(action) => {
+            net_tx.send(action).await;
+        }
         AppAction::Exit => {
             state.should_quit = true;
         }
@@ -108,9 +131,7 @@ fn handle_app_action(action: AppAction, state: &mut AppState) {
     }
 }
 
-pub enum UpdateAction {
+pub enum AppAction {
     Network(NetworkAction),
-    OpenPrompt(PromptState),
-    ExitPrompt,
     Exit,
 }

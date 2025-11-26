@@ -217,7 +217,7 @@ impl Controller {
 impl Controller {
     pub async fn get_all_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
         match &mut self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => match iwd.get_networks().await {
+            Some(WirelessAdapter::Iwd(iwd)) => match iwd.nearby_networks().await {
                 Ok(v) => Ok(v),
                 Err(e) => Err(ComError::OperationFailed(
                     "Error while getting scanned networks!".to_string(),
