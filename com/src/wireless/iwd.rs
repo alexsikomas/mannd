@@ -351,8 +351,9 @@ impl Iwd {
         get_prop_from_proxy::<bool>(&proxy, "Connected")
             .await
             .inspect(|b| {
-                info!("connected: {:?}", b);
-                flags = flags | NetworkFlags::CONNECTED;
+                if *b {
+                    flags = flags | NetworkFlags::CONNECTED;
+                }
             })?;
 
         let ap = AccessPointBuilder::default()

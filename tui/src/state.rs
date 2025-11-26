@@ -52,7 +52,8 @@ pub fn handle_event(event: Event, data: &mut UiData) -> Option<AppAction> {
                 }
             }
             View::Connection(state) => {
-                if let Some(action) = state.on_key(key) {
+                // mut ref to networks so we can move up/down
+                if let Some(action) = state.on_key(key, &mut data.networks) {
                     return Some(action);
                 }
             }
@@ -204,10 +205,22 @@ impl ConnectionState {
             .unwrap()
     }
 
-    fn on_key(&mut self, event: KeyEvent) -> Option<AppAction> {
+    fn on_key(
+        &mut self,
+        key: KeyEvent,
+        networks: &mut SelectableList<AccessPoint>,
+    ) -> Option<AppAction> {
         // check if up or down
-        self.actions.on_key(&event);
-        match event.code {
+        match self.focused_list.get_selected_value() {
+            FocusedConnection::Actions => {
+                self.actions.on_key(&key);
+            }
+            FocusedConnection::Networks => {
+                networks.on_key(&key);
+            }
+        }
+
+        match key.code {
             // since only two left/right functionally eq. to down
             KeyCode::Right | KeyCode::Left => {
                 self.focused_list
