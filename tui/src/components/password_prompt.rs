@@ -7,34 +7,39 @@ use ratatui::{
 };
 
 use crate::{
-    state::{ConnectionPrompt, ConnectionPromptSelect},
-    ui::{Theme, THEME},
+    state::{PskConnectionPrompt, PskPromptSelect},
+    ui::{THEME, Theme},
 };
 
-pub struct NetworkPrompt<'a> {
+pub struct PasswordPrompt<'a> {
     network: &'a AccessPoint,
-    selected: &'a ConnectionPrompt,
+    info: &'a PskConnectionPrompt,
+    theme: &'a Theme,
 }
 
-impl<'a> NetworkPrompt<'a> {
-    pub fn new(ap: &'a AccessPoint, selected: &'a ConnectionPrompt) -> Self {
-        Self {
+impl<'a> PasswordPrompt<'a> {
+    pub fn new(ap: &'a AccessPoint, info: &'a PskConnectionPrompt) -> Option<Self> {
+        let theme: &Theme = match THEME.get() {
+            Some(t) => t,
+            None => {
+                return None;
+            }
+        };
+
+        Some(Self {
             network: ap,
-            selected,
-        }
+            info,
+            theme,
+        })
     }
 }
 
-impl<'a> Widget for NetworkPrompt<'a> {
+impl<'a> Widget for PasswordPrompt<'a> {
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized,
     {
-        let theme: &Theme = match THEME.get() {
-            Some(t) => t,
-            None => return,
-        };
-
+        let theme = self.theme;
         Clear.render(area, buf);
 
         let main_block = Block::new()
@@ -65,6 +70,7 @@ impl<'a> Widget for NetworkPrompt<'a> {
         let ssid_area = chunks[0];
         let password_area = chunks[2];
 
+        let selected = self.info.select.get_selected_value();
         let ssid_line = Line::from(vec![
             Span::styled("  SSID: ", Style::new().fg(theme.tertiary.color())),
             Span::styled(
@@ -75,48 +81,41 @@ impl<'a> Widget for NetworkPrompt<'a> {
 
         Paragraph::new(ssid_line).render(ssid_area, buf);
 
-        let password_box_style = if matches!(self.selected.select, ConnectionPromptSelect::Password)
-        {
-            Style::new().fg(theme.accent.color())
-        } else {
-            Style::new().fg(theme.muted.color())
-        };
+        // BUTTON STYLES
+        // order: password, connect, show, back
+        let mut styles: Vec<Style> = vec![];
+        for i in 0..self.info.select.items.len() {
+            let style = if self.info.select.selected == i {
+                Style::new().fg(theme.accent.color())
+            } else {
+                Style::new().fg(theme.muted.color())
+            };
+            styles.push(style);
+        }
 
         let password_box = Block::new()
             .title_top(Line::from(" Password ").style(Style::new().fg(theme.tertiary.color())))
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .style(password_box_style);
+            .style(styles[0]);
 
         let password_text_area = Layout::horizontal([Constraint::Percentage(98)])
             .flex(Flex::Center)
             .split(password_box.inner(password_area))[0];
 
         password_box.render(password_area, buf);
-        let password_text = Paragraph::new("*".repeat(self.selected.password.len()));
+        let password_text = Paragraph::new("*".repeat(self.info.password.len()));
+
         password_text.render(password_text_area, buf);
-
-        let connect_box_style = if matches!(self.selected.select, ConnectionPromptSelect::Connect) {
-            Style::new().fg(theme.accent.color())
-        } else {
-            Style::new().fg(theme.muted.color())
-        };
-
         let connect_block = Block::new()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .style(connect_box_style);
-
-        let back_block_style = if matches!(self.selected.select, ConnectionPromptSelect::Back) {
-            Style::new().fg(theme.accent.color())
-        } else {
-            Style::new().fg(theme.muted.color())
-        };
+            .style(styles[1]);
 
         let back_block = Block::new()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .style(back_block_style);
+            .style(styles[2]);
 
         let button_layouts = Layout::vertical([Constraint::Min(0), Constraint::Length(3)])
             .flex(Flex::Center)
@@ -149,4 +148,8 @@ impl<'a> Widget for NetworkPrompt<'a> {
 
         back_block.render(button_layouts[0], buf);
     }
+}
+
+impl<'a> PasswordPrompt<'a> {
+    fn button_styles(&self) {}
 }

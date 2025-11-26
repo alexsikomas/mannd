@@ -9,7 +9,7 @@ use ratatui::{
 use tracing::info;
 
 use crate::{
-    components::net_prompt::NetworkPrompt,
+    components::password_prompt::PasswordPrompt,
     state::{ConnectionAction, FocusedConnection, PromptState, SelectableList},
     ui::{THEME, Theme},
 };
@@ -99,7 +99,7 @@ impl<'a> Widget for Connection<'a> {
             .direction(ListDirection::TopToBottom)
             .scroll_padding(1)
             .highlight_symbol("> ")
-            .highlight_style(Style::new().bold());
+            .highlight_style(Style::new().fg(theme.accent.color()).bold());
 
         let mut network_list_state = ListState::default();
         network_list_state.select(Some(self.networks.selected));
@@ -207,14 +207,7 @@ impl<'a> Connection<'a> {
     fn network_style(&self, ap: &AccessPoint, is_selected: bool, is_focused: bool) -> Style {
         let mut style = Style::new();
         let (mut fg_col, bg_col) = (self.theme.foreground.color(), self.theme.background.color());
-        if is_selected {
-            fg_col = if is_focused {
-                self.theme.accent.color()
-            } else {
-                self.theme.info.color()
-            };
-            style = style.fg(fg_col);
-        } else if ap.flags.contains(NetworkFlags::CONNECTED) && is_focused {
+        if ap.flags.contains(NetworkFlags::CONNECTED) && is_focused {
             fg_col = self.theme.success.color();
             style = style.fg(fg_col).bold();
         } else if ap.flags.contains(NetworkFlags::KNOWN) && is_focused {

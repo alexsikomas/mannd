@@ -109,7 +109,7 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &UiData) {
     // render
     match &state.view {
         View::MainMenu(list) => {
-            let menu = MainMenu::new(&list);
+            let menu = MainMenu::new(list);
             frame.render_widget(menu, inner_area);
         }
         View::Connection(connection_state) => {

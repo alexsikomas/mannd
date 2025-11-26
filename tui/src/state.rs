@@ -1,6 +1,9 @@
+use std::{marker::PhantomData, usize};
+
 use com::{
     controller::DaemonType,
-    wireless::common::{AccessPoint, Security},
+    state::network::{ApConnectInfo, ApConnectInfoBuilder},
+    wireless::common::{AccessPoint, NetworkFlags, Security},
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use derive_builder::Builder;
@@ -93,10 +96,10 @@ impl MainMenuSelection {
     }
 }
 
-//* View
-//*
-//* Controls what should happen on keypress and
-//* what the viewer should see
+// View
+//
+// Controls what should happen on keypress and
+// what the viewer should see
 #[derive(Debug)]
 pub enum View {
     MainMenu(SelectableList<MainMenuSelection>),
@@ -135,42 +138,10 @@ impl View {
     }
 }
 
-//* Prompt
-//*
-//* Displays a prompt visually on
-//* top of the current view
-#[derive(Debug)]
-pub enum PromptState {
-    Connect(ConnectionPrompt),
-}
-
-#[derive(Debug)]
-pub enum ConnectionPromptSelect {
-    Password,
-    Connect,
-    Back,
-}
-
-#[derive(Builder, Debug)]
-#[builder(pattern = "owned")]
-pub struct ConnectionPrompt {
-    pub ssid: String,
-    #[builder(default = "String::new()")]
-    pub password: String,
-    #[builder(default = "ConnectionPromptSelect::Password")]
-    pub select: ConnectionPromptSelect,
-}
-
-impl ConnectionPrompt {
-    fn new(ssid: String) -> Self {
-        ConnectionPromptBuilder::default().build().unwrap()
-    }
-}
-
-//* Connection
-//*
-//* Possible actions the user can take in the connection
-//* menu and how the data should be stored
+// Connection
+//
+// Possible actions the user can take in the connection
+// menu and how the data should be stored
 #[derive(Clone, Debug)]
 pub enum ConnectionAction {
     Scan,
@@ -205,6 +176,27 @@ impl ConnectionState {
             .unwrap()
     }
 
+    pub fn update_action_from_network(&mut self, networks: &SelectableList<AccessPoint>) {
+        if !networks.items.is_empty() {
+            let selected_flags = networks.get_selected_value().flags;
+            self.actions = SelectableList::new(vec![ConnectionAction::Scan]);
+
+            if selected_flags.contains(NetworkFlags::NEARBY)
+                && !selected_flags.contains(NetworkFlags::CONNECTED)
+            {
+                self.actions.items.push(ConnectionAction::Connect);
+            }
+
+            if selected_flags.contains(NetworkFlags::CONNECTED) {
+                self.actions.items.push(ConnectionAction::Disconnect);
+            }
+
+            if selected_flags.contains(NetworkFlags::KNOWN) {
+                self.actions.items.push(ConnectionAction::Forget);
+            }
+        }
+    }
+
     fn on_key(
         &mut self,
         key: KeyEvent,
@@ -214,9 +206,34 @@ impl ConnectionState {
         match self.focused_list.get_selected_value() {
             FocusedConnection::Actions => {
                 self.actions.on_key(&key);
+                match key.code {
+                    KeyCode::Enter => match self.actions.get_selected_value() {
+                        ConnectionAction::Scan => {
+                            return Some(AppAction::Network(NetworkAction::Scan));
+                        }
+                        ConnectionAction::Connect => {
+                            // start connect prompt
+                            match networks.get_selected_value().security {
+                                Security::Ieee8021x => {}
+                                Security::Psk => {
+                                    return Some(AppAction::AddPrompt(PromptState::PskConnect(
+                                        PskConnectionPromptBuilder::default()
+                                            .ssid(networks.get_selected_value().ssid.clone())
+                                            .build()
+                                            .unwrap(),
+                                    )));
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
             }
             FocusedConnection::Networks => {
                 networks.on_key(&key);
+                Self::update_action_from_network(self, networks);
             }
         }
 
@@ -226,12 +243,6 @@ impl ConnectionState {
                 self.focused_list
                     .on_key(&KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
             }
-            KeyCode::Enter => match self.actions.get_selected_value() {
-                ConnectionAction::Scan => {
-                    return Some(AppAction::Network(NetworkAction::Scan));
-                }
-                _ => {}
-            },
             _ => {}
         };
         None
@@ -247,6 +258,38 @@ impl ConnectionAction {
             // Self::Info => "Info",
             Self::Forget => "Forget",
         }
+    }
+}
+
+// Prompt
+//
+// Displays a prompt visually on
+// top of the current view
+#[derive(Debug)]
+pub enum PromptState {
+    PskConnect(PskConnectionPrompt),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum PskPromptSelect {
+    Password,
+    Show,
+    Connect,
+    Back,
+}
+
+#[derive(Builder, Debug)]
+#[builder(pattern = "owned")]
+pub struct PskConnectionPrompt {
+    pub ssid: String,
+    #[builder(default = "String::new()")]
+    pub password: String,
+    pub select: SelectableList<PskPromptSelect>,
+}
+
+impl PskConnectionPrompt {
+    fn new(ssid: String) -> Self {
+        PskConnectionPromptBuilder::default().build().unwrap()
     }
 }
 

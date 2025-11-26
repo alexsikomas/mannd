@@ -9,7 +9,7 @@ use com::{
         network::{NetworkAction, NetworkActor, NetworkState, handle_action},
         signals::{SignalManager, SignalUpdate},
     },
-    wireless::common::{AccessPoint, AccessPointBuilderError},
+    wireless::common::{AccessPoint, AccessPointBuilderError, NetworkFlags},
 };
 use crossterm::event::{self, Event, EventStream};
 use tokio::sync::mpsc::{self, Receiver, Sender};
@@ -107,6 +107,15 @@ async fn handle_state_update(state: &mut AppState, msg: NetworkState) {
         NetworkState::UpdateNetworks(aps) => {
             info!("Updating networks: {:?}", aps);
             state.ui_data.networks = SelectableList::new(aps);
+            match &mut state.ui_data.view {
+                View::Connection(conn_state) => {
+                    ConnectionState::update_action_from_network(
+                        conn_state,
+                        &state.ui_data.networks,
+                    );
+                }
+                _ => {}
+            }
         }
         NetworkState::SetDaemon(daemon) => {
             state.ui_data.wifi_daemon = Some(daemon);
@@ -126,6 +135,9 @@ async fn handle_app_action(
         AppAction::Network(action) => {
             net_tx.send(action).await;
         }
+        AppAction::AddPrompt(prompt) => {
+            state.ui_data.prompt_stack.push(prompt);
+        }
         AppAction::Exit => {
             state.should_quit = true;
         }
@@ -135,5 +147,6 @@ async fn handle_app_action(
 
 pub enum AppAction {
     Network(NetworkAction),
+    AddPrompt(PromptState),
     Exit,
 }
