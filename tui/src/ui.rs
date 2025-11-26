@@ -1,10 +1,10 @@
 use std::sync::OnceLock;
 
 use ratatui::{
+    Frame,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, BorderType, Borders},
-    Frame,
 };
 use serde::Deserialize;
 use toml::Value;
@@ -113,13 +113,14 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &UiData) {
             frame.render_widget(menu, inner_area);
         }
         View::Connection(connection_state) => {
-            let con = Connection::new(
+            if let Some(con) = Connection::new(
                 &state.networks,
                 &connection_state.actions,
                 &connection_state.focused_list,
                 &state.prompt_stack,
-            );
-            frame.render_widget(con, inner_area);
+            ) {
+                frame.render_widget(con, inner_area);
+            }
         }
         _ => {
             return;
