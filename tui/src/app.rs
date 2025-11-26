@@ -84,6 +84,7 @@ impl App {
 
             tokio::select! {
                 Some(msg) = state_rx.recv() => {
+                    handle_state_update(&mut state, msg).await;
                     state.redraw = true;
                 }
                 Some(Ok(event)) = events.next() => {
@@ -104,6 +105,7 @@ impl App {
 async fn handle_state_update(state: &mut AppState, msg: NetworkState) {
     match msg {
         NetworkState::UpdateNetworks(aps) => {
+            info!("Updating networks: {:?}", aps);
             state.ui_data.networks = SelectableList::new(aps);
         }
         NetworkState::SetDaemon(daemon) => {
