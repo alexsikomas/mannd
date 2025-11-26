@@ -2,12 +2,13 @@ use com::{
     controller::DaemonType,
     wireless::common::{AccessPoint, Security},
 };
-use crossterm::event::{Event, KeyCode, KeyEvent};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use derive_builder::Builder;
 use tracing::info;
 
-use crate::app::UpdateAction;
 use com::state::network::NetworkAction;
+
+use crate::app::AppAction;
 
 /// Data used for UI, may be sent to threads through
 /// channels
@@ -31,6 +32,7 @@ pub struct UiData {
 }
 
 pub fn handle_event(event: Event, data: &mut UiData) -> Option<AppAction> {
+    // Priority: Prompt, Back (must not be in prompt), View
     if let Event::Key(key) = event {
         let back = data.view.handle_back(&key);
         if back.is_some() {
@@ -49,17 +51,16 @@ pub fn handle_event(event: Event, data: &mut UiData) -> Option<AppAction> {
                     }
                 }
             }
-            View::Connection(state) => {}
+            View::Connection(state) => {
+                if let Some(action) = state.on_key(key) {
+                    return Some(action);
+                }
+            }
             View::Vpn => {}
             View::Config => {}
         };
     }
     None
-}
-
-pub enum AppAction {
-    Network(NetworkAction),
-    Exit,
 }
 
 #[derive(Debug, PartialEq)]
@@ -189,13 +190,38 @@ pub enum FocusedConnection {
 pub struct ConnectionState {
     #[builder(default = "SelectableList::new(vec![ConnectionAction::Scan])")]
     pub actions: SelectableList<ConnectionAction>,
-    #[builder(default = "FocusedConnection::Actions")]
-    pub focused_list: FocusedConnection,
+    pub focused_list: SelectableList<FocusedConnection>,
 }
 
 impl ConnectionState {
     pub fn new(aps: Vec<AccessPoint>) -> Self {
-        ConnectionStateBuilder::default().build().unwrap()
+        ConnectionStateBuilder::default()
+            .focused_list(SelectableList::new(vec![
+                FocusedConnection::Actions,
+                FocusedConnection::Networks,
+            ]))
+            .build()
+            .unwrap()
+    }
+
+    fn on_key(&mut self, event: KeyEvent) -> Option<AppAction> {
+        // check if up or down
+        self.actions.on_key(&event);
+        match event.code {
+            // since only two left/right functionally eq. to down
+            KeyCode::Right | KeyCode::Left => {
+                self.focused_list
+                    .on_key(&KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+            }
+            KeyCode::Enter => match self.actions.get_selected_value() {
+                ConnectionAction::Scan => {
+                    return Some(AppAction::Network(NetworkAction::Scan));
+                }
+                _ => {}
+            },
+            _ => {}
+        };
+        None
     }
 }
 
@@ -211,8 +237,8 @@ impl ConnectionAction {
     }
 }
 
-//* Generic data structure used to keep
-//* track of menu items
+// Generic data structure used to keep
+// track of menu items
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SelectableList<T> {
     pub items: Vec<T>,

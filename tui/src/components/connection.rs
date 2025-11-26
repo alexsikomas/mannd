@@ -11,13 +11,13 @@ use tracing::info;
 use crate::{
     components::net_prompt::NetworkPrompt,
     state::{ConnectionAction, FocusedConnection, PromptState, SelectableList},
-    ui::{Theme, THEME},
+    ui::{THEME, Theme},
 };
 
 pub struct Connection<'a> {
     networks: &'a SelectableList<AccessPoint>,
     actions: &'a SelectableList<ConnectionAction>,
-    focused: &'a FocusedConnection,
+    focused: &'a SelectableList<FocusedConnection>,
     prompt_stack: &'a Vec<PromptState>,
 }
 
@@ -25,7 +25,7 @@ impl<'a> Connection<'a> {
     pub fn new(
         networks: &'a SelectableList<AccessPoint>,
         actions: &'a SelectableList<ConnectionAction>,
-        focused: &'a FocusedConnection,
+        focused: &'a SelectableList<FocusedConnection>,
         prompt_stack: &'a Vec<PromptState>,
     ) -> Self {
         Self {
@@ -48,7 +48,7 @@ impl<'a> Widget for Connection<'a> {
         };
 
         let mut select_heading_style = Style::new().fg(theme.accent.color());
-        if *self.focused == FocusedConnection::Networks {
+        if *self.focused.get_selected_value() == FocusedConnection::Networks {
             select_heading_style = Style::new().fg(theme.accent.color()).bold();
         }
 
@@ -59,13 +59,13 @@ impl<'a> Widget for Connection<'a> {
         let network_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .borders(Borders::ALL)
-            .style(
-                Style::new().fg(if *self.focused == FocusedConnection::Networks {
+            .style(Style::new().fg(
+                if *self.focused.get_selected_value() == FocusedConnection::Networks {
                     theme.primary.color()
                 } else {
                     theme.muted.color()
-                }),
-            )
+                },
+            ))
             .title_top(
                 Line::from(" Network Status ")
                     .centered()
@@ -92,7 +92,7 @@ impl<'a> Widget for Connection<'a> {
             // precedence: selected > connected > known > default
             let (mut fg_col, bg_col) = (theme.foreground.color(), theme.background.color());
             if self.networks.selected == i {
-                if *self.focused == FocusedConnection::Networks {
+                if *self.focused.get_selected_value() == FocusedConnection::Networks {
                     fg_col = theme.accent.color();
                 } else {
                     fg_col = theme.info.color();
@@ -163,7 +163,9 @@ impl<'a> Widget for Connection<'a> {
 
             let (mut fg_col, mut bg_col) = (theme.foreground.color(), theme.background.color());
 
-            if i == self.actions.selected && *self.focused == FocusedConnection::Actions {
+            if i == self.actions.selected
+                && *self.focused.get_selected_value() == FocusedConnection::Actions
+            {
                 fg_col = theme.background.color();
                 bg_col = theme.secondary.color();
             }
@@ -172,7 +174,9 @@ impl<'a> Widget for Connection<'a> {
                 .centered()
                 .style(Style::new().fg(fg_col).bold());
 
-            if i == self.actions.selected && *self.focused == FocusedConnection::Actions {
+            if i == self.actions.selected
+                && *self.focused.get_selected_value() == FocusedConnection::Actions
+            {
                 let highlight_area = Layout::horizontal([Constraint::Percentage(95)])
                     .flex(Flex::Center)
                     .split(selection_chunks[i])[0];
