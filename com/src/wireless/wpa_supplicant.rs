@@ -26,16 +26,21 @@ use futures::StreamExt;
 use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::info;
 use zbus::{
+    Connection, Proxy,
     names::MemberName,
     proxy::SignalStream,
     zvariant::{self, Dict, OwnedObjectPath, OwnedValue, Str, Value},
-    Connection, Proxy,
 };
 
 use crate::{
     error::ComError,
-    state::signals::SignalUpdate,
-    wireless::common::{get_prop_from_proxy, AccessPoint, AccessPointBuilder, Security},
+    state::{
+        network::{ApConnectInfo, EapInfo},
+        signals::SignalUpdate,
+    },
+    wireless::common::{
+        AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -43,9 +48,6 @@ pub struct WpaSupplicant {
     service: String,
     path: String,
     conn: Connection,
-    // this will cause collisions if multiple SSIDs
-    // clash because they will be assumed to be related
-    networks: HashMap<String, Vec<WpaBss>>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,17 +66,15 @@ impl WpaSupplicant {
     pub fn new(conn: Connection) -> Result<Self, ComError> {
         let service = String::from("fi.w1.wpa_supplicant1");
         let path = String::from("/fi/w1/wpa_supplicant1/Interfaces/0");
-        let networks: HashMap<String, Vec<WpaBss>> = HashMap::new();
 
         Ok(Self {
             conn,
             service,
             path,
-            networks,
         })
     }
 
-    pub async fn connect_network(&self, ssid: String, psk: String) -> Result<(), ComError> {
+    pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ComError> {
         let psk_len = psk.len();
         if (psk_len < 8 || psk_len > 63) && psk_len != 0 {
             return Err(ComError::PasswordLength);
@@ -113,6 +113,10 @@ impl WpaSupplicant {
             }
             _ => Ok(()),
         }
+    }
+
+    pub async fn connect_network_eap(&self, ssid: String, eap: EapInfo) -> Result<(), ComError> {
+        Ok(())
     }
 
     pub async fn disconnect(&self) -> Result<(), ComError> {
@@ -168,8 +172,6 @@ impl WpaSupplicant {
         let mut aps: Vec<AccessPoint> = vec![];
         let mut seen: HashSet<String> = HashSet::new();
 
-        self.networks.clear();
-
         for network in networks {
             // ssid may appear multiple times if router broadcasts
             // ap at different freqs
@@ -179,15 +181,10 @@ impl WpaSupplicant {
                 let ap = AccessPointBuilder::default()
                     .ssid(bss.ssid.clone())
                     .security(bss.security.clone().unwrap())
-                    .connected(false)
-                    .known(false)
-                    .nearby(true)
+                    .flags(NetworkFlags::NEARBY)
                     .build()?;
 
                 aps.push(ap);
-                self.networks.insert(bss.ssid.clone(), vec![bss]);
-            } else {
-                self.networks.entry(bss.ssid.clone()).or_default().push(bss);
             }
         }
 

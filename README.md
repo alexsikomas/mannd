@@ -27,6 +27,7 @@ Before you can use `mannd`, you must have the following installed on your system
 - Rust
 - For Wi-Fi: `wpa_supplicant` or `iwd`
 - For VPN: `wireguard-tools`
+- Font Awesome Free (Optional)
 
 `mannd` expects that a `.network` rule already exists for allowing you to connect to the Internet via Wi-Fi.
 

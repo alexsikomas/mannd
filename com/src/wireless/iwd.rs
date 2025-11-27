@@ -1,21 +1,24 @@
 use std::sync::Arc;
 
 use serde::Deserialize;
-use tokio::sync::{mpsc::Sender, RwLock};
+use tokio::sync::{RwLock, mpsc::Sender};
 use tracing::info;
 use zbus::{
+    Connection, Proxy,
     fdo::ObjectManagerProxy,
     names::OwnedUniqueName,
     zvariant::{self, ObjectPath, OwnedObjectPath, Type, Value},
-    Connection, Proxy,
 };
 
 use crate::{
     error::ComError,
-    state::signals::SignalUpdate,
+    state::{
+        network::{ApConnectInfo, Credentials, EapInfo},
+        signals::SignalUpdate,
+    },
     wireless::{
         agent::{AgentState, IwdAgent, IwdAgentMsg},
-        common::{get_prop_from_proxy, AccessPoint, AccessPointBuilder, Security},
+        common::{AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy},
     },
 };
 
@@ -61,27 +64,21 @@ impl Iwd {
     ///
     /// Since iwd does not allow connecting via BSSID the connection band is determined by signal
     /// strength internally by iwd, this can be tweaked in the iwd configuration file
-    pub async fn connect_network(
-        &self,
-        ssid: String,
-        psk: String,
-        security: Security,
-    ) -> Result<(), ComError> {
+    pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ComError> {
         match self.agent_state.try_write() {
             Ok(mut writer) => {
-                writer.password = Some(psk);
+                writer.password = Some(psk.clone());
             }
             Err(e) => {
                 tracing::error!("Error trying to get lock on writer. {e}");
             }
         }
 
-        info!(
-            "Connecting to: {}/{}_{}",
-            self.path.clone(),
-            Self::ssid_to_hex(ssid.clone()),
-            security
-        );
+        let security = if psk.is_empty() {
+            Security::Open
+        } else {
+            Security::Psk
+        };
 
         let proxy = Proxy::new(
             &self.conn,
@@ -108,6 +105,10 @@ impl Iwd {
                 Err(ComError::OperationFailed(format!("{}", e)))
             }
         }
+    }
+
+    pub async fn connect_network_eap(&self, ssid: String, eap: EapInfo) -> Result<(), ComError> {
+        Ok(())
     }
 
     /// Disconnects from the current WiFi network, does not remove the network
@@ -202,13 +203,20 @@ impl Iwd {
         let proxy = self.get_interface_proxy("Station").await?;
         if !get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
             proxy.call_noreply("Scan", &()).await?;
+            let proxy = Proxy::new(
+                &self.conn,
+                self.service.clone(),
+                self.path.clone(),
+                "org.freedesktop.DBus.Properties",
+            )
+            .await?;
             let signal = proxy.receive_signal("PropertiesChanged").await?;
             signal_tx.send(SignalUpdate::Add(signal)).await;
         }
         Ok(())
     }
 
-    pub async fn get_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+    pub async fn nearby_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
         let proxy = self.get_interface_proxy("Station").await?;
         let aps = proxy.call_method("GetOrderedNetworks", &()).await?.body();
         let aps: Vec<(OwnedObjectPath, i16)> = aps.deserialize()?;
@@ -240,13 +248,11 @@ impl Iwd {
 
                 let mut ap_builder = AccessPointBuilder::default()
                     .ssid(ssid)
-                    .known(true)
-                    .connected(false)
-                    .nearby(false);
+                    .flags(NetworkFlags::KNOWN);
 
                 if let Some(net_security) = known_network_props.get("Type") {
                     let security_str = net_security.downcast_ref::<&str>().unwrap_or("psk");
-                    let security = Security::from_str(security_str).unwrap();
+                    let security = Security::from_str(security_str);
                     ap_builder = ap_builder.security(security);
                 }
 
@@ -312,6 +318,7 @@ impl Iwd {
         )
         .await?)
     }
+
     async fn get_ap_info(&self, network: String) -> Result<AccessPoint, ComError> {
         let proxy = zbus::Proxy::new(
             &self.conn,
@@ -321,29 +328,38 @@ impl Iwd {
         )
         .await?;
 
+        info!("Getting ap info");
         let ssid = get_prop_from_proxy::<String>(&proxy, "Name").await?;
+        info!("ssid: {}", ssid);
         let security: Security;
         let security_str = get_prop_from_proxy::<String>(&proxy, "Type").await?;
-        let security = Security::from_str(security_str.as_str()).unwrap();
+        info!("sec: {:?}", security_str);
+        let security = Security::from_str(security_str.as_str());
+        let mut flags = NetworkFlags::NEARBY;
 
         let mut known = false;
 
         // let known_network: Option<OwnedObjectPath>;
         match get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork").await {
             Ok(_) => {
-                known = true;
+                flags = flags | NetworkFlags::KNOWN;
             }
-            _ => {}
-        }
+            // not actually an error the field is just optional
+            Err(_) => {}
+        };
 
-        let connected = get_prop_from_proxy::<bool>(&proxy, "Connected").await?;
+        get_prop_from_proxy::<bool>(&proxy, "Connected")
+            .await
+            .inspect(|b| {
+                if *b {
+                    flags = flags | NetworkFlags::CONNECTED;
+                }
+            })?;
 
         let ap = AccessPointBuilder::default()
             .ssid(ssid)
             .security(security)
-            .known(known)
-            .connected(connected)
-            .nearby(true)
+            .flags(flags)
             .build()?;
 
         Ok(ap)

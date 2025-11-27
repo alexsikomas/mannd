@@ -7,6 +7,5 @@ use crate::{error::ComError, wireless::common::Security};
 
 pub mod agent;
 pub mod common;
-pub mod defs;
 pub mod iwd;
 pub mod wpa_supplicant;

@@ -1,10 +1,10 @@
 use std::sync::OnceLock;
 
 use ratatui::{
+    Frame,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, BorderType, Borders},
-    Frame,
 };
 use serde::Deserialize;
 use toml::Value;
@@ -12,8 +12,8 @@ use tracing::info;
 
 use crate::{
     app::AppState,
-    components::{connection::Connection, main_menu::MainMenu},
-    state::State,
+    components::{connection::Connection, main_menu::MainMenu, password_prompt::PasswordPrompt},
+    state::{AppContext, PromptState, UiState, View},
 };
 
 /// Theme global state, used to bypass needing to
@@ -60,7 +60,7 @@ impl Theme {
 
 /// Renders title, border and conditionally renders main content depending on
 /// state
-pub fn render<'a>(frame: &mut Frame<'a>, state: &AppState) {
+pub fn render<'a>(frame: &mut Frame<'a>, state: &UiState, ctx: &AppContext) {
     let outer_area = frame.area();
     let theme: &Theme;
     match THEME.get() {
@@ -107,19 +107,30 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &AppState) {
 
     // we give the widget only the necessary selections to
     // render
-    match &state.view_state {
-        State::MainMenu(list) => {
+    match &state.current_view {
+        View::MainMenu(list) => {
             let menu = MainMenu::new(&list);
             frame.render_widget(menu, inner_area);
         }
-        State::Connection(connection_state) => {
-            let con = Connection::new(
-                &connection_state.networks,
-                &connection_state.actions,
-                &connection_state.focused_list,
-                &state.prompt_view,
-            );
-            frame.render_widget(con, inner_area);
+        View::Connection(connection_state) => {
+            if let Some(con) = Connection::new(ctx.networks, &connection_state) {
+                frame.render_widget(con, inner_area);
+            }
+
+            for prompt in &state.prompt_stack {
+                match prompt {
+                    PromptState::PskConnect(psk_prompt) => {
+                        let Some(selected) = ctx.networks.get(connection_state.network_cursor)
+                        else {
+                            return;
+                        };
+
+                        if let Some(prompt_instance) = PasswordPrompt::new(selected, &psk_prompt) {
+                            frame.render_widget(prompt_instance, inner_area);
+                        }
+                    }
+                }
+            }
         }
         _ => {
             return;
