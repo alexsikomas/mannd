@@ -12,8 +12,8 @@ use tracing::info;
 
 use crate::{
     app::AppState,
-    components::{connection::Connection, main_menu::MainMenu},
-    state::{UiData, View},
+    components::{connection::Connection, main_menu::MainMenu, password_prompt::PasswordPrompt},
+    state::{PromptState, UiData, View},
 };
 
 /// Theme global state, used to bypass needing to
@@ -124,6 +124,18 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &UiData) {
         }
         _ => {
             return;
+        }
+    }
+
+    for prompt in &state.prompt_stack {
+        match prompt {
+            PromptState::PskConnect(psk_prompt) => {
+                if let Some(prompt_instance) =
+                    PasswordPrompt::new(state.networks.get_selected_value(), psk_prompt)
+                {
+                    frame.render_widget(prompt_instance, inner_area);
+                }
+            }
         }
     }
 }
