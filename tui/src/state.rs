@@ -1,4 +1,12 @@
-use std::{marker::PhantomData, usize};
+//!
+//! State makes heavy use of on_key() functions,
+//! these functions process a KeyEvent and some
+//! may return a boolean representing if they
+//! should exit the handle loop early to stop
+//! unexpected beahaviour
+//!
+
+use std::{fmt::Debug, marker::PhantomData, usize};
 
 use com::{
     controller::DaemonType,
@@ -18,9 +26,7 @@ use crate::app::AppAction;
 #[derive(Builder, Debug)]
 #[builder(pattern = "owned")]
 pub struct UiData {
-    // Only ConnectionState needs the selected part but
-    // it might cause less headache being able to access
-    // here
+    // Allows saving network list when leaving menu
     #[builder(default = "SelectableList::new(vec![])")]
     pub networks: SelectableList<AccessPoint>,
 
@@ -37,9 +43,22 @@ pub struct UiData {
 pub fn handle_event(event: Event, data: &mut UiData) -> Option<AppAction> {
     // Priority: Prompt, Back (must not be in prompt), View
     if let Event::Key(key) = event {
-        let back = data.view.handle_back(&key);
-        if back.is_some() {
-            return back;
+        if key.code.is_esc() {
+            if !data.prompt_stack.is_empty() {
+                data.prompt_stack.pop();
+                return None;
+            }
+
+            let back = data.view.handle_back(&key);
+            if back.is_some() {
+                return back;
+            }
+        }
+
+        if let Some(top) = data.prompt_stack.last_mut() {
+            if top.on_key(&key) {
+                return None;
+            }
         }
 
         match &mut data.view {
@@ -56,7 +75,7 @@ pub fn handle_event(event: Event, data: &mut UiData) -> Option<AppAction> {
             }
             View::Connection(state) => {
                 // mut ref to networks so we can move up/down
-                if let Some(action) = state.on_key(key, &mut data.networks) {
+                if let Some(action) = state.on_key(&key, &mut data.networks) {
                     return Some(action);
                 }
             }
@@ -96,10 +115,6 @@ impl MainMenuSelection {
     }
 }
 
-// View
-//
-// Controls what should happen on keypress and
-// what the viewer should see
 #[derive(Debug)]
 pub enum View {
     MainMenu(SelectableList<MainMenuSelection>),
@@ -199,7 +214,7 @@ impl ConnectionState {
 
     fn on_key(
         &mut self,
-        key: KeyEvent,
+        key: &KeyEvent,
         networks: &mut SelectableList<AccessPoint>,
     ) -> Option<AppAction> {
         // check if up or down
@@ -270,6 +285,18 @@ pub enum PromptState {
     PskConnect(PskConnectionPrompt),
 }
 
+impl PromptState {
+    fn on_key(&mut self, key: &KeyEvent) -> bool {
+        match self {
+            PromptState::PskConnect(prompt) => {
+                // movement is more granular here
+                prompt.on_key(key);
+                true
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum PskPromptSelect {
     Password,
@@ -278,18 +305,55 @@ pub enum PskPromptSelect {
     Back,
 }
 
+impl PskPromptSelect {
+    fn as_vec() -> Vec<Self> {
+        vec![Self::Password, Self::Show, Self::Connect, Self::Back]
+    }
+}
+
 #[derive(Builder, Debug)]
 #[builder(pattern = "owned")]
 pub struct PskConnectionPrompt {
     pub ssid: String,
     #[builder(default = "String::new()")]
     pub password: String,
+    #[builder(default = "SelectableList::new(PskPromptSelect::as_vec())")]
     pub select: SelectableList<PskPromptSelect>,
 }
 
 impl PskConnectionPrompt {
     fn new(ssid: String) -> Self {
         PskConnectionPromptBuilder::default().build().unwrap()
+    }
+
+    fn on_key(&mut self, key: &KeyEvent) {
+        let selected = self.select.get_selected_value();
+        match key.code {
+            KeyCode::Up | KeyCode::Down => match selected {
+                PskPromptSelect::Password => {
+                    self.select.set(PskPromptSelect::Connect);
+                }
+                PskPromptSelect::Connect | PskPromptSelect::Back => {
+                    self.select.set(PskPromptSelect::Password);
+                }
+                _ => {}
+            },
+            KeyCode::Left | KeyCode::Right => match selected {
+                PskPromptSelect::Password => {
+                    self.select.set(PskPromptSelect::Show);
+                }
+                PskPromptSelect::Show => {
+                    self.select.set(PskPromptSelect::Password);
+                }
+                PskPromptSelect::Connect => {
+                    self.select.set(PskPromptSelect::Back);
+                }
+                PskPromptSelect::Back => {
+                    self.select.set(PskPromptSelect::Connect);
+                }
+            },
+            _ => {}
+        };
     }
 }
 
@@ -343,6 +407,22 @@ impl<T> SelectableList<T> {
         }
         if key.code.is_up() {
             self.prev();
+        }
+    }
+}
+
+impl<T> SelectableList<T>
+where
+    T: PartialEq,
+{
+    // sets val as the currently selected
+    // item
+    fn set(&mut self, val: T) {
+        match self.items.iter().position(|v| *v == val) {
+            Some(pos) => {
+                self.selected = pos;
+            }
+            None => {}
         }
     }
 }

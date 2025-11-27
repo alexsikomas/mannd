@@ -82,7 +82,7 @@ impl<'a> Widget for PasswordPrompt<'a> {
         Paragraph::new(ssid_line).render(ssid_area, buf);
 
         // BUTTON STYLES
-        // order: password, connect, show, back
+        // for order refer to PskPromptSelect::to_vec()
         let mut styles: Vec<Style> = vec![];
         for i in 0..self.info.select.items.len() {
             let style = if self.info.select.selected == i {
@@ -110,12 +110,12 @@ impl<'a> Widget for PasswordPrompt<'a> {
         let connect_block = Block::new()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .style(styles[1]);
+            .style(styles[2]);
 
         let back_block = Block::new()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .style(styles[2]);
+            .style(styles[3]);
 
         let button_layouts = Layout::vertical([Constraint::Min(0), Constraint::Length(3)])
             .flex(Flex::Center)
