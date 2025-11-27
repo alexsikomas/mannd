@@ -1,16 +1,7 @@
-//!
-//! State makes heavy use of on_key() functions,
-//! these functions process a KeyEvent and some
-//! may return a boolean representing if they
-//! should exit the handle loop early to stop
-//! unexpected beahaviour
-//!
-
-use std::{fmt::Debug, marker::PhantomData, usize};
+use std::{fmt::Debug, usize};
 
 use com::{
     controller::DaemonType,
-    state::network::{ApConnectInfo, ApConnectInfoBuilder},
     wireless::common::{AccessPoint, NetworkFlags, Security},
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -21,96 +12,93 @@ use com::state::network::NetworkAction;
 
 use crate::app::AppAction;
 
+pub enum StateResult {
+    Consumed,
+    Command(AppCommand),
+    Ignored,
+}
+
+pub enum AppCommand {
+    Exit,
+    ChangeView(View),
+    Back,
+    NetworkAction(NetworkAction),
+    Prompt(PromptState),
+}
+
+pub struct AppContext<'a> {
+    pub networks: &'a [AccessPoint],
+    pub wifi_daemon: &'a Option<DaemonType>,
+}
+
 /// Data used for UI, may be sent to threads through
 /// channels
-#[derive(Builder, Debug)]
-#[builder(pattern = "owned")]
-pub struct UiData {
-    // Allows saving network list when leaving menu
-    #[builder(default = "SelectableList::new(vec![])")]
-    pub networks: SelectableList<AccessPoint>,
-
-    #[builder(default = "View::main_menu()")]
-    pub view: View,
-
-    // for prompts inside of a view state
-    #[builder(default = "vec![]")]
+pub struct UiState {
+    pub current_view: View,
     pub prompt_stack: Vec<PromptState>,
-    #[builder(setter(into, strip_option), default)]
-    pub wifi_daemon: Option<DaemonType>,
 }
 
-pub fn handle_event(event: Event, data: &mut UiData) -> Option<AppAction> {
-    // Priority: Prompt, Back (must not be in prompt), View
-    if let Event::Key(key) = event {
-        if key.code.is_esc() {
-            if !data.prompt_stack.is_empty() {
-                data.prompt_stack.pop();
-                return None;
-            }
-
-            let back = data.view.handle_back(&key);
-            if back.is_some() {
-                return back;
-            }
+impl<'a> AppContext<'a> {
+    pub fn create(networks: &'a [AccessPoint], wifi_daemon: &'a Option<DaemonType>) -> Self {
+        Self {
+            networks,
+            wifi_daemon,
         }
-
-        if let Some(top) = data.prompt_stack.last_mut() {
-            if top.on_key(&key) {
-                return None;
-            }
-        }
-
-        match &mut data.view {
-            View::MainMenu(list) => {
-                list.on_key(&key);
-                if key.code.is_enter() {
-                    let selected = list.get_selected_value();
-                    if selected == &MainMenuSelection::Exit {
-                        return Some(AppAction::Exit);
-                    } else {
-                        data.view = selected.to_view();
-                    }
-                }
-            }
-            View::Connection(state) => {
-                // mut ref to networks so we can move up/down
-                if let Some(action) = state.on_key(&key, &mut data.networks) {
-                    return Some(action);
-                }
-            }
-            View::Vpn => {}
-            View::Config => {}
-        };
     }
-    None
 }
 
-#[derive(Debug, PartialEq)]
-pub enum MainMenuSelection {
-    Connection,
-    Vpn,
-    Config,
-    Exit,
+trait Component {
+    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult;
 }
 
-impl MainMenuSelection {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Connection => "Connection",
-            Self::Vpn => "VPN",
-            Self::Config => "Config",
-            Self::Exit => "Exit",
+impl UiState {
+    pub fn new() -> Self {
+        UiState {
+            current_view: View::main_menu(),
+            prompt_stack: vec![],
         }
     }
 
-    fn to_view(&self) -> View {
-        match self {
-            MainMenuSelection::Connection => View::Connection(ConnectionState::new(vec![])),
-            MainMenuSelection::Vpn => View::Vpn,
-            MainMenuSelection::Config => View::Config,
-            // okay because exit code checked first so this shouldn't be run
-            MainMenuSelection::Exit => View::MainMenu(SelectableList::new(vec![])),
+    pub fn handle_event(&mut self, event: Event, ctx: &AppContext) -> Option<AppAction> {
+        if let Event::Key(key) = event {
+            if key.code == KeyCode::Esc {
+                if !self.prompt_stack.is_empty() {
+                    self.prompt_stack.pop();
+                    return None;
+                }
+            }
+
+            if let Some(prompt) = self.prompt_stack.last_mut() {
+                match prompt.on_key(&key, ctx) {
+                    StateResult::Command(cmd) => return self.process_command(cmd),
+                    _ => return None,
+                }
+            }
+
+            let result = self.current_view.on_key(&key, ctx);
+            if let StateResult::Command(cmd) = result {
+                return self.process_command(cmd);
+            }
+        }
+        None
+    }
+
+    fn process_command(&mut self, cmd: AppCommand) -> Option<AppAction> {
+        match cmd {
+            AppCommand::Exit => Some(AppAction::Exit),
+            AppCommand::ChangeView(view) => {
+                self.current_view = view;
+                None
+            }
+            AppCommand::Prompt(prompt) => {
+                self.prompt_stack.push(prompt);
+                None
+            }
+            AppCommand::Back => {
+                self.current_view = View::main_menu();
+                None
+            }
+            AppCommand::NetworkAction(action) => Some(AppAction::Network(action)),
         }
     }
 }
@@ -132,24 +120,35 @@ impl View {
             MainMenuSelection::Exit,
         ]))
     }
+}
 
-    pub fn connection() -> Self {
-        View::Connection(ConnectionState::new(vec![]))
-    }
-
-    fn handle_back(&mut self, key: &KeyEvent) -> Option<AppAction> {
-        if key.code.is_esc() {
-            match &self {
-                View::MainMenu(_) => {
-                    return Some(AppAction::Exit);
-                }
-                _ => {
-                    let mut new = Self::main_menu();
-                    *self = new;
-                }
+impl Component for View {
+    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
+        if key.code == KeyCode::Esc {
+            return match self {
+                View::MainMenu(_) => StateResult::Command(AppCommand::Exit),
+                _ => StateResult::Command(AppCommand::Back),
             };
         }
-        None
+
+        match self {
+            View::MainMenu(list) => {
+                if list.on_key(key, ctx).is_consumed() {
+                    return StateResult::Consumed;
+                }
+
+                if key.code == KeyCode::Enter {
+                    if let Some(selection) = list.selected() {
+                        return selection.execute();
+                    }
+                    return StateResult::Consumed;
+                }
+            }
+            View::Connection(state) => return state.on_key(key, ctx),
+            View::Vpn => {}
+            View::Config => {}
+        };
+        StateResult::Ignored
     }
 }
 
@@ -157,6 +156,14 @@ impl View {
 //
 // Possible actions the user can take in the connection
 // menu and how the data should be stored
+#[derive(Debug)]
+pub struct ConnectionState {
+    pub focused_area: ConnectionFocus,
+    pub actions: SelectableList<ConnectionAction>,
+    // selected network
+    pub network_cursor: usize,
+}
+
 #[derive(Clone, Debug)]
 pub enum ConnectionAction {
     Scan,
@@ -167,100 +174,105 @@ pub enum ConnectionAction {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum FocusedConnection {
+pub enum ConnectionFocus {
     Networks,
     Actions,
 }
 
-#[derive(Builder, Debug)]
-#[builder(pattern = "owned")]
-pub struct ConnectionState {
-    #[builder(default = "SelectableList::new(vec![ConnectionAction::Scan])")]
-    pub actions: SelectableList<ConnectionAction>,
-    pub focused_list: SelectableList<FocusedConnection>,
-}
-
 impl ConnectionState {
-    pub fn new(aps: Vec<AccessPoint>) -> Self {
-        ConnectionStateBuilder::default()
-            .focused_list(SelectableList::new(vec![
-                FocusedConnection::Actions,
-                FocusedConnection::Networks,
-            ]))
-            .build()
-            .unwrap()
+    pub fn new() -> Self {
+        Self {
+            focused_area: ConnectionFocus::Actions,
+            actions: SelectableList::new(vec![ConnectionAction::Scan]),
+            network_cursor: 0,
+        }
     }
 
-    pub fn update_action_from_network(&mut self, networks: &SelectableList<AccessPoint>) {
-        if !networks.items.is_empty() {
-            let selected_flags = networks.get_selected_value().flags;
-            self.actions = SelectableList::new(vec![ConnectionAction::Scan]);
+    pub fn refresh_available_actions(&mut self, networks: &[AccessPoint]) {
+        self.actions = SelectableList::new(vec![ConnectionAction::Scan]);
 
-            if selected_flags.contains(NetworkFlags::NEARBY)
-                && !selected_flags.contains(NetworkFlags::CONNECTED)
-            {
+        if let Some(ap) = networks.get(self.network_cursor) {
+            let flags = ap.flags;
+            if flags.contains(NetworkFlags::NEARBY) && !flags.contains(NetworkFlags::CONNECTED) {
                 self.actions.items.push(ConnectionAction::Connect);
             }
 
-            if selected_flags.contains(NetworkFlags::CONNECTED) {
+            if flags.contains(NetworkFlags::CONNECTED) {
                 self.actions.items.push(ConnectionAction::Disconnect);
             }
 
-            if selected_flags.contains(NetworkFlags::KNOWN) {
+            if flags.contains(NetworkFlags::KNOWN) {
                 self.actions.items.push(ConnectionAction::Forget);
             }
         }
     }
+}
 
-    fn on_key(
-        &mut self,
-        key: &KeyEvent,
-        networks: &mut SelectableList<AccessPoint>,
-    ) -> Option<AppAction> {
+impl Component for ConnectionState {
+    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
         // check if up or down
-        match self.focused_list.get_selected_value() {
-            FocusedConnection::Actions => {
-                self.actions.on_key(&key);
-                match key.code {
-                    KeyCode::Enter => match self.actions.get_selected_value() {
-                        ConnectionAction::Scan => {
-                            return Some(AppAction::Network(NetworkAction::Scan));
-                        }
-                        ConnectionAction::Connect => {
-                            // start connect prompt
-                            match networks.get_selected_value().security {
-                                Security::Ieee8021x => {}
-                                Security::Psk => {
-                                    return Some(AppAction::AddPrompt(PromptState::PskConnect(
-                                        PskConnectionPromptBuilder::default()
-                                            .ssid(networks.get_selected_value().ssid.clone())
-                                            .build()
-                                            .unwrap(),
-                                    )));
-                                }
-                                _ => {}
-                            }
-                        }
-                        _ => {}
-                    },
-                    _ => {}
-                }
-            }
-            FocusedConnection::Networks => {
-                networks.on_key(&key);
-                Self::update_action_from_network(self, networks);
-            }
-        }
-
         match key.code {
-            // since only two left/right functionally eq. to down
             KeyCode::Right | KeyCode::Left => {
-                self.focused_list
-                    .on_key(&KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+                self.focused_area = match self.focused_area {
+                    ConnectionFocus::Actions => ConnectionFocus::Networks,
+                    ConnectionFocus::Networks => ConnectionFocus::Actions,
+                };
+                return StateResult::Consumed;
             }
             _ => {}
         };
-        None
+
+        match self.focused_area {
+            ConnectionFocus::Actions => {
+                self.actions.on_key(key, ctx);
+                if key.code == KeyCode::Enter {
+                    return match self.actions.selected() {
+                        Some(ConnectionAction::Scan) => {
+                            StateResult::Command(AppCommand::NetworkAction(NetworkAction::Scan))
+                        }
+                        Some(ConnectionAction::Connect) => {
+                            if let Some(network) = ctx.networks.get(self.network_cursor) {
+                                match network.security {
+                                    Security::Psk => {
+                                        let prompt = PskConnectionPrompt::new(network.ssid.clone());
+                                        StateResult::Command(AppCommand::Prompt(
+                                            PromptState::PskConnect(prompt),
+                                        ))
+                                    }
+                                    _ => StateResult::Consumed,
+                                }
+                            } else {
+                                StateResult::Consumed
+                            }
+                        }
+                        Some(ConnectionAction::Disconnect) => StateResult::Command(
+                            AppCommand::NetworkAction(NetworkAction::Disconnect),
+                        ),
+                        _ => StateResult::Consumed,
+                    };
+                }
+            }
+            ConnectionFocus::Networks => match key.code {
+                KeyCode::Down => {
+                    if !ctx.networks.is_empty() {
+                        self.network_cursor = (self.network_cursor + 1) % ctx.networks.len();
+                        self.refresh_available_actions(ctx.networks);
+                    }
+                }
+                KeyCode::Up => {
+                    if !ctx.networks.is_empty() {
+                        if self.network_cursor == 0 {
+                            self.network_cursor = ctx.networks.len() - 1;
+                        } else {
+                            self.network_cursor -= 1;
+                        }
+                        self.refresh_available_actions(ctx.networks);
+                    }
+                }
+                _ => {}
+            },
+        }
+        StateResult::Consumed
     }
 }
 
@@ -285,15 +297,15 @@ pub enum PromptState {
     PskConnect(PskConnectionPrompt),
 }
 
-impl PromptState {
-    fn on_key(&mut self, key: &KeyEvent) -> bool {
+impl Component for PromptState {
+    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
         match self {
             PromptState::PskConnect(prompt) => {
                 // movement is more granular here
-                prompt.on_key(key);
-                true
+                return prompt.on_key(key, ctx);
             }
-        }
+        };
+        StateResult::Ignored
     }
 }
 
@@ -311,23 +323,29 @@ impl PskPromptSelect {
     }
 }
 
-#[derive(Builder, Debug)]
-#[builder(pattern = "owned")]
+#[derive(Debug)]
 pub struct PskConnectionPrompt {
     pub ssid: String,
-    #[builder(default = "String::new()")]
     pub password: String,
-    #[builder(default = "SelectableList::new(PskPromptSelect::as_vec())")]
     pub select: SelectableList<PskPromptSelect>,
 }
 
 impl PskConnectionPrompt {
     fn new(ssid: String) -> Self {
-        PskConnectionPromptBuilder::default().build().unwrap()
+        Self {
+            ssid,
+            password: String::new(),
+            select: SelectableList::new(PskPromptSelect::as_vec()),
+        }
     }
+}
 
-    fn on_key(&mut self, key: &KeyEvent) {
-        let selected = self.select.get_selected_value();
+impl Component for PskConnectionPrompt {
+    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
+        let Some(selected) = self.select.selected() else {
+            return StateResult::Ignored;
+        };
+
         match key.code {
             KeyCode::Up | KeyCode::Down => match selected {
                 PskPromptSelect::Password => {
@@ -352,8 +370,27 @@ impl PskConnectionPrompt {
                     self.select.set(PskPromptSelect::Connect);
                 }
             },
+            KeyCode::Backspace => match selected {
+                PskPromptSelect::Password => {
+                    self.password.pop();
+                }
+                _ => {}
+            },
+            KeyCode::Char(c) => match selected {
+                PskPromptSelect::Password => {
+                    self.password.push(c);
+                }
+                _ => {}
+            },
             _ => {}
         };
+        StateResult::Consumed
+    }
+}
+
+impl StateResult {
+    pub fn is_consumed(&self) -> bool {
+        matches!(self, StateResult::Consumed)
     }
 }
 
@@ -362,67 +399,89 @@ impl PskConnectionPrompt {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SelectableList<T> {
     pub items: Vec<T>,
-    pub selected: usize,
+    pub selected_index: usize,
 }
 
 impl<T> SelectableList<T> {
     pub fn new(v: Vec<T>) -> Self {
         Self {
             items: v,
-            selected: 0,
+            selected_index: 0,
         }
+    }
+    pub fn selected(&self) -> Option<&T> {
+        self.items.get(self.selected_index)
     }
 
     fn next(&mut self) {
-        if self.items.len() == 0 {
+        if self.items.is_empty() {
             return;
         }
-
-        if self.selected == self.items.len() - 1 {
-            self.selected = 0;
-        } else {
-            self.selected += 1;
-        }
+        self.selected_index = { self.selected_index + 1 } % self.items.len();
     }
 
     fn prev(&mut self) {
-        if self.items.len() == 0 {
+        if self.items.is_empty() {
             return;
         }
 
-        if self.selected == 0 {
-            self.selected = self.items.len() - 1;
+        if self.selected_index == 0 {
+            self.selected_index = self.items.len() - 1;
         } else {
-            self.selected -= 1;
-        }
-    }
-
-    pub fn get_selected_value(&self) -> &T {
-        &self.items[self.selected]
-    }
-
-    fn on_key(&mut self, key: &KeyEvent) {
-        if key.code.is_down() {
-            self.next();
-        }
-        if key.code.is_up() {
-            self.prev();
+            self.selected_index -= 1;
         }
     }
 }
 
-impl<T> SelectableList<T>
-where
-    T: PartialEq,
-{
-    // sets val as the currently selected
-    // item
-    fn set(&mut self, val: T) {
-        match self.items.iter().position(|v| *v == val) {
-            Some(pos) => {
-                self.selected = pos;
+impl<T> Component for SelectableList<T> {
+    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
+        match key.code {
+            KeyCode::Up => {
+                self.prev();
+                StateResult::Consumed
             }
-            None => {}
+            KeyCode::Down => {
+                self.next();
+                StateResult::Consumed
+            }
+            _ => StateResult::Ignored,
+        }
+    }
+}
+
+impl<T: PartialEq> SelectableList<T> {
+    pub fn set(&mut self, item: T) {
+        if let Some(index) = self.items.iter().position(|x| *x == item) {
+            self.selected_index = index;
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum MainMenuSelection {
+    Connection,
+    Vpn,
+    Config,
+    Exit,
+}
+
+impl MainMenuSelection {
+    fn execute(&self) -> StateResult {
+        match self {
+            Self::Connection => StateResult::Command(AppCommand::ChangeView(View::Connection(
+                ConnectionState::new(),
+            ))),
+            Self::Config => StateResult::Command(AppCommand::ChangeView(View::Config)),
+            Self::Vpn => StateResult::Command(AppCommand::ChangeView(View::Vpn)),
+            Self::Exit => StateResult::Command(AppCommand::Exit),
+        }
+    }
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Connection => "Connection",
+            Self::Vpn => "VPN",
+            Self::Config => "Config",
+            Self::Exit => "Exit",
         }
     }
 }

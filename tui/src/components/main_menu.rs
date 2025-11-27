@@ -78,7 +78,7 @@ impl<'a> Widget for MainMenu<'a> {
                 break;
             }
 
-            let (fg_col, bg_col) = if i == self.list.selected {
+            let (fg_col, bg_col) = if i == self.list.selected_index {
                 (theme.background.color(), theme.secondary.color())
             } else {
                 (theme.foreground.color(), theme.background.color())
@@ -88,7 +88,7 @@ impl<'a> Widget for MainMenu<'a> {
                 .centered()
                 .style(Style::new().fg(fg_col).bold());
 
-            if i == self.list.selected {
+            if i == self.list.selected_index {
                 let highlight_area = Layout::horizontal([Constraint::Percentage(95)])
                     .flex(Flex::Center)
                     .split(inner_chunks[i])[0];
