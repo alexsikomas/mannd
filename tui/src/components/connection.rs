@@ -10,25 +10,18 @@ use tracing::info;
 
 use crate::{
     components::password_prompt::PasswordPrompt,
-    state::{ConnectionAction, FocusedConnection, PromptState, SelectableList},
+    state::{ConnectionAction, ConnectionFocus, ConnectionState, PromptState, SelectableList},
     ui::{THEME, Theme},
 };
 
 pub struct Connection<'a> {
-    networks: &'a SelectableList<AccessPoint>,
-    actions: &'a SelectableList<ConnectionAction>,
-    focused: &'a SelectableList<FocusedConnection>,
-    prompt_stack: &'a Vec<PromptState>,
+    networks: &'a [AccessPoint],
+    conn_state: &'a ConnectionState,
     theme: &'a Theme,
 }
 
 impl<'a> Connection<'a> {
-    pub fn new(
-        networks: &'a SelectableList<AccessPoint>,
-        actions: &'a SelectableList<ConnectionAction>,
-        focused: &'a SelectableList<FocusedConnection>,
-        prompt_stack: &'a Vec<PromptState>,
-    ) -> Option<Self> {
+    pub fn new(networks: &'a [AccessPoint], conn_state: &'a ConnectionState) -> Option<Self> {
         let theme: &Theme = match THEME.get() {
             Some(t) => t,
             None => {
@@ -38,9 +31,7 @@ impl<'a> Connection<'a> {
 
         Some(Self {
             networks,
-            actions,
-            focused,
-            prompt_stack,
+            conn_state,
             theme,
         })
     }
@@ -52,7 +43,7 @@ impl<'a> Widget for Connection<'a> {
         Self: Sized,
     {
         let theme = self.theme;
-        let heading_styles = self.heading_styles(self.focused);
+        let heading_styles = self.heading_styles(&self.conn_state.focused_area);
 
         let main_chunks =
             Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)])
@@ -62,7 +53,7 @@ impl<'a> Widget for Connection<'a> {
             .border_type(ratatui::widgets::BorderType::Rounded)
             .borders(Borders::ALL)
             .style(Style::new().fg(
-                if *self.focused.get_selected_value() == FocusedConnection::Networks {
+                if self.conn_state.focused_area == ConnectionFocus::Networks {
                     theme.primary.color()
                 } else {
                     theme.muted.color()
@@ -78,11 +69,11 @@ impl<'a> Widget for Connection<'a> {
 
         // Networks (left)
         let mut network_ssids: Vec<ListItem> = vec![];
-        for (i, network) in self.networks.items.iter().enumerate() {
+        for (i, network) in self.networks.iter().enumerate() {
             let mut text = network.ssid.clone();
             // precedence: selected > connected > known > default
-            let is_selected = i == self.networks.selected;
-            let is_focused = *self.focused.get_selected_value() == FocusedConnection::Networks;
+            let is_selected = i == self.conn_state.network_cursor;
+            let is_focused = self.conn_state.focused_area == ConnectionFocus::Networks;
             let network_style = self.network_style(network, is_selected, is_focused);
 
             let mut spans = vec![Span::styled(network.ssid.clone(), network_style)];
@@ -102,7 +93,7 @@ impl<'a> Widget for Connection<'a> {
             .highlight_style(Style::new().fg(theme.accent.color()).bold());
 
         let mut network_list_state = ListState::default();
-        network_list_state.select(Some(self.networks.selected));
+        network_list_state.select(Some(self.conn_state.network_cursor));
 
         widgets::StatefulWidget::render(network_list, main_chunks[0], buf, &mut network_list_state);
 
@@ -116,7 +107,8 @@ impl<'a> Widget for Connection<'a> {
         selection_block.render(main_chunks[1], buf);
 
         let selection_chunks = Layout::vertical(
-            self.actions
+            self.conn_state
+                .actions
                 .items
                 .iter()
                 .map(|_| Constraint::Length(1))
@@ -126,19 +118,20 @@ impl<'a> Widget for Connection<'a> {
         .split(selection_area);
 
         // Action labels (right)
-        for (i, item) in self.actions.items.iter().enumerate() {
+        for (i, item) in self.conn_state.actions.items.iter().enumerate() {
             if i >= selection_chunks.len() {
                 break;
             }
 
-            let is_selected = i == self.actions.selected;
-            let (mut fg_col, mut bg_col) = self.action_item_colors(self.focused, is_selected);
+            let is_selected = i == self.conn_state.actions.selected_index;
+            let (mut fg_col, mut bg_col) =
+                self.action_item_colors(&self.conn_state.focused_area, is_selected);
 
             let paragraph = Paragraph::new(item.as_str())
                 .centered()
                 .style(Style::new().fg(fg_col).bold());
 
-            if is_selected && *self.focused.get_selected_value() == FocusedConnection::Actions {
+            if is_selected && self.conn_state.focused_area == ConnectionFocus::Actions {
                 let highlight_area = Layout::horizontal([Constraint::Percentage(95)])
                     .flex(Flex::Center)
                     .split(selection_chunks[i])[0];
@@ -150,22 +143,6 @@ impl<'a> Widget for Connection<'a> {
 
             paragraph.render(selection_chunks[i], buf);
         }
-
-        // if let Some(prompt) = self.prompt {
-        //     match prompt {
-        //         PromptState::Connect(selected) => {
-        //             let prompt_layout = Layout::vertical([Constraint::Percentage(40)])
-        //                 .flex(Flex::Center)
-        //                 .split(
-        //                     Layout::horizontal([Constraint::Percentage(30)])
-        //                         .flex(Flex::Center)
-        //                         .split(area)[0],
-        //                 );
-        //             NetworkPrompt::new(&self.networks.items[self.networks.selected], selected)
-        //                 .render(prompt_layout[0], buf);
-        //         }
-        //     }
-        // }
     }
 }
 
@@ -179,25 +156,21 @@ impl<'a> Connection<'a> {
         }
     }
 
-    fn heading_styles(&self, list: &SelectableList<FocusedConnection>) -> (Style, Style) {
-        match list.get_selected_value() {
-            FocusedConnection::Actions => (
+    fn heading_styles(&self, focus: &ConnectionFocus) -> (Style, Style) {
+        match focus {
+            ConnectionFocus::Actions => (
                 Style::new().fg(self.theme.accent.color()).bold(),
                 Style::new().fg(self.theme.accent.color()),
             ),
-            FocusedConnection::Networks => (
+            ConnectionFocus::Networks => (
                 Style::new().fg(self.theme.accent.color()),
                 Style::new().fg(self.theme.accent.color()).bold(),
             ),
         }
     }
 
-    fn action_item_colors(
-        &self,
-        list: &SelectableList<FocusedConnection>,
-        is_selected: bool,
-    ) -> (Color, Color) {
-        if *list.get_selected_value() == FocusedConnection::Actions && is_selected {
+    fn action_item_colors(&self, focus: &ConnectionFocus, is_selected: bool) -> (Color, Color) {
+        if *focus == ConnectionFocus::Actions && is_selected {
             return (self.theme.background.color(), self.theme.secondary.color());
         } else {
             return (self.theme.foreground.color(), self.theme.background.color());

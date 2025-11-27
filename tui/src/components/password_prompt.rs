@@ -70,7 +70,7 @@ impl<'a> Widget for PasswordPrompt<'a> {
         let ssid_area = chunks[0];
         let password_area = chunks[2];
 
-        let selected = self.info.select.get_selected_value();
+        let selected = self.info.select.selected();
         let ssid_line = Line::from(vec![
             Span::styled("  SSID: ", Style::new().fg(theme.tertiary.color())),
             Span::styled(
@@ -85,7 +85,7 @@ impl<'a> Widget for PasswordPrompt<'a> {
         // for order refer to PskPromptSelect::to_vec()
         let mut styles: Vec<Style> = vec![];
         for i in 0..self.info.select.items.len() {
-            let style = if self.info.select.selected == i {
+            let style = if self.info.select.selected_index == i {
                 Style::new().fg(theme.accent.color())
             } else {
                 Style::new().fg(theme.muted.color())

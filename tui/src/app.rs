@@ -17,47 +17,39 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use crate::{
     error::TuiError,
     state::{
-        ConnectionAction, ConnectionState, FocusedConnection, PromptState, SelectableList, UiData,
-        UiDataBuilder, View, handle_event,
+        AppContext, ConnectionAction, ConnectionState, PromptState, SelectableList, UiState, View,
     },
     ui::render,
 };
 
 pub struct App;
 
-#[derive(Builder, Debug)]
-#[builder(pattern = "owned")]
 pub struct AppState {
     // only used in main loop
-    #[builder(default = "false")]
     should_quit: bool,
-    #[builder(default = "true")]
     redraw: bool,
+    ui: UiState,
 
-    #[builder(default = "UiDataBuilder::default().build().unwrap()")]
-    pub ui_data: UiData,
+    // non-ui state,
+    networks: Vec<AccessPoint>,
+    daemon_type: Option<DaemonType>,
 }
 
 impl AppState {
-    fn new() -> Result<Self, AppStateBuilderError> {
-        match AppStateBuilder::default().build() {
-            Ok(a) => Ok(a),
-            Err(e) => {
-                tracing::error!("Error occured while creating the application state: {e}");
-                Err(e)
-            }
+    fn new() -> Self {
+        AppState {
+            should_quit: false,
+            redraw: true,
+            ui: UiState::new(),
+            networks: vec![],
+            daemon_type: None,
         }
     }
 }
 
 impl App {
     pub async fn run() -> Result<(), TuiError> {
-        let mut state = match AppState::new() {
-            Ok(s) => s,
-            Err(e) => {
-                return Err(TuiError::StateBuilder(e));
-            }
-        };
+        let mut state = AppState::new();
 
         // to network thread
         let (action_tx, action_rx) = mpsc::channel::<NetworkAction>(32);
@@ -78,7 +70,8 @@ impl App {
 
         while !state.should_quit {
             if state.redraw {
-                terminal.draw(|f| render(f, &state.ui_data))?;
+                let context = AppContext::create(&state.networks, &state.daemon_type);
+                terminal.draw(|f| render(f, &state.ui, &context))?;
                 state.redraw = false;
             }
 
@@ -89,7 +82,8 @@ impl App {
                 }
                 Some(Ok(event)) = events.next() => {
                     state.redraw = true;
-                    if let Some(action) = handle_event(event, &mut state.ui_data) {
+                    let context = AppContext::create(&state.networks, &state.daemon_type);
+                    if let Some(action) = state.ui.handle_event(event, &context) {
                         handle_app_action(action, &mut state, &action_tx).await;
                     }
                 }
@@ -106,19 +100,16 @@ async fn handle_state_update(state: &mut AppState, msg: NetworkState) {
     match msg {
         NetworkState::UpdateNetworks(aps) => {
             info!("Updating networks: {:?}", aps);
-            state.ui_data.networks = SelectableList::new(aps);
-            match &mut state.ui_data.view {
+            state.networks = aps;
+            match &mut state.ui.current_view {
                 View::Connection(conn_state) => {
-                    ConnectionState::update_action_from_network(
-                        conn_state,
-                        &state.ui_data.networks,
-                    );
+                    ConnectionState::refresh_available_actions(conn_state, &state.networks);
                 }
                 _ => {}
             }
         }
         NetworkState::SetDaemon(daemon) => {
-            state.ui_data.wifi_daemon = Some(daemon);
+            state.daemon_type = Some(daemon);
         }
         NetworkState::ConnectFailed(reason) => {
             todo!()
@@ -136,7 +127,7 @@ async fn handle_app_action(
             net_tx.send(action).await;
         }
         AppAction::AddPrompt(prompt) => {
-            state.ui_data.prompt_stack.push(prompt);
+            state.ui.prompt_stack.push(prompt);
         }
         AppAction::Exit => {
             state.should_quit = true;
