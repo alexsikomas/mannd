@@ -111,6 +111,25 @@ impl Iwd {
         Ok(())
     }
 
+    pub async fn connect_known(&self, ssid: String, security: Security) -> Result<(), ComError> {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            format!(
+                "{}/{}_{}",
+                self.path.clone(),
+                Self::ssid_to_hex(ssid),
+                security
+            ),
+            "net.connman.iwd.Network",
+        )
+        .await?;
+
+        let resp: Result<(), zbus::Error> = proxy.call("Connect", &()).await;
+
+        Ok(())
+    }
+
     /// Disconnects from the current WiFi network, does not remove the network
     pub async fn disconnect(&self) -> Result<(), ComError> {
         let proxy = self.get_interface_proxy("Station").await?;

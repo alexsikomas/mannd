@@ -232,6 +232,15 @@ impl Component for ConnectionState {
                         }
                         Some(ConnectionAction::Connect) => {
                             if let Some(network) = ctx.networks.get(self.network_cursor) {
+                                if network.flags.contains(NetworkFlags::KNOWN) {
+                                    return StateResult::Command(AppCommand::NetworkAction(
+                                        NetworkAction::ConnectKnown(
+                                            network.ssid.clone(),
+                                            network.security.clone(),
+                                        ),
+                                    ));
+                                }
+
                                 match network.security {
                                     Security::Psk => {
                                         let prompt = PskConnectionPrompt::new(network.ssid.clone());

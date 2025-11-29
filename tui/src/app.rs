@@ -70,21 +70,28 @@ impl App {
 
         while !state.should_quit {
             if state.redraw {
+                info!("Draw Started");
                 let context = AppContext::create(&state.networks, &state.daemon_type);
                 terminal.draw(|f| render(f, &state.ui, &context))?;
                 state.redraw = false;
+                info!("Draw finished");
             }
 
             tokio::select! {
                 Some(msg) = state_rx.recv() => {
-                    handle_state_update(&mut state, msg).await;
+                    if let Some(action) = handle_state_update(&mut state, msg).await {
+                        action_tx.send(action).await;
+                    }
                     state.redraw = true;
                 }
                 Some(Ok(event)) = events.next() => {
+                    info!("Redraw enabled");
                     state.redraw = true;
                     let context = AppContext::create(&state.networks, &state.daemon_type);
                     if let Some(action) = state.ui.handle_event(event, &context) {
+                        info!("App Action Started");
                         handle_app_action(action, &mut state, &action_tx).await;
+                        info!("App Action Ended");
                     }
                 }
                 else => break,
@@ -96,14 +103,14 @@ impl App {
     }
 }
 
-async fn handle_state_update(state: &mut AppState, msg: NetworkState) {
+// Network thread may optionally ask us to perform a network action
+async fn handle_state_update(state: &mut AppState, msg: NetworkState) -> Option<NetworkAction> {
     match msg {
         NetworkState::UpdateNetworks(aps) => {
-            info!("Updating networks: {:?}", aps);
             state.networks = aps;
             match &mut state.ui.current_view {
                 View::Connection(conn_state) => {
-                    ConnectionState::refresh_available_actions(conn_state, &state.networks);
+                    conn_state.refresh_available_actions(&state.networks);
                 }
                 _ => {}
             }
@@ -114,7 +121,11 @@ async fn handle_state_update(state: &mut AppState, msg: NetworkState) {
         NetworkState::ConnectFailed(reason) => {
             todo!()
         }
-    }
+        NetworkState::CallAction(action) => {
+            return Some(action);
+        }
+    };
+    None
 }
 
 async fn handle_app_action(

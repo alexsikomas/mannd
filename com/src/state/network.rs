@@ -79,12 +79,17 @@ pub enum NetworkAction {
     GetNearbyNetworks,
     GetConnectedNetworks,
     Connect(ApConnectInfo),
+    ConnectKnown(String, Security),
     Forget(String, Security),
     Exit,
     Disconnect,
 }
 
 pub enum NetworkState {
+    // Use when you want to update state
+    // i.e. after connecting to a known network,
+    // without recursive call in handle_action
+    CallAction(NetworkAction),
     UpdateNetworks(Vec<AccessPoint>),
     ConnectFailed(String),
     SetDaemon(DaemonType),
@@ -113,6 +118,16 @@ pub async fn handle_action<'a>(
                 state_update.send(NetworkState::ConnectFailed(e.to_string()));
             }
         },
+        NetworkAction::ConnectKnown(ssid, security) => {
+            match controller.connect_known(ssid, security).await {
+                Ok(()) => {
+                    let _ = state_update
+                        .send(NetworkState::CallAction(NetworkAction::GetNearbyNetworks))
+                        .await;
+                }
+                Err(e) => {}
+            }
+        }
         NetworkAction::Disconnect => {
             if let Ok(()) = controller.disconenct().await {
                 info!("Disconnected from a network");
