@@ -103,6 +103,7 @@ impl<'a> Widget for Connection<'a> {
             .style(Style::new().fg(theme.muted.color()))
             .title_top(Line::from(" Options ").centered().style(heading_styles.0));
 
+        // list not used here because highlight symbol can't be centered
         let selection_area = selection_block.inner(main_chunks[1]);
         selection_block.render(main_chunks[1], buf);
 
@@ -143,6 +144,13 @@ impl<'a> Widget for Connection<'a> {
 
             paragraph.render(selection_chunks[i], buf);
         }
+
+        let legend_block = Block::new()
+            .border_type(widgets::BorderType::Thick)
+            .title_alignment(ratatui::layout::Alignment::Left)
+            .title_top(Span::from("Key").bold());
+
+        // legend_block.render(, buf);
     }
 }
 

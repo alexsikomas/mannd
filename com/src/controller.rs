@@ -167,6 +167,18 @@ impl Controller {
         Ok(())
     }
 
+    /// security is required for iwd due to the way it stores network names
+    pub async fn connect_known(&self, ssid: String, security: Security) -> Result<(), ComError> {
+        match &self.wifi {
+            Some(WirelessAdapter::Iwd(iwd)) => {
+                iwd.connect_known(ssid, security).await?;
+            }
+            Some(WirelessAdapter::Wpa(wpa)) => {}
+            None => {}
+        }
+        Ok(())
+    }
+
     pub async fn disconenct(&self) -> Result<(), ComError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
