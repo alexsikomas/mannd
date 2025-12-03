@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::{
-    state::{PskConnectionPrompt, PskPromptSelect},
+    state::PskConnectionPrompt,
     ui::{THEME, Theme},
 };
 
@@ -70,7 +70,6 @@ impl<'a> Widget for PasswordPrompt<'a> {
         let ssid_area = chunks[0];
         let password_area = chunks[2];
 
-        let selected = self.info.select.selected();
         let ssid_line = Line::from(vec![
             Span::styled("  SSID: ", Style::new().fg(theme.tertiary.color())),
             Span::styled(
@@ -150,6 +149,6 @@ impl<'a> Widget for PasswordPrompt<'a> {
     }
 }
 
-impl<'a> PasswordPrompt<'a> {
-    fn button_styles(&self) {}
-}
+// impl<'a> PasswordPrompt<'a> {
+//     fn button_styles(&self) {}
+// }

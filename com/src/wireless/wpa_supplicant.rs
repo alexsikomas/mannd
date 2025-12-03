@@ -29,15 +29,12 @@ use zbus::{
     Connection, Proxy,
     names::MemberName,
     proxy::SignalStream,
-    zvariant::{self, Dict, OwnedObjectPath, OwnedValue, Str, Value},
+    zvariant::{self, OwnedObjectPath, OwnedValue, Value},
 };
 
 use crate::{
     error::ComError,
-    state::{
-        network::{ApConnectInfo, EapInfo},
-        signals::SignalUpdate,
-    },
+    state::{network::EapInfo, signals::SignalUpdate},
     wireless::common::{
         AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy,
     },
@@ -104,7 +101,7 @@ impl WpaSupplicant {
         self.call_interface_method_noreply("SelectNetwork", network_path.clone())
             .await?;
 
-        let mut stream = proxy.receive_signal("PropertiesChanged").await?;
+        let stream = proxy.receive_signal("PropertiesChanged").await?;
         match self.check_connection(stream).await {
             Err(e) => {
                 self.call_interface_method_noreply("RemoveNetwork", network_path)
@@ -442,10 +439,10 @@ mod tests {
     async fn test_wpa_scan() -> Result<(), ComError> {
         let conn = Connection::system().await.unwrap();
         let mut wpa = WpaSupplicant::new(conn)?;
-        let mac = wpa.get_interface_prop::<Vec<u8>>("MACAddress").await?;
+        let _ = wpa.get_interface_prop::<Vec<u8>>("MACAddress").await?;
         wpa.list_configured_networks().await?;
 
-        let network = wpa.nearby_networks().await?;
+        let _ = wpa.nearby_networks().await?;
 
         Ok(())
     }

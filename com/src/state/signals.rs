@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 use tokio_stream::{StreamExt, StreamMap};
 use tracing::info;
-use zbus::{Message, names::MemberName, proxy::SignalStream, zvariant::OwnedValue};
+use zbus::{Message, proxy::SignalStream, zvariant::OwnedValue};
 
 use crate::state::network::NetworkAction;
 
@@ -58,11 +58,8 @@ impl<'a> SignalManager<'a> {
     }
 
     pub async fn process_iwd_msg(&mut self, msg: (usize, Message), tx: Sender<NetworkAction>) {
-        let (interface_name, changed_properties, invalidated_properties): (
-            String,
-            HashMap<String, OwnedValue>,
-            Vec<String>,
-        ) = msg.1.body().deserialize().unwrap();
+        let (_, changed_properties, _): (String, HashMap<String, OwnedValue>, Vec<String>) =
+            msg.1.body().deserialize().unwrap();
 
         // info!(
         //     "Interface name: {}\n changed: {:?}\n Invalidated props: {:?}\n",
@@ -74,7 +71,7 @@ impl<'a> SignalManager<'a> {
             .get("Scanning")
             .is_some_and(|val| val.eq(&OwnedValue::from(false)))
         {
-            tx.send(NetworkAction::GetNearbyNetworks).await;
+            let _ = tx.send(NetworkAction::GetNearbyNetworks).await;
             SignalUpdate::Remove(msg.0);
         }
     }
@@ -85,7 +82,7 @@ impl<'a> SignalManager<'a> {
             info!("PROCESSING: {:?}", method);
             match method.as_str() {
                 "ScanDone" => {
-                    tx.send(NetworkAction::GetNearbyNetworks).await;
+                    let _ = tx.send(NetworkAction::GetNearbyNetworks).await;
                     self.handle_update(SignalUpdate::Remove(msg.0));
                 }
                 _ => {}

@@ -1,16 +1,14 @@
 use com::wireless::common::{AccessPoint, NetworkFlags, Security};
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Direction, Flex, Layout, Rect},
+    layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span},
     widgets::{self, Block, Borders, List, ListDirection, ListItem, ListState, Paragraph, Widget},
 };
-use tracing::info;
 
 use crate::{
-    components::password_prompt::PasswordPrompt,
-    state::{ConnectionAction, ConnectionFocus, ConnectionState, PromptState, SelectableList},
+    state::{ConnectionFocus, ConnectionState},
     ui::{THEME, Theme},
 };
 
@@ -65,16 +63,14 @@ impl<'a> Widget for Connection<'a> {
                     .style(heading_styles.1),
             );
 
-        let network_area = network_block.inner(main_chunks[0]);
-
         // Networks (left)
         let mut network_ssids: Vec<ListItem> = vec![];
-        for (i, network) in self.networks.iter().enumerate() {
-            let mut text = network.ssid.clone();
+        for (_i, network) in self.networks.iter().enumerate() {
             // precedence: selected > connected > known > default
-            let is_selected = i == self.conn_state.network_cursor;
+
+            // let is_selected = i == self.conn_state.network_cursor;
             let is_focused = self.conn_state.focused_area == ConnectionFocus::Networks;
-            let network_style = self.network_style(network, is_selected, is_focused);
+            let network_style = self.network_style(network, is_focused);
 
             let mut spans = vec![Span::styled(network.ssid.clone(), network_style)];
 
@@ -125,7 +121,7 @@ impl<'a> Widget for Connection<'a> {
             }
 
             let is_selected = i == self.conn_state.actions.selected_index;
-            let (mut fg_col, mut bg_col) =
+            let (fg_col, bg_col) =
                 self.action_item_colors(&self.conn_state.focused_area, is_selected);
 
             let paragraph = Paragraph::new(item.as_str())
@@ -144,18 +140,11 @@ impl<'a> Widget for Connection<'a> {
 
             paragraph.render(selection_chunks[i], buf);
         }
-
-        let legend_block = Block::new()
-            .border_type(widgets::BorderType::Thick)
-            .title_alignment(ratatui::layout::Alignment::Left)
-            .title_top(Span::from("Key").bold());
-
-        // legend_block.render(, buf);
     }
 }
 
 impl<'a> Connection<'a> {
-    fn security_span(security: &Security, network_style: Style) -> Span {
+    fn security_span(security: &Security, network_style: Style) -> Span<'a> {
         match security {
             Security::Psk => Span::styled("  ".to_string(), network_style.bold()),
             Security::Open => Span::styled(" (Open)".to_string(), network_style),
@@ -185,14 +174,13 @@ impl<'a> Connection<'a> {
         }
     }
 
-    fn network_style(&self, ap: &AccessPoint, is_selected: bool, is_focused: bool) -> Style {
+    fn network_style(&self, ap: &AccessPoint, is_focused: bool) -> Style {
         let mut style = Style::new();
-        let (mut fg_col, bg_col) = (self.theme.foreground.color(), self.theme.background.color());
         if ap.flags.contains(NetworkFlags::CONNECTED) && is_focused {
-            fg_col = self.theme.success.color();
+            let fg_col = self.theme.success.color();
             style = style.fg(fg_col).bold();
         } else if ap.flags.contains(NetworkFlags::KNOWN) && is_focused {
-            fg_col = self.theme.tertiary.color();
+            let fg_col = self.theme.tertiary.color();
             style = style.fg(fg_col).italic();
         }
         style

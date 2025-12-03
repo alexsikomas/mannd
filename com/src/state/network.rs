@@ -34,9 +34,11 @@ impl NetworkActor {
 
         if let Ok(mut controller) = Controller::new().await {
             controller.determine_adapter().await;
-            let daemon = controller.daemon_type().inspect(|d| {
-                state_tx.send(NetworkState::SetDaemon(d.clone()));
-            });
+            let daemon = controller.daemon_type();
+
+            if let Some(d) = &daemon {
+                let _ = state_tx.send(NetworkState::SetDaemon(d.clone())).await;
+            }
 
             loop {
                 tokio::select! {

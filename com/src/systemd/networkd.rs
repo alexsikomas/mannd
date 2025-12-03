@@ -5,7 +5,7 @@ use std::{
 };
 
 use tokio::{
-    fs::{read_dir, File},
+    fs::{File, read_dir},
     io::AsyncWriteExt,
 };
 
@@ -96,13 +96,12 @@ pub async fn init_virtual_interface(mut ips: Vec<IpAddr>, dns: IpAddr) -> Result
 }
 
 mod tests {
-    use std::net::Ipv4Addr;
-
     use super::*;
+    use std::net::Ipv4Addr;
 
     #[tokio::test]
     async fn test_get_netd_files() -> Result<(), ComError> {
-        let files = get_netd_files().await?;
+        let _ = get_netd_files().await?;
         Ok(())
     }
 

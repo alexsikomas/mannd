@@ -1,23 +1,18 @@
 use std::sync::Arc;
 
-use serde::Deserialize;
 use tokio::sync::{RwLock, mpsc::Sender};
 use tracing::info;
 use zbus::{
     Connection, Proxy,
     fdo::ObjectManagerProxy,
-    names::OwnedUniqueName,
-    zvariant::{self, ObjectPath, OwnedObjectPath, Type, Value},
+    zvariant::{ObjectPath, OwnedObjectPath},
 };
 
 use crate::{
     error::ComError,
-    state::{
-        network::{ApConnectInfo, Credentials, EapInfo},
-        signals::SignalUpdate,
-    },
+    state::{network::EapInfo, signals::SignalUpdate},
     wireless::{
-        agent::{AgentState, IwdAgent, IwdAgentMsg},
+        agent::AgentState,
         common::{AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy},
     },
 };
@@ -41,8 +36,6 @@ impl Iwd {
         agent_state: Arc<RwLock<AgentState>>,
     ) -> Result<Self, ComError> {
         let service = "net.connman.iwd".to_string();
-
-        let unique_name: OwnedUniqueName;
 
         match Self::find_adapter_path(&conn, &service).await {
             Ok(Some(path)) => Ok(Self {
@@ -125,7 +118,7 @@ impl Iwd {
         )
         .await?;
 
-        let resp: Result<(), zbus::Error> = proxy.call("Connect", &()).await;
+        let _: Result<(), zbus::Error> = proxy.call("Connect", &()).await;
 
         Ok(())
     }
@@ -230,7 +223,7 @@ impl Iwd {
             )
             .await?;
             let signal = proxy.receive_signal("PropertiesChanged").await?;
-            signal_tx.send(SignalUpdate::Add(signal)).await;
+            let _ = signal_tx.send(SignalUpdate::Add(signal)).await;
         }
         Ok(())
     }
@@ -304,7 +297,7 @@ impl Iwd {
         bytes.into_iter().map(|b| format!("{:02x}", b)).collect()
     }
 
-    async fn register_agent(&self) -> Result<(), ComError> {
+    pub async fn register_agent(&self) -> Result<(), ComError> {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -328,7 +321,7 @@ impl Iwd {
         }
     }
 
-    async fn get_interface_proxy(&self, interface: &'static str) -> Result<Proxy, ComError> {
+    async fn get_interface_proxy(&self, interface: &'static str) -> Result<Proxy<'_>, ComError> {
         Ok(Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -350,13 +343,12 @@ impl Iwd {
         info!("Getting ap info");
         let ssid = get_prop_from_proxy::<String>(&proxy, "Name").await?;
         info!("ssid: {}", ssid);
-        let security: Security;
+
         let security_str = get_prop_from_proxy::<String>(&proxy, "Type").await?;
         info!("sec: {:?}", security_str);
+
         let security = Security::from_str(security_str.as_str());
         let mut flags = NetworkFlags::NEARBY;
-
-        let mut known = false;
 
         // let known_network: Option<OwnedObjectPath>;
         match get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork").await {
@@ -457,83 +449,84 @@ mod tests {
 // }
 
 // Config settings
-enum IwdConfigGroup {
-    General,
-    Network,
-    Blacklist,
-    Rank,
-    Scan,
-}
 
-enum GeneralSettings {
-    EnableNetworkConfiguration(bool),
-    AddressRandomization(AddrRandOpts),
-    AddressRandomizationRange(AddrRandRangeOpts),
-    // -100 to 1; default: -70
-    RoamThreshold(i8),
-    // default: -76
-    RoamThreshold5G(i8),
-    // default -80
-    CriticalRoamThreshold(i8),
-    // default: -82
-    CriticalRoamThreshold5G(i8),
-    RoamRetryInterval(u16),
-    ManagementFrameProtection(ManagementFrameProtectionOpts),
-}
-
-enum AddrRandOpts {
-    Disabled,
-    Once,
-    Network,
-}
-
-enum AddrRandRangeOpts {
-    Full,
-    Nic,
-}
-
-enum ManagementFrameProtectionOpts {
-    Optional,
-    Required,
-    Disabled,
-}
-
-enum NetworkSettings {
-    EnableIpv6(bool),
-    NameResolvingService(NameResolver),
-    // default: 300
-    RoutePriorityOffset(u32),
-}
-
-enum NameResolver {
-    Resolveconf,
-    Systemd,
-    None,
-}
-
-enum BlacklistSettings {
-    // default: 60
-    InitialTimeout(u32),
-    // default: 30
-    InitialAccessPointBusyTimeout(u32),
-    // default: 30
-    Multiplier(u32),
-    // default: 86400
-    MaximumTimeout(u32),
-}
-
-enum RankSettings {
-    // band modif. default: 1.0
-    BandModifier2_4Ghz(f32),
-    BandModifier5Ghz(f32),
-    BandModifier6Ghz(f32),
-}
-
-enum ScanSettings {
-    DisablePeriodicScan(bool),
-    // default: 10
-    InitialPeriodicScanInterval(u32),
-    // default: 300
-    MaximumPeriodicScanInterval(u32),
-    DisableRoamingScan(bool),
-}
+// enum IwdConfigGroup {
+//     General,
+//     Network,
+//     Blacklist,
+//     Rank,
+//     Scan,
+// }
+//
+// enum GeneralSettings {
+//     EnableNetworkConfiguration(bool),
+//     AddressRandomization(AddrRandOpts),
+//     AddressRandomizationRange(AddrRandRangeOpts),
+//     // -100 to 1; default: -70
+//     RoamThreshold(i8),
+//     // default: -76
+//     RoamThreshold5G(i8),
+//     // default -80
+//     CriticalRoamThreshold(i8),
+//     // default: -82
+//     CriticalRoamThreshold5G(i8),
+//     RoamRetryInterval(u16),
+//     ManagementFrameProtection(ManagementFrameProtectionOpts),
+// }
+//
+// enum AddrRandOpts {
+//     Disabled,
+//     Once,
+//     Network,
+// }
+//
+// enum AddrRandRangeOpts {
+//     Full,
+//     Nic,
+// }
+//
+// enum ManagementFrameProtectionOpts {
+//     Optional,
+//     Required,
+//     Disabled,
+// }
+//
+// enum NetworkSettings {
+//     EnableIpv6(bool),
+//     NameResolvingService(NameResolver),
+//     // default: 300
+//     RoutePriorityOffset(u32),
+// }
+//
+// enum NameResolver {
+//     Resolveconf,
+//     Systemd,
+//     None,
+// }
+//
+// enum BlacklistSettings {
+//     // default: 60
+//     InitialTimeout(u32),
+//     // default: 30
+//     InitialAccessPointBusyTimeout(u32),
+//     // default: 30
+//     Multiplier(u32),
+//     // default: 86400
+//     MaximumTimeout(u32),
+// }
+//
+// enum RankSettings {
+//     // band modif. default: 1.0
+//     BandModifier2_4Ghz(f32),
+//     BandModifier5Ghz(f32),
+//     BandModifier6Ghz(f32),
+// }
+//
+// enum ScanSettings {
+//     DisablePeriodicScan(bool),
+//     // default: 10
+//     InitialPeriodicScanInterval(u32),
+//     // default: 300
+//     MaximumPeriodicScanInterval(u32),
+//     DisableRoamingScan(bool),
+// }
