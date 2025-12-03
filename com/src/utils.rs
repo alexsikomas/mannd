@@ -84,7 +84,9 @@ pub async fn get_index(interface: &'static str) -> Result<u32, ComError> {
                                 return Ok(index);
                             }
                         }
-                        Err(e) => {}
+                        Err(e) => {
+                            tracing::error!("Could not convert into Cstr. {e}");
+                        }
                     };
                 }
             }

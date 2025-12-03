@@ -1,6 +1,5 @@
 use bitflags::bitflags;
 use derive_builder::Builder;
-use tokio::fs::write;
 use zbus::{Connection, zvariant::Value};
 
 use crate::error::ComError;
@@ -70,7 +69,7 @@ where
 {
     match proxy.get_property(prop).await {
         Ok(val) => Ok(<zbus::zvariant::Value<'_> as Clone>::clone(&val).downcast::<T>()?),
-        Err(e) => Err(ComError::PropertyNotFound(format!(
+        Err(_e) => Err(ComError::PropertyNotFound(format!(
             "Could not find given property {} at {}",
             prop,
             proxy.path()

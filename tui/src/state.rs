@@ -2,11 +2,10 @@ use std::{fmt::Debug, usize};
 
 use com::{
     controller::DaemonType,
+    state::network::ApConnectInfoBuilder,
     wireless::common::{AccessPoint, NetworkFlags, Security},
 };
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-use derive_builder::Builder;
-use tracing::info;
+use crossterm::event::{Event, KeyCode, KeyEvent};
 
 use com::state::network::NetworkAction;
 
@@ -257,6 +256,21 @@ impl Component for ConnectionState {
                         Some(ConnectionAction::Disconnect) => StateResult::Command(
                             AppCommand::NetworkAction(NetworkAction::Disconnect),
                         ),
+                        Some(ConnectionAction::Forget) => {
+                            if let Some(network) = ctx.networks.get(self.network_cursor) {
+                                if network.flags.contains(NetworkFlags::KNOWN) {
+                                    return StateResult::Command(AppCommand::NetworkAction(
+                                        NetworkAction::Forget(
+                                            network.ssid.clone(),
+                                            network.security.clone(),
+                                        ),
+                                    ));
+                                }
+                                StateResult::Consumed
+                            } else {
+                                StateResult::Consumed
+                            }
+                        }
                         _ => StateResult::Consumed,
                     };
                 }
@@ -314,7 +328,6 @@ impl Component for PromptState {
                 return prompt.on_key(key, ctx);
             }
         };
-        StateResult::Ignored
     }
 }
 
@@ -350,7 +363,7 @@ impl PskConnectionPrompt {
 }
 
 impl Component for PskConnectionPrompt {
-    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
+    fn on_key(&mut self, key: &KeyEvent, _ctx: &AppContext) -> StateResult {
         let Some(selected) = self.select.selected() else {
             return StateResult::Ignored;
         };
@@ -382,6 +395,22 @@ impl Component for PskConnectionPrompt {
             KeyCode::Backspace => match selected {
                 PskPromptSelect::Password => {
                     self.password.pop();
+                }
+                _ => {}
+            },
+            KeyCode::Enter => match selected {
+                PskPromptSelect::Connect => {
+                    let ap_info = ApConnectInfoBuilder::default()
+                        .ssid(self.ssid.clone())
+                        .credentials(com::state::network::Credentials::Password(
+                            self.password.clone(),
+                        ))
+                        .security(Security::Psk)
+                        .build()
+                        .unwrap();
+                    return StateResult::Command(AppCommand::NetworkAction(
+                        NetworkAction::Connect(ap_info),
+                    ));
                 }
                 _ => {}
             },
@@ -443,7 +472,7 @@ impl<T> SelectableList<T> {
 }
 
 impl<T> Component for SelectableList<T> {
-    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
+    fn on_key(&mut self, key: &KeyEvent, _ctx: &AppContext) -> StateResult {
         match key.code {
             KeyCode::Up => {
                 self.prev();

@@ -1,4 +1,3 @@
-use futures::StreamExt;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc::Sender};
 
@@ -6,7 +5,7 @@ use crate::{
     error::ComError,
     state::{
         network::{ApConnectInfo, Credentials},
-        signals::{self, SignalUpdate},
+        signals::SignalUpdate,
     },
     systemd::systemctl,
     wireless::{
@@ -16,8 +15,8 @@ use crate::{
         wpa_supplicant::WpaSupplicant,
     },
 };
-use tracing::{error, info};
-use zbus::{Connection, proxy::SignalStream};
+use tracing::info;
+use zbus::Connection;
 
 // used in outside functions
 #[derive(Debug, Clone)]
@@ -89,6 +88,7 @@ impl Controller {
         match Iwd::new(conn.clone(), agent_state.clone()).await {
             Ok(iwd) => {
                 self.connection = conn;
+                iwd.register_agent().await?;
                 self.wifi = Some(WirelessAdapter::Iwd(iwd));
                 Ok(())
             }
@@ -173,7 +173,7 @@ impl Controller {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 iwd.connect_known(ssid, security).await?;
             }
-            Some(WirelessAdapter::Wpa(wpa)) => {}
+            Some(WirelessAdapter::Wpa(_wpa)) => {}
             None => {}
         }
         Ok(())
@@ -196,7 +196,9 @@ impl Controller {
         };
         Ok(())
     }
+
     pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ComError> {
+        info!("Removing network");
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => match iwd.remove_network(ssid, security).await {
                 Ok(()) => {
@@ -206,7 +208,7 @@ impl Controller {
                     return Err(e);
                 }
             },
-            Some(WirelessAdapter::Wpa(wpa)) => {}
+            Some(WirelessAdapter::Wpa(_wpa)) => {}
             None => {}
         }
         Ok(())
@@ -218,7 +220,7 @@ impl Controller {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 iwd.unregister_agent().await?;
             }
-            Some(WirelessAdapter::Wpa(wpa)) => {}
+            Some(WirelessAdapter::Wpa(_wpa)) => {}
             None => {}
         };
         Ok(())
@@ -231,13 +233,13 @@ impl Controller {
         match &mut self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => match iwd.nearby_networks().await {
                 Ok(v) => Ok(v),
-                Err(e) => Err(ComError::OperationFailed(
+                Err(_) => Err(ComError::OperationFailed(
                     "Error while getting scanned networks!".to_string(),
                 )),
             },
             Some(WirelessAdapter::Wpa(wpa)) => match wpa.nearby_networks().await {
                 Ok(v) => Ok(v),
-                Err(e) => Err(ComError::OperationFailed(
+                Err(_) => Err(ComError::OperationFailed(
                     "Error while getting scanned networks!".to_string(),
                 )),
             },
@@ -255,7 +257,7 @@ impl Controller {
                     return Err(e);
                 }
             },
-            Some(WirelessAdapter::Wpa(wpa)) => {}
+            Some(WirelessAdapter::Wpa(_wpa)) => {}
             None => {}
         }
 

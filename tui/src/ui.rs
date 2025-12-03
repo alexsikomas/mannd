@@ -11,7 +11,6 @@ use toml::Value;
 use tracing::info;
 
 use crate::{
-    app::AppState,
     components::{connection::Connection, main_menu::MainMenu, password_prompt::PasswordPrompt},
     state::{AppContext, PromptState, UiState, View},
 };

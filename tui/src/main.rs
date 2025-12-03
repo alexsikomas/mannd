@@ -42,9 +42,9 @@ async fn main() -> Result<(), TuiError> {
 
     let _ = Theme::new();
 
-    let result = App::run().await;
+    let _ = App::run().await?;
     ratatui::restore();
-    result
+    Ok(())
 }
 
 /// Returns true if the program should continue, false otherwise
