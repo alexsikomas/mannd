@@ -117,7 +117,9 @@ pub async fn handle_action<'a>(
             }
             Err(e) => {
                 tracing::error!("Connection to network was not successful.");
-                state_update.send(NetworkState::ConnectFailed(e.to_string()));
+                state_update
+                    .send(NetworkState::ConnectFailed(e.to_string()))
+                    .await;
             }
         },
         NetworkAction::ConnectKnown(ssid, security) => {

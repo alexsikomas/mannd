@@ -1,17 +1,20 @@
 use std::sync::OnceLock;
 
 use ratatui::{
-    Frame,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, BorderType, Borders},
+    Frame,
 };
 use serde::Deserialize;
 use toml::Value;
 use tracing::info;
 
 use crate::{
-    components::{connection::Connection, main_menu::MainMenu, password_prompt::PasswordPrompt},
+    components::{
+        connection::Connection, err_prompt::ErrorPrompt, main_menu::MainMenu,
+        password_prompt::PasswordPrompt,
+    },
     state::{AppContext, PromptState, UiState, View},
 };
 
@@ -108,8 +111,11 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &UiState, ctx: &AppContext) {
     // render
     match &state.current_view {
         View::MainMenu(list) => {
-            let menu = MainMenu::new(&list);
-            frame.render_widget(menu, inner_area);
+            if let Some(menu) = MainMenu::new(&list) {
+                frame.render_widget(menu, inner_area);
+            } else {
+                return;
+            }
         }
         View::Connection(connection_state) => {
             if let Some(con) = Connection::new(ctx.networks, &connection_state) {
@@ -125,6 +131,11 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &UiState, ctx: &AppContext) {
                         };
 
                         if let Some(prompt_instance) = PasswordPrompt::new(selected, &psk_prompt) {
+                            frame.render_widget(prompt_instance, inner_area);
+                        }
+                    }
+                    PromptState::Error(err_prompt) => {
+                        if let Some(prompt_instance) = ErrorPrompt::new(&err_prompt.reason) {
                             frame.render_widget(prompt_instance, inner_area);
                         }
                     }

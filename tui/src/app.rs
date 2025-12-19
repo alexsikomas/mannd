@@ -11,7 +11,7 @@ use tokio::sync::mpsc::{self, Sender};
 
 use crate::{
     error::TuiError,
-    state::{AppContext, PromptState, UiState, View},
+    state::{AppContext, ErrorPrompt, PromptState, StateCommand, UiState, View},
     ui::render,
 };
 
@@ -23,7 +23,6 @@ pub struct AppState {
     redraw: bool,
     ui: UiState,
 
-    // non-ui state,
     networks: Vec<AccessPoint>,
     daemon_type: Option<DaemonType>,
 }
@@ -49,8 +48,7 @@ impl App {
         // from network thread
         let (state_tx, mut state_rx) = mpsc::channel::<NetworkState>(32);
 
-        // we pass the sender to network due to how signals
-        // work
+        // we pass the sender to network due to how signals work
         let action_tx_clone = action_tx.clone();
         tokio::spawn(async move {
             NetworkActor::new()
@@ -63,22 +61,27 @@ impl App {
 
         while !state.should_quit {
             if state.redraw {
-                info!("Draw Started");
                 let context = AppContext::create(&state.networks, &state.daemon_type);
                 terminal.draw(|f| render(f, &state.ui, &context))?;
                 state.redraw = false;
-                info!("Draw finished");
             }
 
             tokio::select! {
                 Some(msg) = state_rx.recv() => {
-                    if let Some(action) = handle_state_update(&mut state, msg).await {
-                        let _ = action_tx.send(action).await;
+                    match msg {
+                        NetworkState::CallAction(action) => {
+                            let _ = action_tx.send(action).await;
+                        }
+                        _ => {
+                            if let Some(cmd) = handle_state_update(&mut state, msg).await {
+                                info!("Connection failed and sent command");
+                                state.ui.process_command(cmd);
+                            }
+                        }
                     }
                     state.redraw = true;
                 }
                 Some(Ok(event)) = events.next() => {
-                    info!("Redraw enabled");
                     state.redraw = true;
                     let context = AppContext::create(&state.networks, &state.daemon_type);
                     if let Some(action) = state.ui.handle_event(event, &context) {
@@ -94,8 +97,7 @@ impl App {
     }
 }
 
-// Network thread may optionally ask us to perform a network action
-async fn handle_state_update(state: &mut AppState, msg: NetworkState) -> Option<NetworkAction> {
+async fn handle_state_update(state: &mut AppState, msg: NetworkState) -> Option<StateCommand> {
     match msg {
         NetworkState::UpdateNetworks(aps) => {
             state.networks = aps;
@@ -109,12 +111,12 @@ async fn handle_state_update(state: &mut AppState, msg: NetworkState) -> Option<
         NetworkState::SetDaemon(daemon) => {
             state.daemon_type = Some(daemon);
         }
-        NetworkState::ConnectFailed(_reason) => {
-            todo!()
+        NetworkState::ConnectFailed(reason) => {
+            return Some(StateCommand::Prompt(PromptState::Error(ErrorPrompt::new(
+                reason,
+            ))));
         }
-        NetworkState::CallAction(action) => {
-            return Some(action);
-        }
+        _ => {}
     };
     None
 }

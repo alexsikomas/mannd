@@ -9,7 +9,7 @@ use ratatui::{
 
 use crate::{
     state::{ConnectionFocus, ConnectionState},
-    ui::{THEME, Theme},
+    ui::{Theme, THEME},
 };
 
 pub struct Connection<'a> {
@@ -40,7 +40,7 @@ impl<'a> Widget for Connection<'a> {
     where
         Self: Sized,
     {
-        let theme = self.theme;
+        let theme = &self.theme;
         let heading_styles = self.heading_styles(&self.conn_state.focused_area);
 
         let main_chunks =

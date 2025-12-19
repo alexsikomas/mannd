@@ -13,16 +13,17 @@ use crate::app::AppAction;
 
 pub enum StateResult {
     Consumed,
-    Command(AppCommand),
+    Command(StateCommand),
     Ignored,
 }
 
-pub enum AppCommand {
+pub enum StateCommand {
     Exit,
     ChangeView(View),
     Back,
     NetworkAction(NetworkAction),
     Prompt(PromptState),
+    PopPrompt,
 }
 
 pub struct AppContext<'a> {
@@ -82,22 +83,31 @@ impl UiState {
         None
     }
 
-    fn process_command(&mut self, cmd: AppCommand) -> Option<AppAction> {
+    /// May be used by external files to make something happen in the UI
+    /// like adding a prompt based on something the UiState doesn't know
+    /// directly
+    pub fn process_command(&mut self, cmd: StateCommand) -> Option<AppAction> {
         match cmd {
-            AppCommand::Exit => Some(AppAction::Exit),
-            AppCommand::ChangeView(view) => {
+            StateCommand::Exit => Some(AppAction::Exit),
+            StateCommand::ChangeView(view) => {
                 self.current_view = view;
                 None
             }
-            AppCommand::Prompt(prompt) => {
+            StateCommand::Prompt(prompt) => {
                 self.prompt_stack.push(prompt);
                 None
             }
-            AppCommand::Back => {
+            StateCommand::Back => {
                 self.current_view = View::main_menu();
                 None
             }
-            AppCommand::NetworkAction(action) => Some(AppAction::Network(action)),
+            StateCommand::NetworkAction(action) => Some(AppAction::Network(action)),
+            StateCommand::PopPrompt => {
+                if !self.prompt_stack.is_empty() {
+                    self.prompt_stack.pop();
+                }
+                None
+            }
         }
     }
 }
@@ -125,8 +135,8 @@ impl Component for View {
     fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
         if key.code == KeyCode::Esc {
             return match self {
-                View::MainMenu(_) => StateResult::Command(AppCommand::Exit),
-                _ => StateResult::Command(AppCommand::Back),
+                View::MainMenu(_) => StateResult::Command(StateCommand::Exit),
+                _ => StateResult::Command(StateCommand::Back),
             };
         }
 
@@ -227,12 +237,12 @@ impl Component for ConnectionState {
                 if key.code == KeyCode::Enter {
                     return match self.actions.selected() {
                         Some(ConnectionAction::Scan) => {
-                            StateResult::Command(AppCommand::NetworkAction(NetworkAction::Scan))
+                            StateResult::Command(StateCommand::NetworkAction(NetworkAction::Scan))
                         }
                         Some(ConnectionAction::Connect) => {
                             if let Some(network) = ctx.networks.get(self.network_cursor) {
                                 if network.flags.contains(NetworkFlags::KNOWN) {
-                                    return StateResult::Command(AppCommand::NetworkAction(
+                                    return StateResult::Command(StateCommand::NetworkAction(
                                         NetworkAction::ConnectKnown(
                                             network.ssid.clone(),
                                             network.security.clone(),
@@ -243,7 +253,7 @@ impl Component for ConnectionState {
                                 match network.security {
                                     Security::Psk => {
                                         let prompt = PskConnectionPrompt::new(network.ssid.clone());
-                                        StateResult::Command(AppCommand::Prompt(
+                                        StateResult::Command(StateCommand::Prompt(
                                             PromptState::PskConnect(prompt),
                                         ))
                                     }
@@ -254,12 +264,12 @@ impl Component for ConnectionState {
                             }
                         }
                         Some(ConnectionAction::Disconnect) => StateResult::Command(
-                            AppCommand::NetworkAction(NetworkAction::Disconnect),
+                            StateCommand::NetworkAction(NetworkAction::Disconnect),
                         ),
                         Some(ConnectionAction::Forget) => {
                             if let Some(network) = ctx.networks.get(self.network_cursor) {
                                 if network.flags.contains(NetworkFlags::KNOWN) {
-                                    return StateResult::Command(AppCommand::NetworkAction(
+                                    return StateResult::Command(StateCommand::NetworkAction(
                                         NetworkAction::Forget(
                                             network.ssid.clone(),
                                             network.security.clone(),
@@ -318,13 +328,16 @@ impl ConnectionAction {
 #[derive(Debug)]
 pub enum PromptState {
     PskConnect(PskConnectionPrompt),
+    Error(ErrorPrompt),
 }
 
 impl Component for PromptState {
     fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
         match self {
             PromptState::PskConnect(prompt) => {
-                // movement is more granular here
+                return prompt.on_key(key, ctx);
+            }
+            PromptState::Error(prompt) => {
                 return prompt.on_key(key, ctx);
             }
         };
@@ -408,9 +421,13 @@ impl Component for PskConnectionPrompt {
                         .security(Security::Psk)
                         .build()
                         .unwrap();
-                    return StateResult::Command(AppCommand::NetworkAction(
+                    return StateResult::Command(StateCommand::NetworkAction(
                         NetworkAction::Connect(ap_info),
                     ));
+                }
+                PskPromptSelect::Back => {
+                    self.password.pop();
+                    return StateResult::Command(StateCommand::PopPrompt);
                 }
                 _ => {}
             },
@@ -423,6 +440,26 @@ impl Component for PskConnectionPrompt {
             _ => {}
         };
         StateResult::Consumed
+    }
+}
+
+#[derive(Debug)]
+pub struct ErrorPrompt {
+    pub reason: String,
+}
+
+impl ErrorPrompt {
+    pub fn new(reason: String) -> Self {
+        Self { reason }
+    }
+}
+
+impl Component for ErrorPrompt {
+    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
+        match key.code {
+            KeyCode::Enter | KeyCode::Backspace => StateResult::Command(StateCommand::PopPrompt),
+            _ => StateResult::Ignored,
+        }
     }
 }
 
@@ -506,12 +543,12 @@ pub enum MainMenuSelection {
 impl MainMenuSelection {
     fn execute(&self) -> StateResult {
         match self {
-            Self::Connection => StateResult::Command(AppCommand::ChangeView(View::Connection(
+            Self::Connection => StateResult::Command(StateCommand::ChangeView(View::Connection(
                 ConnectionState::new(),
             ))),
-            Self::Config => StateResult::Command(AppCommand::ChangeView(View::Config)),
-            Self::Vpn => StateResult::Command(AppCommand::ChangeView(View::Vpn)),
-            Self::Exit => StateResult::Command(AppCommand::Exit),
+            Self::Config => StateResult::Command(StateCommand::ChangeView(View::Config)),
+            Self::Vpn => StateResult::Command(StateCommand::ChangeView(View::Vpn)),
+            Self::Exit => StateResult::Command(StateCommand::Exit),
         }
     }
     pub fn as_str(&self) -> &'static str {
