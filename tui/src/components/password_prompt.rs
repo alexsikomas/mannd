@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     state::PskConnectionPrompt,
-    ui::{THEME, Theme},
+    ui::{Theme, THEME},
 };
 
 pub struct PasswordPrompt<'a> {
@@ -39,8 +39,21 @@ impl<'a> Widget for PasswordPrompt<'a> {
     where
         Self: Sized,
     {
-        let theme = self.theme;
-        Clear.render(area, buf);
+        let theme = &self.theme;
+        let [main_area] = Layout::vertical([Constraint::Percentage(75)])
+            .flex(Flex::Center)
+            .areas(
+                Layout::horizontal([Constraint::Percentage(75)])
+                    .flex(Flex::Center)
+                    .areas::<1>(area)[0],
+            );
+        Clear.render(main_area, buf);
+        buf.set_style(
+            main_area,
+            Style::new()
+                .fg(theme.background.color())
+                .bg(theme.background.color()),
+        );
 
         let main_block = Block::new()
             .borders(Borders::ALL)
@@ -56,8 +69,8 @@ impl<'a> Widget for PasswordPrompt<'a> {
                     .bg(theme.background.color()),
             );
 
-        let inner_area = main_block.inner(area);
-        main_block.render(area, buf);
+        let inner_area = main_block.inner(main_area);
+        main_block.render(main_area, buf);
 
         let chunks = Layout::vertical([
             Constraint::Length(1),

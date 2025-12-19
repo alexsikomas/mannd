@@ -8,16 +8,24 @@ use ratatui::{
 
 use crate::{
     state::{MainMenuSelection, SelectableList},
-    ui::{THEME, Theme},
+    ui::{Theme, THEME},
 };
 
 pub struct MainMenu<'a> {
     list: &'a SelectableList<MainMenuSelection>,
+    theme: &'a Theme,
 }
 
 impl<'a> MainMenu<'a> {
-    pub fn new(list: &'a SelectableList<MainMenuSelection>) -> Self {
-        Self { list }
+    pub fn new(list: &'a SelectableList<MainMenuSelection>) -> Option<Self> {
+        let theme: &Theme = match THEME.get() {
+            Some(t) => t,
+            None => {
+                return None;
+            }
+        };
+
+        Some(Self { list, theme })
     }
 }
 
@@ -26,11 +34,7 @@ impl<'a> Widget for MainMenu<'a> {
     where
         Self: Sized,
     {
-        let theme: &Theme = match THEME.get() {
-            Some(t) => t,
-            None => return,
-        };
-
+        let theme = &self.theme;
         let max_item_width = self
             .list
             .items
