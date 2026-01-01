@@ -1,5 +1,3 @@
-use std::sync::OnceLock;
-
 use ratatui::{
     style::{Color, Modifier, Style},
     text::Line,
@@ -7,13 +5,14 @@ use ratatui::{
     Frame,
 };
 use serde::Deserialize;
+use std::sync::OnceLock;
 use toml::Value;
 use tracing::info;
 
 use crate::{
     components::{
-        connection::Connection, err_prompt::ErrorPrompt, main_menu::MainMenu,
-        password_prompt::PasswordPrompt,
+        connection::Connection, main_menu::MainMenu, password_prompt::PasswordPrompt,
+        popup_prompt::PopupPrompt,
     },
     state::{AppContext, PromptState, UiState, View},
 };
@@ -26,6 +25,7 @@ pub static THEME: OnceLock<Theme> = OnceLock::new();
 impl Theme {
     /// Reads config toml from a predefined location and sets the
     /// global value of `THEME`
+    #[inline(never)]
     pub fn new() -> Result<(), Box<dyn std::error::Error>> {
         // temporary, will be changed to more standard .config location
         // as well as command-line option
@@ -134,8 +134,10 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &UiState, ctx: &AppContext) {
                             frame.render_widget(prompt_instance, inner_area);
                         }
                     }
-                    PromptState::Error(err_prompt) => {
-                        if let Some(prompt_instance) = ErrorPrompt::new(&err_prompt.reason) {
+                    PromptState::Info(info_prompt) => {
+                        if let Some(prompt_instance) =
+                            PopupPrompt::new(&info_prompt.reason, &info_prompt.kind)
+                        {
                             frame.render_widget(prompt_instance, inner_area);
                         }
                     }

@@ -37,9 +37,9 @@ impl Section {
     async fn write(&self, file: &mut File) -> io::Result<()> {
         file.write(format!("[{}]\n", self.name).as_bytes()).await?;
         for (key, val) in &self.props {
-            file.write(format!("{}={}\n", key, val).as_bytes()).await?;
+            file.write_all(format!("{}={}\n", key, val).as_bytes()).await?;
             if &self.props[self.props.len() - 1].0 == key {
-                file.write(b"\n").await?;
+                file.write_all(b"\n").await?;
             }
         }
         Ok(())

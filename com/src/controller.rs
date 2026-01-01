@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc::Sender};
+use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::{
     error::ComError,

@@ -1,0 +1,2 @@
+# issues with rustic lsp when this is not set
+edition = "2024"

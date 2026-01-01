@@ -1,35 +1,49 @@
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Flex, Layout, Offset, Rect},
-    style::{palette::material::WHITE, Style, Stylize},
+    style::{Color, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Widget},
+    widgets::{Block, Borders, Clear, Widget},
 };
 
 use crate::{
-    state::{MainMenuSelection, SelectableList},
+    state::PopupType,
     ui::{Theme, THEME},
 };
 
-pub struct ErrorPrompt<'a> {
-    theme: &'a Theme,
-    reason: &'a String,
+// Style that should be displayed for each
+// prompt type
+struct PromptMeta {
+    title: String,
+    main_color: Color,
+    secondary_color: Color,
+    text_color: Color,
 }
 
-impl<'a> ErrorPrompt<'a> {
-    pub fn new(reason: &'a String) -> Option<Self> {
-        let theme: &Theme = match THEME.get() {
+pub struct PopupPrompt<'a> {
+    theme: &'a Theme,
+    text: &'a String,
+    prompt_type: &'a PopupType,
+}
+
+impl<'a> PopupPrompt<'a> {
+    pub fn new(text: &'a String, prompt_type: &'a PopupType) -> Option<Self> {
+        let theme = match THEME.get() {
             Some(t) => t,
             None => {
                 return None;
             }
         };
 
-        Some(Self { theme, reason })
+        Some(Self {
+            theme,
+            text,
+            prompt_type,
+        })
     }
 }
 
-impl<'a> Widget for ErrorPrompt<'a> {
+impl<'a> Widget for PopupPrompt<'a> {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
@@ -52,6 +66,8 @@ impl<'a> Widget for ErrorPrompt<'a> {
                 .bg(theme.background.color()),
         );
 
+        let prompt_meta = self.prompt_type.to_info(theme);
+
         let main_block = Block::new()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
@@ -61,7 +77,7 @@ impl<'a> Widget for ErrorPrompt<'a> {
                     .fg(theme.error.color()),
             )
             .title_top(
-                Line::from(" ERROR ")
+                Line::from(prompt_meta.title)
                     .centered()
                     .style(Style::new().fg(theme.error.color()).bold()),
             );
@@ -70,7 +86,7 @@ impl<'a> Widget for ErrorPrompt<'a> {
         main_block.render(main_area, buf);
 
         let span = Span::styled(
-            self.reason,
+            self.text,
             Style::new()
                 .bg(theme.background.color())
                 .fg(theme.foreground.color())
@@ -104,5 +120,24 @@ impl<'a> Widget for ErrorPrompt<'a> {
 
         exit_block.render(btn_layout[0], buf);
         btn_span.render(btn_area, buf);
+    }
+}
+
+impl PopupType {
+    fn to_info(&self, theme: &Theme) -> PromptMeta {
+        match self {
+            PopupType::General => PromptMeta {
+                title: " Info ".to_string(),
+                main_color: theme.primary.color(),
+                secondary_color: theme.secondary.color(),
+                text_color: Color::White,
+            },
+            PopupType::Error => PromptMeta {
+                title: " Error ".to_string(),
+                main_color: theme.error.color(),
+                secondary_color: theme.secondary.color(),
+                text_color: Color::White,
+            },
+        }
     }
 }

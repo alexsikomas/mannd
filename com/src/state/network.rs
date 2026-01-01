@@ -87,14 +87,32 @@ pub enum NetworkAction {
     Disconnect,
 }
 
+// to update the ui, mainly
+// with prompts
+pub enum NetStart {
+    Connection,
+    Scan,
+}
+
+pub enum NetSuccess {
+    Connection,
+    Scan,
+}
+
+pub enum NetFailure {
+    Connection(String),
+}
+
 pub enum NetworkState {
     // Use when you want to update state
     // i.e. after connecting to a known network,
     // without recursive call in handle_action
     CallAction(NetworkAction),
     UpdateNetworks(Vec<AccessPoint>),
-    ConnectFailed(String),
     SetDaemon(DaemonType),
+    Start(NetStart),
+    Success(NetSuccess),
+    Failed(NetFailure),
 }
 
 /// Returns true if we are quitting the application
@@ -105,23 +123,40 @@ pub async fn handle_action<'a>(
     action: NetworkAction,
 ) -> bool {
     match action {
-        NetworkAction::Scan => if let Ok(()) = controller.scan(signal_tx.clone()).await {},
+        NetworkAction::Scan => {
+            let _ = state_update.send(NetworkState::Start(NetStart::Scan)).await;
+
+            if let Ok(()) = controller.scan(signal_tx.clone()).await {
+                let _ = state_update
+                    .send(NetworkState::Success(NetSuccess::Scan))
+                    .await;
+            }
+        }
         NetworkAction::GetNearbyNetworks => {
             if let Ok(aps) = controller.get_all_networks().await {
                 let _ = state_update.send(NetworkState::UpdateNetworks(aps)).await;
             }
         }
-        NetworkAction::Connect(info) => match controller.network_connect(info).await {
-            Ok(()) => {
-                info!("Connection to network was successful");
+        NetworkAction::Connect(info) => {
+            let _ = state_update
+                .send(NetworkState::Start(NetStart::Connection))
+                .await;
+
+            match controller.network_connect(info).await {
+                Ok(()) => {
+                    info!("Connection to network was successful");
+                    let _ = state_update
+                        .send(NetworkState::Success(NetSuccess::Connection))
+                        .await;
+                }
+                Err(e) => {
+                    tracing::error!("Connection to network was not successful.");
+                    let _ = state_update
+                        .send(NetworkState::Failed(NetFailure::Connection(e.to_string())))
+                        .await;
+                }
             }
-            Err(e) => {
-                tracing::error!("Connection to network was not successful.");
-                state_update
-                    .send(NetworkState::ConnectFailed(e.to_string()))
-                    .await;
-            }
-        },
+        }
         NetworkAction::ConnectKnown(ssid, security) => {
             match controller.connect_known(ssid, security).await {
                 Ok(()) => {

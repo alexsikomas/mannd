@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     state::PskConnectionPrompt,
-    ui::{Theme, THEME},
+    ui::{THEME, Theme},
 };
 
 pub struct PasswordPrompt<'a> {
