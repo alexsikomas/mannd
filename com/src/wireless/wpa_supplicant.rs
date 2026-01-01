@@ -1,4 +1,4 @@
-//! Reference: https://w1.fi/wpa_supplicant/devel/dbus.html#dbus_network
+//! Reference: <https://w1.fi/wpa_supplicant/devel/dbus.html#dbus_network>
 //!
 //! The WpaBss struct has a lot of optional types mainly because it
 //! differs significantly to what is provided from a scan vs a connected
@@ -26,23 +26,24 @@ use futures::StreamExt;
 use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::info;
 use zbus::{
-    Connection, Proxy,
     names::MemberName,
     proxy::SignalStream,
     zvariant::{self, OwnedObjectPath, OwnedValue, Value},
+    Connection, Proxy,
 };
 
 use crate::{
     error::ComError,
     state::{network::EapInfo, signals::SignalUpdate},
     wireless::common::{
-        AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy,
+        get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security,
     },
 };
 
 #[derive(Debug, Clone)]
 pub struct WpaSupplicant {
     service: String,
+
     path: String,
     conn: Connection,
 }
@@ -173,10 +174,12 @@ impl WpaSupplicant {
             // ssid may appear multiple times if router broadcasts
             // ap at different freqs
             let bss = self.get_bss_info(network.clone()).await?;
+            let ssid = bss.ssid.clone();
 
-            if seen.insert(bss.ssid.clone()) {
+            // BUG: not all hidden networks are removed
+            if seen.insert(ssid.clone()) && !ssid.is_empty() {
                 let ap = AccessPointBuilder::default()
-                    .ssid(bss.ssid.clone())
+                    .ssid(ssid)
                     .security(bss.security.clone().unwrap())
                     .flags(NetworkFlags::NEARBY)
                     .build()?;

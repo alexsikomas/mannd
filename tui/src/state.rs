@@ -1,13 +1,13 @@
 use std::{fmt::Debug, usize};
 
+use com::state::network::NetworkAction;
 use com::{
     controller::DaemonType,
     state::network::ApConnectInfoBuilder,
     wireless::common::{AccessPoint, NetworkFlags, Security},
 };
 use crossterm::event::{Event, KeyCode, KeyEvent};
-
-use com::state::network::NetworkAction;
+use tracing::info;
 
 use crate::app::AppAction;
 
@@ -24,6 +24,7 @@ pub enum StateCommand {
     NetworkAction(NetworkAction),
     Prompt(PromptState),
     PopPrompt,
+    ClearPrompts,
 }
 
 pub struct AppContext<'a> {
@@ -34,6 +35,8 @@ pub struct AppContext<'a> {
 /// Data used for UI, may be sent to threads through
 /// channels
 pub struct UiState {
+    // kbd input block
+    pub should_block: bool,
     pub current_view: View,
     pub prompt_stack: Vec<PromptState>,
 }
@@ -54,12 +57,17 @@ trait Component {
 impl UiState {
     pub fn new() -> Self {
         UiState {
+            should_block: false,
             current_view: View::main_menu(),
             prompt_stack: vec![],
         }
     }
 
     pub fn handle_event(&mut self, event: Event, ctx: &AppContext) -> Option<AppAction> {
+        if self.should_block {
+            return None;
+        }
+
         if let Event::Key(key) = event {
             if key.code == KeyCode::Esc {
                 if !self.prompt_stack.is_empty() {
@@ -94,6 +102,15 @@ impl UiState {
                 None
             }
             StateCommand::Prompt(prompt) => {
+                match &prompt {
+                    PromptState::Info(info) => {
+                        // remove all general popups if we encounter an error
+                        if info.kind == PopupType::Error {
+                            self.remove_general_prompts();
+                        }
+                    }
+                    _ => {}
+                };
                 self.prompt_stack.push(prompt);
                 None
             }
@@ -108,7 +125,24 @@ impl UiState {
                 }
                 None
             }
+            StateCommand::ClearPrompts => {
+                self.prompt_stack = vec![];
+                None
+            }
         }
+    }
+
+    fn remove_general_prompts(&mut self) {
+        self.prompt_stack.retain(|prompt| match prompt {
+            PromptState::Info(info) => {
+                if info.kind == PopupType::General {
+                    false
+                } else {
+                    true
+                }
+            }
+            _ => true,
+        });
     }
 }
 
@@ -328,7 +362,8 @@ impl ConnectionAction {
 #[derive(Debug)]
 pub enum PromptState {
     PskConnect(PskConnectionPrompt),
-    Error(ErrorPrompt),
+    /// Displays general info or errors to the user
+    Info(InfoPrompt),
 }
 
 impl Component for PromptState {
@@ -337,7 +372,7 @@ impl Component for PromptState {
             PromptState::PskConnect(prompt) => {
                 return prompt.on_key(key, ctx);
             }
-            PromptState::Error(prompt) => {
+            PromptState::Info(prompt) => {
                 return prompt.on_key(key, ctx);
             }
         };
@@ -443,18 +478,25 @@ impl Component for PskConnectionPrompt {
     }
 }
 
-#[derive(Debug)]
-pub struct ErrorPrompt {
-    pub reason: String,
+#[derive(Debug, PartialEq)]
+pub enum PopupType {
+    General,
+    Error,
 }
 
-impl ErrorPrompt {
-    pub fn new(reason: String) -> Self {
-        Self { reason }
+#[derive(Debug)]
+pub struct InfoPrompt {
+    pub reason: String,
+    pub kind: PopupType,
+}
+
+impl InfoPrompt {
+    pub fn new(reason: String, kind: PopupType) -> Self {
+        Self { reason, kind }
     }
 }
 
-impl Component for ErrorPrompt {
+impl Component for InfoPrompt {
     fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
         match key.code {
             KeyCode::Enter | KeyCode::Backspace => StateResult::Command(StateCommand::PopPrompt),

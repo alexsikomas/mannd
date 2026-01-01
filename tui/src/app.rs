@@ -3,15 +3,18 @@ use tracing::info;
 
 use com::{
     controller::DaemonType,
-    state::network::{NetworkAction, NetworkActor, NetworkState},
+    state::network::{NetFailure, NetStart, NetSuccess, NetworkAction, NetworkActor, NetworkState},
     wireless::common::AccessPoint,
 };
 use crossterm::event::EventStream;
-use tokio::sync::mpsc::{self, Sender};
+use tokio::{
+    sync::mpsc::{self, Sender},
+    time::error,
+};
 
 use crate::{
     error::TuiError,
-    state::{AppContext, ErrorPrompt, PromptState, StateCommand, UiState, View},
+    state::{AppContext, InfoPrompt, PopupType, PromptState, StateCommand, UiState, View},
     ui::render,
 };
 
@@ -48,7 +51,6 @@ impl App {
         // from network thread
         let (state_tx, mut state_rx) = mpsc::channel::<NetworkState>(32);
 
-        // we pass the sender to network due to how signals work
         let action_tx_clone = action_tx.clone();
         tokio::spawn(async move {
             NetworkActor::new()
@@ -111,14 +113,51 @@ async fn handle_state_update(state: &mut AppState, msg: NetworkState) -> Option<
         NetworkState::SetDaemon(daemon) => {
             state.daemon_type = Some(daemon);
         }
-        NetworkState::ConnectFailed(reason) => {
-            return Some(StateCommand::Prompt(PromptState::Error(ErrorPrompt::new(
-                reason,
-            ))));
+        NetworkState::Start(started) => return handle_start(state, started),
+        NetworkState::Success(succeeded) => return handle_success(state, succeeded),
+        NetworkState::Failed(failure) => return handle_failure(state, failure),
+        _ => {}
+    };
+    None
+}
+
+fn handle_start(state: &mut AppState, started: NetStart) -> Option<StateCommand> {
+    match started {
+        NetStart::Connection => {
+            state.ui.should_block = true;
+            Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
+                "Connecting...".to_string(),
+                PopupType::General,
+            ))))
+        }
+        NetStart::Scan => Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
+            "Scanning...".to_string(),
+            PopupType::General,
+        )))),
+    }
+}
+
+fn handle_success(state: &mut AppState, succeeded: NetSuccess) -> Option<StateCommand> {
+    match succeeded {
+        NetSuccess::Connection => {
+            state.ui.should_block = false;
+            return Some(StateCommand::ClearPrompts);
         }
         _ => {}
     };
     None
+}
+
+fn handle_failure(state: &mut AppState, failed: NetFailure) -> Option<StateCommand> {
+    match failed {
+        NetFailure::Connection(err) => {
+            state.ui.should_block = false;
+            return Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
+                err,
+                PopupType::Error,
+            ))));
+        }
+    }
 }
 
 async fn handle_app_action(

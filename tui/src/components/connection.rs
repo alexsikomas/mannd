@@ -9,7 +9,7 @@ use ratatui::{
 
 use crate::{
     state::{ConnectionFocus, ConnectionState},
-    ui::{Theme, THEME},
+    ui::{THEME, Theme},
 };
 
 pub struct Connection<'a> {

@@ -1,6 +1,6 @@
 use std::sync::Arc;
-
 use tokio::sync::{RwLock, mpsc::Sender};
+
 use tracing::info;
 use zbus::{
     Connection, Proxy,
