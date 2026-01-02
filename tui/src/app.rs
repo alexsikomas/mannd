@@ -143,6 +143,9 @@ fn handle_success(state: &mut AppState, succeeded: NetSuccess) -> Option<StateCo
             state.ui.should_block = false;
             return Some(StateCommand::ClearPrompts);
         }
+        NetSuccess::Scan => {
+            return Some(StateCommand::ClearPrompts);
+        }
         _ => {}
     };
     None

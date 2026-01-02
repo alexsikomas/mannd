@@ -99,12 +99,17 @@ impl UiState {
             StateCommand::Exit => Some(AppAction::Exit),
             StateCommand::ChangeView(view) => {
                 self.current_view = view;
-                None
+                // improves usability by fetching any networks
+                // that are currently known in connection
+                match self.current_view {
+                    View::Connection(_) => Some(AppAction::Network(NetworkAction::GetNetworks)),
+                    _ => None,
+                }
             }
             StateCommand::Prompt(prompt) => {
                 match &prompt {
                     PromptState::Info(info) => {
-                        // remove all general popups if we encounter an error
+                        // removes clutter of general messages if we have error
                         if info.kind == PopupType::Error {
                             self.remove_general_prompts();
                         }

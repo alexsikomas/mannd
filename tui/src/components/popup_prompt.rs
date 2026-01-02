@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     state::PopupType,
-    ui::{Theme, THEME},
+    ui::{THEME, Theme},
 };
 
 // Style that should be displayed for each
@@ -74,12 +74,12 @@ impl<'a> Widget for PopupPrompt<'a> {
             .border_style(
                 Style::new()
                     .bg(theme.background.color())
-                    .fg(theme.error.color()),
+                    .fg(prompt_meta.main_color),
             )
             .title_top(
                 Line::from(prompt_meta.title)
                     .centered()
-                    .style(Style::new().fg(theme.error.color()).bold()),
+                    .style(Style::new().fg(prompt_meta.text_color).bold()),
             );
 
         let main_inner = main_block.inner(main_area);
@@ -99,7 +99,7 @@ impl<'a> Widget for PopupPrompt<'a> {
         let exit_block = Block::new()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .style(Style::new().fg(theme.accent.color()));
+            .style(Style::new().fg(prompt_meta.secondary_color));
 
         let btn_layout = Layout::vertical([Constraint::Min(0), Constraint::Length(3)])
             .flex(Flex::Center)
@@ -114,8 +114,8 @@ impl<'a> Widget for PopupPrompt<'a> {
             .spacing(1)
             .split(btn_layout[1]);
 
-        let btn_span =
-            Span::styled("OK", Style::new().fg(theme.accent.color()).bold()).into_centered_line();
+        let btn_span = Span::styled("OK", Style::new().fg(prompt_meta.secondary_color).bold())
+            .into_centered_line();
         let btn_area = exit_block.inner(btn_layout[0]);
 
         exit_block.render(btn_layout[0], buf);

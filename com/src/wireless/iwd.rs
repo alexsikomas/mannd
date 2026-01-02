@@ -228,25 +228,32 @@ impl Iwd {
         Ok(())
     }
 
-    pub async fn nearby_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+    // Gets nearby and known networks
+    pub async fn all_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
         let proxy = self.get_interface_proxy("Station").await?;
-        let aps = proxy.call_method("GetOrderedNetworks", &()).await?.body();
-        let aps: Vec<(OwnedObjectPath, i16)> = aps.deserialize()?;
+        let nearby_aps = proxy.call_method("GetOrderedNetworks", &()).await?.body();
+        let nearby_aps: Vec<(OwnedObjectPath, i16)> = nearby_aps.deserialize()?;
 
         let mut access_points: Vec<AccessPoint> = vec![];
-        for ap in aps {
-            // FIX: very janky
-            let ap_info = self
-                .get_ap_info(String::from(ap.0.as_str().split("/").last().unwrap()))
-                .await?;
-            access_points.push(ap_info);
+        for ap in nearby_aps {
+            if let Some(ap_name) = ap.0.as_str().split("/").last() {
+                let ap_info = self.get_ap_info(ap_name).await?;
+                access_points.push(ap_info);
+            } else {
+                continue;
+            }
         }
 
+        let known_aps = self.get_known_networks().await?;
+        let aps_to_add: Vec<AccessPoint> = known_aps
+            .into_iter()
+            .filter(|known_ap| !access_points.iter().any(|ap| ap.ssid == known_ap.ssid))
+            .collect();
+
+        access_points.extend(aps_to_add);
         Ok(access_points)
     }
 
-    // FIX: This code is not something I would write anymore, check with iwd
-    // device if this was done for a reason or just bad
     pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
         let mut known_networks: Vec<AccessPoint> = vec![];
         let proxy = ObjectManagerProxy::new(&self.conn, self.service.clone(), "/").await?;
@@ -331,7 +338,8 @@ impl Iwd {
         .await?)
     }
 
-    async fn get_ap_info(&self, network: String) -> Result<AccessPoint, ComError> {
+    async fn get_ap_info(&self, network: impl Into<String>) -> Result<AccessPoint, ComError> {
+        let network: String = network.into();
         let proxy = zbus::Proxy::new(
             &self.conn,
             self.service.clone(),
