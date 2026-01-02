@@ -71,7 +71,7 @@ impl<'a> SignalManager<'a> {
             .get("Scanning")
             .is_some_and(|val| val.eq(&OwnedValue::from(false)))
         {
-            let _ = tx.send(NetworkAction::GetNearbyNetworks).await;
+            let _ = tx.send(NetworkAction::GetNetworks).await;
             SignalUpdate::Remove(msg.0);
         }
     }
@@ -82,7 +82,7 @@ impl<'a> SignalManager<'a> {
             info!("PROCESSING: {:?}", method);
             match method.as_str() {
                 "ScanDone" => {
-                    let _ = tx.send(NetworkAction::GetNearbyNetworks).await;
+                    let _ = tx.send(NetworkAction::GetNetworks).await;
                     self.handle_update(SignalUpdate::Remove(msg.0));
                 }
                 _ => {}

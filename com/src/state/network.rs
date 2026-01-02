@@ -78,8 +78,8 @@ impl NetworkActor {
 #[derive(Debug)]
 pub enum NetworkAction {
     Scan,
-    GetNearbyNetworks,
-    GetConnectedNetworks,
+    // gets known & nearby networks
+    GetNetworks,
     Connect(ApConnectInfo),
     ConnectKnown(String, Security),
     Forget(String, Security),
@@ -126,15 +126,14 @@ pub async fn handle_action<'a>(
         NetworkAction::Scan => {
             let _ = state_update.send(NetworkState::Start(NetStart::Scan)).await;
 
-            if let Ok(()) = controller.scan(signal_tx.clone()).await {
+            if let Ok(()) = controller.scan(signal_tx.clone()).await {}
+        }
+        NetworkAction::GetNetworks => {
+            if let Ok(aps) = controller.get_all_networks().await {
+                let _ = state_update.send(NetworkState::UpdateNetworks(aps)).await;
                 let _ = state_update
                     .send(NetworkState::Success(NetSuccess::Scan))
                     .await;
-            }
-        }
-        NetworkAction::GetNearbyNetworks => {
-            if let Ok(aps) = controller.get_all_networks().await {
-                let _ = state_update.send(NetworkState::UpdateNetworks(aps)).await;
             }
         }
         NetworkAction::Connect(info) => {
@@ -161,7 +160,7 @@ pub async fn handle_action<'a>(
             match controller.connect_known(ssid, security).await {
                 Ok(()) => {
                     let _ = state_update
-                        .send(NetworkState::CallAction(NetworkAction::GetNearbyNetworks))
+                        .send(NetworkState::CallAction(NetworkAction::GetNetworks))
                         .await;
                 }
                 Err(e) => {}
@@ -171,15 +170,6 @@ pub async fn handle_action<'a>(
             if let Ok(()) = controller.disconenct().await {
                 info!("Disconnected from a network");
             } else {
-            }
-        }
-        NetworkAction::GetConnectedNetworks => {
-            if let Ok(known_aps) = controller.get_known_networks().await {
-                // At this point some of the networks will still be reachable
-                // we don't have self so can't do check here
-                let _ = state_update
-                    .send(NetworkState::UpdateNetworks(known_aps))
-                    .await;
             }
         }
         NetworkAction::Forget(ssid, sec) => {
