@@ -1,11 +1,11 @@
 use ratatui::{
+    Frame,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, BorderType, Borders},
-    Frame,
 };
 use serde::Deserialize;
-use std::sync::OnceLock;
+use std::{env, path::PathBuf, sync::OnceLock};
 use toml::Value;
 use tracing::info;
 
@@ -27,9 +27,26 @@ impl Theme {
     /// global value of `THEME`
     #[inline(never)]
     pub fn new() -> Result<(), Box<dyn std::error::Error>> {
-        // temporary, will be changed to more standard .config location
-        // as well as command-line option
-        let config = std::fs::read_to_string("tui/example_config.toml")?;
+        let mut config_file = match env::var("XDG_CONFIG_HOME") {
+            Ok(val) => PathBuf::from(val),
+            Err(_) => {
+                let home = env::var_os("HOME");
+                match home {
+                    Some(val) => {
+                        let mut path = PathBuf::from(val);
+                        path.push(".config");
+                        path
+                    }
+                    None => {
+                        panic!("Cannot find $HOME directory!");
+                    }
+                }
+            }
+        };
+
+        config_file.push("mannd/config.toml");
+
+        let config = std::fs::read_to_string(config_file)?;
         let toml_value: Value = toml::from_str(&config)?;
         let selected_theme = toml_value["theme"]["selected"].as_str().ok_or_else(|| {
             return std::io::Error::new(
