@@ -67,6 +67,9 @@ pub enum ComError {
     PasswordLength,
     #[error("Connection timeout")]
     Timeout,
+
+    #[error("Database error occured")]
+    RedbDatabase(redb::DatabaseError),
 }
 
 impl<T, P> From<neli::err::RouterError<T, P>> for ComError
@@ -174,3 +177,5 @@ error_with_tracing!(
     AccessPointBuilder,
     "Error building ap: {}"
 );
+
+error_with_tracing!(redb::DatabaseError, RedbDatabase, "Redb database error: {}");

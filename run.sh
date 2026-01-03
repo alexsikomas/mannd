@@ -10,11 +10,10 @@ display_help() {
 
     Options:
         -h, --help      Displays this help message and exits.
-        -t, --tui [d|r|debug|release] [opt]
+        -t, --tui [d|r|debug|release]
                         Compiles and runs the TUI debug or release build.
                         'd' or 'debug' is the default build.
                         'r' or 'release' creates the release build.
-                        'opt' can be added to optimise the release.
 
         -c  --com       Compiles and tests the com package in debug mode.
         -i  --install   Installs the TUI.
@@ -39,13 +38,11 @@ EOF
 
 tui() {
     echo "Building TUI..."
+    make_config
     # Release
     if [[ "$1" == "r" ]] || [[ "$1" == "release" ]]; then
-        if cargo build --release --package tui;  then
+        if cargo build --release;  then
             if sudo setcap cap_net_admin,cap_dac_override=ep ./target/release/tui; then 
-                if [[ "$2" == "opt" ]] || [[ "$2" == "optimise" ]] then
-                    upx --best --lzma ./target/release/tui
-                fi
                 ./target/release/tui
                 exit 0
             fi
@@ -54,13 +51,28 @@ tui() {
     fi
 
    # Debug 
-   if cargo build --package tui; then 
+   if cargo build; then 
        if sudo setcap cap_net_admin,cap_dac_override=ep ./target/debug/tui; then 
            ./target/debug/tui
            exit 0
        fi
    fi
    exit 1
+}
+
+make_config() {
+    local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/mannd"
+
+    if [ "${config_dir}" = "/mannd" ] || [ -z "$HOME" ]; then
+        echo "Error: Unable to determine config directory." >&2
+        return 2
+    fi
+
+    mkdir -p "${config_dir}"
+    if [ ! -f "${config_dir}/config.toml" ]; then
+        cp ./tui/example_config.toml "${config_dir}/config.toml"
+        echo "Config created at ${config_dir}/config.toml"
+    fi
 }
 
 com() {

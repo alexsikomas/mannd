@@ -1,4 +1,10 @@
-use std::sync::Arc;
+use redb::{Database, TableDefinition};
+use std::{
+    env,
+    fs::create_dir_all,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::sync::{RwLock, mpsc::Sender};
 
 use crate::{
@@ -8,6 +14,7 @@ use crate::{
         signals::SignalUpdate,
     },
     systemd::systemctl,
+    wireguard::WgFileTable,
     wireless::{
         agent::{AgentState, IwdAgent},
         common::{AccessPoint, Security},
@@ -36,22 +43,40 @@ pub enum WirelessAdapter {
 pub struct Controller {
     pub wifi: Option<WirelessAdapter>,
     connection: Connection,
+    database: Database,
 }
+
+const WG_TABLE: TableDefinition<&str, WgFileTable> = TableDefinition::new("wg_table");
 
 // Initialisations
 impl Controller {
     pub async fn new() -> Result<Self, ComError> {
-        let connection = Connection::system().await?;
+        // wg db
+        let mut path = match env::var_os("XDG_STATE_HOME") {
+            Some(val) => PathBuf::from(val),
+            None => {
+                let home = env::var_os("HOME").expect("Could not find HOME directory");
+                let mut p = PathBuf::from(home);
+                p.push(".local/state");
+                p
+            }
+        };
 
+        path.push("mannd");
+        create_dir_all(&path)?;
+        path.push("wg.redb");
+        let database = Database::create(path)?;
+
+        let connection = Connection::system().await?;
         Ok(Self {
             wifi: None,
             connection,
+            database,
         })
     }
 
     /// Sets wifi to be either iwd, wpa or netlink
     pub async fn determine_adapter(&mut self) {
-        info!("Determining adapter");
         let ctl = systemctl::Systemctl::new(self.connection.clone());
         match ctl.is_service_active("iwd".to_string()).await {
             Some(v) => {
@@ -70,6 +95,7 @@ impl Controller {
             Ok(v) => {
                 if v {
                     let _ = self.connect_wpa().await;
+                    info!("wpa connected");
                     return;
                 }
             }
