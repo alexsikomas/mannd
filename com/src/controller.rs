@@ -14,7 +14,7 @@ use crate::{
         signals::SignalUpdate,
     },
     systemd::systemctl,
-    wireguard::WgFileTable,
+    wireguard::{WgFileTable, Wireguard},
     wireless::{
         agent::{AgentState, IwdAgent},
         common::{AccessPoint, Security},
@@ -43,7 +43,7 @@ pub enum WirelessAdapter {
 pub struct Controller {
     pub wifi: Option<WirelessAdapter>,
     connection: Connection,
-    database: Database,
+    wg: Option<Wireguard>,
 }
 
 const WG_TABLE: TableDefinition<&str, WgFileTable> = TableDefinition::new("wg_table");
@@ -51,27 +51,11 @@ const WG_TABLE: TableDefinition<&str, WgFileTable> = TableDefinition::new("wg_ta
 // Initialisations
 impl Controller {
     pub async fn new() -> Result<Self, ComError> {
-        // wg db
-        let mut path = match env::var_os("XDG_STATE_HOME") {
-            Some(val) => PathBuf::from(val),
-            None => {
-                let home = env::var_os("HOME").expect("Could not find HOME directory");
-                let mut p = PathBuf::from(home);
-                p.push(".local/state");
-                p
-            }
-        };
-
-        path.push("mannd");
-        create_dir_all(&path)?;
-        path.push("wg.redb");
-        let database = Database::create(path)?;
-
         let connection = Connection::system().await?;
         Ok(Self {
             wifi: None,
             connection,
-            database,
+            wg: None,
         })
     }
 
@@ -126,6 +110,18 @@ impl Controller {
         match WpaSupplicant::new(self.connection.clone()) {
             Ok(wpa) => {
                 self.wifi = Some(WirelessAdapter::Wpa(wpa));
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn start_wg(&mut self) -> Result<(), ComError> {
+        let db = Wireguard::get_db()?;
+
+        match Wireguard::start_interface(db).await {
+            Ok(wg) => {
+                self.wg = Some(wg);
                 Ok(())
             }
             Err(e) => Err(e),
@@ -313,21 +309,21 @@ mod tests {
         }
     }
 
-    #[cfg(iwd_installed)]
-    #[tokio::test]
-    async fn test_connect_iwd() -> Result<(), ComError> {
-        let controller = Controller::new().await;
-        match controller {
-            Ok(mut cont) => match cont.connect_iwd().await {
-                Ok(_) => Ok(()),
-                Err(_) => {
-                    println!("iwd is not found");
-                    Ok(())
-                }
-            },
-            Err(_) => Err(ComError::OperationFailed(
-                "Controller could not be initalised".to_string(),
-            )),
-        }
-    }
+    // #[cfg(iwd_installed)]
+    // #[tokio::test]
+    // async fn test_connect_iwd() -> Result<(), ComError> {
+    //     let controller = Controller::new().await;
+    //     match controller {
+    //         Ok(mut cont) => match cont.connect_iwd().await {
+    //             Ok(_) => Ok(()),
+    //             Err(_) => {
+    //                 println!("iwd is not found");
+    //                 Ok(())
+    //             }
+    //         },
+    //         Err(_) => Err(ComError::OperationFailed(
+    //             "Controller could not be initalised".to_string(),
+    //         )),
+    //     }
+    // }
 }

@@ -80,6 +80,7 @@ pub enum NetworkAction {
     Scan,
     // gets known & nearby networks
     GetNetworks,
+    GetWireguardFiles,
     Connect(ApConnectInfo),
     ConnectKnown(String, Security),
     Forget(String, Security),
@@ -123,11 +124,6 @@ pub async fn handle_action<'a>(
     action: NetworkAction,
 ) -> bool {
     match action {
-        NetworkAction::Scan => {
-            let _ = state_update.send(NetworkState::Start(NetStart::Scan)).await;
-
-            if let Ok(()) = controller.scan(signal_tx.clone()).await {}
-        }
         NetworkAction::GetNetworks => {
             if let Ok(aps) = controller.get_all_networks().await {
                 let _ = state_update.send(NetworkState::UpdateNetworks(aps)).await;
@@ -136,6 +132,12 @@ pub async fn handle_action<'a>(
                     .await;
             }
         }
+        NetworkAction::Scan => {
+            let _ = state_update.send(NetworkState::Start(NetStart::Scan)).await;
+
+            if let Ok(()) = controller.scan(signal_tx.clone()).await {}
+        }
+
         NetworkAction::Connect(info) => {
             let _ = state_update
                 .send(NetworkState::Start(NetStart::Connection))

@@ -1,4 +1,11 @@
-use std::ffi::CStr;
+use std::{
+    env,
+    ffi::CStr,
+    fs::{File, OpenOptions},
+    io,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use neli::{
     consts::{
@@ -109,4 +116,57 @@ pub fn format_mac_address(mac: &[u8]) -> String {
         .map(|b| format!("{:02X}", b))
         .collect::<Vec<String>>()
         .join(":")
+}
+
+pub struct NamedTempFile {
+    pub path: PathBuf,
+    pub file: File,
+}
+
+impl NamedTempFile {
+    pub fn new() -> io::Result<Self> {
+        let tmp_dir = env::temp_dir();
+
+        let mut tries = 0;
+        loop {
+            let mut path = tmp_dir.clone();
+            path.push(format!(
+                "tmp_{}_{}",
+                std::process::id(),
+                generate_random_suffix()
+            ));
+
+            match OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(file) => return Ok(Self { path, file }),
+                Err(_) => {
+                    tries += 1;
+                    if tries > 100 {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            "Cannot create unique temporary file name.",
+                        ));
+                    }
+                    continue;
+                }
+            }
+        }
+    }
+}
+
+impl Drop for NamedTempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn generate_random_suffix() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
 }

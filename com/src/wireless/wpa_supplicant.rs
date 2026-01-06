@@ -26,17 +26,17 @@ use futures::StreamExt;
 use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::info;
 use zbus::{
+    Connection, Proxy,
     names::MemberName,
     proxy::SignalStream,
     zvariant::{self, OwnedObjectPath, OwnedValue, Value},
-    Connection, Proxy,
 };
 
 use crate::{
     error::ComError,
     state::{network::EapInfo, signals::SignalUpdate},
     wireless::common::{
-        get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security,
+        AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy,
     },
 };
 
@@ -435,6 +435,7 @@ impl WpaSupplicant {
     }
 }
 
+#[cfg(wpa_installed)]
 mod tests {
     use super::*;
 

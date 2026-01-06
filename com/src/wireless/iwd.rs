@@ -398,42 +398,6 @@ impl Iwd {
     }
 }
 
-#[cfg(test)]
-#[cfg(iwd_installed)]
-mod tests {
-    use zbus::zvariant::ObjectPath;
-
-    use super::*;
-
-    // Networking tests
-    // async fn setup() -> Result<Iwd, ComError> {
-    //     let conn = zbus::Connection::system().await?;
-    //     Ok(Iwd::new(conn).await?)
-    // }
-
-    // #[tokio::test]
-    // async fn test_get_connected_network() -> Result<(), ComError> {
-    //     let iwd = setup().await?;
-    //     iwd.get_prop::<OwnedObjectPath>("Station", "ConnectedNetwork")
-    //         .await?;
-    //     Ok(())
-    // }
-
-    // #[tokio::test]
-    // async fn test_get_networks() -> Result<(), ComError> {
-    //     let mut iwd = setup().await?;
-    //     iwd.update_networks().await?;
-    //     iwd.print_networks().await;
-    //     Ok(())
-    // }
-    //
-    // // configuration tests
-    // #[tokio::test]
-    // async fn test_get_conf_path() -> Result<(), ComError> {
-    //     let path = Iwd::get_conf().await?;
-    //     Ok(())
-    // }
-}
 //
 // #[derive(Debug)]
 // pub struct IwdNetwork {

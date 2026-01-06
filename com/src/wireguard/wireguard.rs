@@ -9,12 +9,11 @@ use neli::{
     types::RtBuffer,
     utils::Groups,
 };
-use redb::{TypeName, Value};
-use serde::{Deserialize, Serialize};
+use redb::Database;
 use std::{
-    ffi::OsStr,
+    env,
+    fmt::Debug,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    os::unix::ffi::OsStrExt,
     path::PathBuf,
 };
 use tokio::process::Command;
@@ -23,15 +22,17 @@ use crate::{error::ComError, utils::get_index};
 
 const INTERFACE: &str = "wg-mannd";
 
-struct Wireguard {
+pub struct Wireguard {
+    database: Database,
     router: NlRouter,
     index: u32,
 }
 
+// methods used by Network
 impl Wireguard {
     /// Connects socket and sets up `INTERFACE`
-    async fn start_interface() -> Result<Self, ComError> {
-        let (router, handle) =
+    pub async fn start_interface(database: Database) -> Result<Self, ComError> {
+        let (router, _) =
             NlRouter::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty()).await?;
 
         let mut linked_attrs = RtBuffer::new();
@@ -74,9 +75,33 @@ impl Wireguard {
 
         let index = get_index(INTERFACE).await?;
 
-        Ok(Self { router, index })
+        Ok(Self {
+            router,
+            index,
+            database,
+        })
     }
 
+    pub fn get_db() -> Result<Database, ComError> {
+        let mut path = match env::var_os("XDG_STATE_HOME") {
+            Some(val) => PathBuf::from(val),
+            None => {
+                let home = env::var_os("HOME").expect("Could not find HOME directory");
+                let mut p = PathBuf::from(home);
+                p.push(".local/state");
+                p
+            }
+        };
+
+        path.push("mannd");
+        std::fs::create_dir_all(&path)?;
+        path.push("wg.redb");
+        let database = Database::create(path)?;
+        Ok(database)
+    }
+}
+
+impl Wireguard {
     async fn delete_interface(&self) -> Result<(), ComError> {
         let mut attrs = RtBuffer::new();
         attrs.push(
@@ -112,6 +137,7 @@ impl Wireguard {
 
         Ok(())
     }
+
     /// Adds the IPv4/6 address to the `INTERFACE`
     async fn set_addr(&self, ips: Vec<IpAddr>) -> Result<(), ComError> {
         for ip in ips {
@@ -458,93 +484,16 @@ impl Wireguard {
     // resolvconf: run `resolvconf -u` to update
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct WgFileTable {
-    path: String,
-    // unix timestamp
-    last_accessed: i64,
-    // ISO 3166-1 alpha-2
-    country: [u8; 2],
-}
-
-// Binary format as follows:
-// [u32 = length of path][u8 = path][i64 = last_accessed][u32; 2 = char]
-// the brackets are only for illustration
-impl Value for WgFileTable {
-    type AsBytes<'a> = Vec<u8>;
-    type SelfType<'a> = Self;
-
-    fn fixed_width() -> Option<usize> {
-        None
-    }
-
-    fn from_bytes<'a>(data: &'a [u8]) -> Self::SelfType<'a>
-    where
-        Self: 'a,
-    {
-        let (len, cont) = data
-            .split_first_chunk::<{ size_of::<u32>() }>()
-            .expect("Too short; cannot read length");
-        let len = u32::from_le_bytes(*len) as usize;
-
-        if len > cont.len() {
-            panic!("Cannot parse path, too long")
-        }
-
-        let (path, cont) = cont.split_at(len);
-        let path = String::from_bytes(path);
-
-        let (last_accessed, cont) = cont
-            .split_first_chunk::<{ size_of::<i64>() }>()
-            .expect("Too short; cannot read access time");
-        let last_accessed = i64::from_le_bytes(*last_accessed);
-
-        let (c1_bytes, cont) = cont
-            .split_first_chunk::<{ size_of::<u8>() }>()
-            .expect("Data too short for country char 1");
-        let (c2_bytes, cont) = cont
-            .split_first_chunk::<{ size_of::<u8>() }>()
-            .expect("Data too short for country char 2");
-
-        if !cont.is_empty() {
-            panic!("Unexpected trailing data");
-        }
-
-        let c1 = u8::from_le_bytes(*c1_bytes);
-        let c2 = u8::from_le_bytes(*c2_bytes);
-
-        Self {
-            path,
-            last_accessed,
-            country: [c1, c2],
-        }
-    }
-
-    fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
-    where
-        Self: 'b,
-    {
-        let path_bytes = value.path.as_bytes();
-        let path_len = path_bytes.len();
-        let cap = size_of::<u32>() + path_len + size_of::<i64>() + 2 * size_of::<u32>();
-
-        let mut bytes = Vec::with_capacity(cap);
-        bytes.extend_from_slice(&(path_len as u32).to_le_bytes());
-        bytes.extend_from_slice(path_bytes);
-        bytes.extend_from_slice(&value.last_accessed.to_le_bytes());
-
-        bytes.extend_from_slice(&(value.country[0] as u8).to_le_bytes());
-        bytes.extend_from_slice(&(value.country[1] as u8).to_le_bytes());
-        bytes
-    }
-
-    fn type_name() -> TypeName {
-        TypeName::new("WgFile")
+impl Debug for Wireguard {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Result::Ok(())
     }
 }
 
 // tests
 mod tests {
+    use crate::utils::NamedTempFile;
+
     use super::*;
 
     #[tokio::test]
@@ -566,7 +515,10 @@ mod tests {
             }
         }
 
-        let wg = Wireguard::start_interface().await?;
+        let tmp = NamedTempFile::new().unwrap();
+        let db = Database::create(tmp.path.clone()).unwrap();
+
+        let wg = Wireguard::start_interface(db).await?;
         wg.set_addr(vec![
             IpAddr::V4(Ipv4Addr::new(12, 76, 70, 29)),
             IpAddr::V6(Ipv6Addr::new(
