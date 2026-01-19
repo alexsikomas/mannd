@@ -1,13 +1,13 @@
 use std::{fmt::Debug, usize};
 
 use com::state::network::NetworkAction;
+use com::wireguard::store::WgMeta;
 use com::{
     controller::DaemonType,
     state::network::ApConnectInfoBuilder,
     wireless::common::{AccessPoint, NetworkFlags, Security},
 };
 use crossterm::event::{Event, KeyCode, KeyEvent};
-use tracing::info;
 
 use crate::app::AppAction;
 
@@ -29,6 +29,7 @@ pub enum StateCommand {
 
 pub struct AppContext<'a> {
     pub networks: &'a [AccessPoint],
+    pub wg_files: &'a [WgMeta],
     pub wifi_daemon: &'a Option<DaemonType>,
 }
 
@@ -42,10 +43,18 @@ pub struct UiState {
 }
 
 impl<'a> AppContext<'a> {
-    pub fn create(networks: &'a [AccessPoint], wifi_daemon: &'a Option<DaemonType>) -> Self {
+    pub fn create(
+        networks: &'a [AccessPoint],
+        wifi_daemon: &'a Option<DaemonType>,
+        // don't take as a tuple with a name here
+        // because meta index is direct map to name
+        // index, vice versa
+        wg_files: &'a [WgMeta],
+    ) -> Self {
         Self {
             networks,
             wifi_daemon,
+            wg_files,
         }
     }
 }
@@ -99,10 +108,11 @@ impl UiState {
             StateCommand::Exit => Some(AppAction::Exit),
             StateCommand::ChangeView(view) => {
                 self.current_view = view;
-                // improves usability by fetching any networks
-                // that are currently known in connection
                 match self.current_view {
+                    // improves usability by fetching any networks
+                    // that are currently known in connection
                     View::Connection(_) => Some(AppAction::Network(NetworkAction::GetNetworks)),
+                    View::Vpn(_) => Some(AppAction::Network(NetworkAction::InitWireguard)),
                     _ => None,
                 }
             }
@@ -155,7 +165,7 @@ impl UiState {
 pub enum View {
     MainMenu(SelectableList<MainMenuSelection>),
     Connection(ConnectionState),
-    Vpn,
+    Vpn(VpnState),
     Config,
 }
 
@@ -193,7 +203,7 @@ impl Component for View {
                 }
             }
             View::Connection(state) => return state.on_key(key, ctx),
-            View::Vpn => {}
+            View::Vpn(state) => return state.on_key(key, ctx),
             View::Config => {}
         };
         StateResult::Ignored
@@ -594,10 +604,11 @@ impl MainMenuSelection {
                 ConnectionState::new(),
             ))),
             Self::Config => StateResult::Command(StateCommand::ChangeView(View::Config)),
-            Self::Vpn => StateResult::Command(StateCommand::ChangeView(View::Vpn)),
+            Self::Vpn => StateResult::Command(StateCommand::ChangeView(View::Vpn(VpnState::new()))),
             Self::Exit => StateResult::Command(StateCommand::Exit),
         }
     }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Connection => "Connection",
@@ -605,5 +616,101 @@ impl MainMenuSelection {
             Self::Config => "Config",
             Self::Exit => "Exit",
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct VpnState {
+    selection: SelectableList<VpnSelection>,
+    file_cursor: usize,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum VpnSelection {
+    // Connect,
+    Scan,
+    Country,
+    Filter,
+    // isn't a menu option but rather a section
+    Files,
+}
+
+impl VpnSelection {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            // Self::Connect => "Connect",
+            Self::Scan => "Scan Files",
+            Self::Country => "Get Countries",
+            Self::Filter => "Filter",
+            Self::Files => "",
+        }
+    }
+}
+
+impl VpnState {
+    fn new() -> Self {
+        Self {
+            selection: Self::get_actions(),
+            file_cursor: 0,
+        }
+    }
+
+    fn get_actions() -> SelectableList<VpnSelection> {
+        SelectableList::new(vec![
+            // VpnSelection::Connect,
+            VpnSelection::Scan,
+            VpnSelection::Country,
+            VpnSelection::Filter,
+            VpnSelection::Files,
+        ])
+    }
+}
+
+impl Component for VpnState {
+    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
+        if let Some(selected) = self.selection.selected() {
+            tracing::info!("{:?}", selected)
+        }
+        match key.code {
+            // only down arrow gets into files
+            KeyCode::Left => {
+                if let Some(selected) = self.selection.selected() {
+                    if selected == &VpnSelection::Scan {
+                        self.selection.selected_index = self.selection.items.len() - 2;
+                    } else {
+                        self.selection.prev();
+                    }
+                }
+            }
+            KeyCode::Right => {
+                if let Some(selected) = self.selection.selected() {
+                    if selected == &VpnSelection::Filter {
+                        self.selection.selected_index = 0;
+                    } else {
+                        self.selection.next();
+                    }
+                }
+            }
+            KeyCode::Down => {
+                if let Some(selected) = self.selection.selected() {
+                    if selected == &VpnSelection::Files {
+                        // file movement
+                    } else {
+                        let _ = selected == &VpnSelection::Files;
+                    }
+                }
+            }
+            KeyCode::Up => {
+                if let Some(selected) = self.selection.selected() {
+                    // BUG: you must be at first file to go back instead
+                    // it should work for the entire top row
+                    if selected == &VpnSelection::Files && self.file_cursor == 0 {
+                        self.selection.selected_index = 0;
+                    }
+                }
+            }
+            _ => {}
+        }
+        StateResult::Consumed
     }
 }

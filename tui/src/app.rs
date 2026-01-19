@@ -4,13 +4,11 @@ use tracing::info;
 use com::{
     controller::DaemonType,
     state::network::{NetFailure, NetStart, NetSuccess, NetworkAction, NetworkActor, NetworkState},
+    wireguard::store::WgMeta,
     wireless::common::AccessPoint,
 };
 use crossterm::event::EventStream;
-use tokio::{
-    sync::mpsc::{self, Sender},
-    time::error,
-};
+use tokio::sync::mpsc::{self, Sender};
 
 use crate::{
     error::TuiError,
@@ -28,6 +26,7 @@ pub struct AppState {
 
     networks: Vec<AccessPoint>,
     daemon_type: Option<DaemonType>,
+    wg_info: (Vec<String>, Vec<WgMeta>),
 }
 
 impl AppState {
@@ -38,6 +37,7 @@ impl AppState {
             ui: UiState::new(),
             networks: vec![],
             daemon_type: None,
+            wg_info: (vec![], vec![]),
         }
     }
 }
@@ -63,7 +63,8 @@ impl App {
 
         while !state.should_quit {
             if state.redraw {
-                let context = AppContext::create(&state.networks, &state.daemon_type);
+                let context =
+                    AppContext::create(&state.networks, &state.daemon_type, &state.wg_info.1);
                 terminal.draw(|f| render(f, &state.ui, &context))?;
                 state.redraw = false;
             }
@@ -85,7 +86,7 @@ impl App {
                 }
                 Some(Ok(event)) = events.next() => {
                     state.redraw = true;
-                    let context = AppContext::create(&state.networks, &state.daemon_type);
+                    let context = AppContext::create(&state.networks, &state.daemon_type, &state.wg_info.1);
                     if let Some(action) = state.ui.handle_event(event, &context) {
                         handle_app_action(action, &mut state, &action_tx).await;
                     }

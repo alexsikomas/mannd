@@ -4,12 +4,14 @@ use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span},
-    widgets::{self, Block, Borders, List, ListDirection, ListItem, ListState, Paragraph, Widget},
+    widgets::{
+        self, Block, Borders, Clear, List, ListDirection, ListItem, ListState, Paragraph, Widget,
+    },
 };
 
 use crate::{
     state::{ConnectionFocus, ConnectionState},
-    ui::{THEME, Theme},
+    ui::{Theme, THEME},
 };
 
 pub struct Connection<'a> {
@@ -46,6 +48,14 @@ impl<'a> Widget for Connection<'a> {
         let main_chunks =
             Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)])
                 .split(area);
+
+        Clear.render(area, buf);
+        buf.set_style(
+            area,
+            Style::new()
+                .fg(theme.background.color())
+                .bg(theme.background.color()),
+        );
 
         let network_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)

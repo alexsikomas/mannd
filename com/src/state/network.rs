@@ -80,7 +80,8 @@ pub enum NetworkAction {
     Scan,
     // gets known & nearby networks
     GetNetworks,
-    GetWireguardFiles,
+    InitWireguard,
+    UpdateWireguard,
     Connect(ApConnectInfo),
     ConnectKnown(String, Security),
     Forget(String, Security),
@@ -124,6 +125,7 @@ pub async fn handle_action<'a>(
     action: NetworkAction,
 ) -> bool {
     match action {
+        // WIFI
         NetworkAction::GetNetworks => {
             if let Ok(aps) = controller.get_all_networks().await {
                 let _ = state_update.send(NetworkState::UpdateNetworks(aps)).await;
@@ -179,6 +181,16 @@ pub async fn handle_action<'a>(
                 //     if let Ok(aps) = controller.get_networks().await {
                 //         let _ = state_update.send(NetUpdate::UpdateAps(aps)).await;
                 //     }
+            }
+        }
+        // WIREGUARD
+        NetworkAction::InitWireguard => {
+            if let Ok(()) = controller.start_wg().await {
+                if let Ok((names, meta)) = controller.update_wg() {
+                    info!("Updated wireguard successfully");
+                    info!("names: {:?}", names);
+                    info!("meta: {:?}", meta);
+                }
             }
         }
         NetworkAction::Exit => {
