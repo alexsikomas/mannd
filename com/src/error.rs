@@ -70,6 +70,17 @@ pub enum ComError {
 
     #[error("Database error occured")]
     RedbDatabase(redb::DatabaseError),
+    #[error("Database transaction error occured")]
+    RedbTransaction(redb::TransactionError),
+    #[error("Database commit error occured")]
+    RedbCommit(redb::CommitError),
+    #[error("Database table error occured")]
+    RedbTable(redb::TableError),
+    #[error("Database storage error occured")]
+    RedbStorage(redb::StorageError),
+
+    #[error("Wireguard accessed while not initialised")]
+    WgAccess,
 }
 
 impl<T, P> From<neli::err::RouterError<T, P>> for ComError
@@ -179,3 +190,12 @@ error_with_tracing!(
 );
 
 error_with_tracing!(redb::DatabaseError, RedbDatabase, "Redb database error: {}");
+error_with_tracing!(
+    redb::TransactionError,
+    RedbTransaction,
+    "Redb transaction error: {}"
+);
+
+error_with_tracing!(redb::CommitError, RedbCommit, "Redb commit error: {}");
+error_with_tracing!(redb::TableError, RedbTable, "Redb table error: {}");
+error_with_tracing!(redb::StorageError, RedbStorage, "Redb storage error: {}");

@@ -1,11 +1,5 @@
-use redb::{Database, TableDefinition};
-use std::{
-    env,
-    fs::create_dir_all,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
-use tokio::sync::{RwLock, mpsc::Sender};
+use std::sync::Arc;
+use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::{
     error::ComError,
@@ -14,7 +8,7 @@ use crate::{
         signals::SignalUpdate,
     },
     systemd::systemctl,
-    wireguard::{WgFileTable, Wireguard},
+    wireguard::{network::Wireguard, store::WgMeta},
     wireless::{
         agent::{AgentState, IwdAgent},
         common::{AccessPoint, Security},
@@ -45,8 +39,6 @@ pub struct Controller {
     connection: Connection,
     wg: Option<Wireguard>,
 }
-
-const WG_TABLE: TableDefinition<&str, WgFileTable> = TableDefinition::new("wg_table");
 
 // Initialisations
 impl Controller {
@@ -116,15 +108,24 @@ impl Controller {
         }
     }
 
-    async fn start_wg(&mut self) -> Result<(), ComError> {
-        let db = Wireguard::get_db()?;
-
-        match Wireguard::start_interface(db).await {
+    pub async fn start_wg(&mut self) -> Result<(), ComError> {
+        match Wireguard::start_interface(None).await {
             Ok(wg) => {
                 self.wg = Some(wg);
                 Ok(())
             }
             Err(e) => Err(e),
+        }
+    }
+
+    pub fn update_wg(&self) -> Result<(Vec<String>, Vec<WgMeta>), ComError> {
+        match &self.wg {
+            Some(wg) => {
+                wg.store.update_files()?;
+                Ok(wg.store.get_ordered_files()?)
+            }
+
+            _ => Err(ComError::WgAccess),
         }
     }
 }
