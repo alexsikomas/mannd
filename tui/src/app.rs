@@ -63,8 +63,11 @@ impl App {
 
         while !state.should_quit {
             if state.redraw {
-                let context =
-                    AppContext::create(&state.networks, &state.daemon_type, &state.wg_info.1);
+                let context = AppContext::create(
+                    &state.networks,
+                    &state.daemon_type,
+                    (&state.wg_info.0, &state.wg_info.1),
+                );
                 terminal.draw(|f| render(f, &state.ui, &context))?;
                 state.redraw = false;
             }
@@ -86,7 +89,10 @@ impl App {
                 }
                 Some(Ok(event)) = events.next() => {
                     state.redraw = true;
-                    let context = AppContext::create(&state.networks, &state.daemon_type, &state.wg_info.1);
+                    let context = AppContext::create(&state.networks,
+                        &state.daemon_type,
+                        (&state.wg_info.0, &state.wg_info.1)
+                    );
                     if let Some(action) = state.ui.handle_event(event, &context) {
                         handle_app_action(action, &mut state, &action_tx).await;
                     }
@@ -113,6 +119,10 @@ async fn handle_state_update(state: &mut AppState, msg: NetworkState) -> Option<
         }
         NetworkState::SetDaemon(daemon) => {
             state.daemon_type = Some(daemon);
+        }
+        NetworkState::UpdateWgDb((names, meta)) => {
+            state.wg_info.0 = names;
+            state.wg_info.1 = meta;
         }
         NetworkState::Start(started) => return handle_start(state, started),
         NetworkState::Success(succeeded) => return handle_success(state, succeeded),

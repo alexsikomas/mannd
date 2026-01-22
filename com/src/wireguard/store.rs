@@ -23,7 +23,7 @@ impl WgStore {
             None => {
                 let home = env::var_os("HOME").expect("Could not find $HOME environment variable");
                 let mut p = PathBuf::from(home);
-                p.push("./local/state");
+                p.push(".local/state");
                 p
             }
         };
@@ -70,7 +70,8 @@ impl WgStore {
             Ok(data) => Some(data),
             Err(e) => match e {
                 ComError::RedbTable(ref table) => {
-                    // if wg_table does not exist then likely we haven't written any data
+                    // if wg_table does not exist then we haven't written any data
+                    // which is not an error
                     if table.to_string().eq("Table 'wg_table' does not exist") {
                         None
                     } else {

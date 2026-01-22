@@ -1,8 +1,8 @@
 use ratatui::{
-    Frame,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, BorderType, Borders},
+    Frame,
 };
 use serde::Deserialize;
 use std::{env, path::PathBuf, sync::OnceLock};
@@ -12,7 +12,7 @@ use tracing::info;
 use crate::{
     components::{
         connection::Connection, main_menu::MainMenu, password_prompt::PasswordPrompt,
-        popup_prompt::PopupPrompt,
+        popup_prompt::PopupPrompt, wireguard_ui::WireguardMenu,
     },
     state::{AppContext, PromptState, UiState, View},
 };
@@ -159,6 +159,11 @@ pub fn render<'a>(frame: &mut Frame<'a>, state: &UiState, ctx: &AppContext) {
                         }
                     }
                 }
+            }
+        }
+        View::Vpn(vpn_state) => {
+            if let Some(vpn) = WireguardMenu::new(&vpn_state, &ctx.wg_files.0, ctx.wg_files.1) {
+                frame.render_widget(vpn, inner_area);
             }
         }
         _ => {
