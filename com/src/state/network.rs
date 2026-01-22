@@ -7,6 +7,7 @@ use tracing::info;
 use crate::{
     controller::{Controller, DaemonType},
     state::signals::{SignalManager, SignalUpdate},
+    wireguard::store::WgMeta,
     wireless::common::{AccessPoint, Security},
 };
 
@@ -111,6 +112,7 @@ pub enum NetworkState {
     // without recursive call in handle_action
     CallAction(NetworkAction),
     UpdateNetworks(Vec<AccessPoint>),
+    UpdateWgDb((Vec<String>, Vec<WgMeta>)),
     SetDaemon(DaemonType),
     Start(NetStart),
     Success(NetSuccess),
@@ -188,8 +190,11 @@ pub async fn handle_action<'a>(
             if let Ok(()) = controller.start_wg().await {
                 if let Ok((names, meta)) = controller.update_wg() {
                     info!("Updated wireguard successfully");
-                    info!("names: {:?}", names);
-                    info!("meta: {:?}", meta);
+                    let _ = state_update
+                        .send(NetworkState::UpdateWgDb((names, meta)))
+                        .await;
+                    // info!("names: {:?}", names);
+                    // info!("meta: {:?}", meta);
                 }
             }
         }
