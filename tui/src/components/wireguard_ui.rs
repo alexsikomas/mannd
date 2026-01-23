@@ -48,34 +48,7 @@ impl<'a> Widget for WireguardMenu<'a> {
         Self: Sized,
     {
         let theme = &self.theme;
-
-        Clear.render(area, buf);
-        buf.set_style(
-            area,
-            Style::new()
-                .fg(theme.background.color())
-                .bg(theme.background.color()),
-        );
-
-        let mut main_area = Layout::horizontal([Constraint::Percentage(80)])
-            .flex(Flex::Center)
-            .split(
-                Layout::vertical([Constraint::Percentage(90)])
-                    .flex(Flex::Center)
-                    .areas::<1>(area)[0],
-            )[0];
-
-        let main_block = Block::new()
-            .border_type(ratatui::widgets::BorderType::Rounded)
-            .borders(Borders::ALL)
-            .style(theme.primary.color())
-            .title_top(
-                Line::from(" WireGuard ")
-                    .centered()
-                    .style(theme.accent.color())
-                    .bold(),
-            );
-        main_block.render(main_area, buf);
+        let mut main_area = self.render_main_block(area, buf);
 
         let item_count = match self.names.len().cmp(&self.meta.len()) {
             std::cmp::Ordering::Equal => self.names.len(),
@@ -95,29 +68,19 @@ impl<'a> Widget for WireguardMenu<'a> {
         // selection options
 
         // without this it can extend beyond main border
-        main_area.y += 1;
-        main_area.height -= 1;
-        main_area.x += 1;
-        main_area.width -= 2;
+        Self::alter_area_bounds(&mut main_area);
+
         let [top, main] = Layout::vertical([Constraint::Percentage(7), Constraint::Fill(1)])
             .areas::<2>(main_area);
 
-        let options_layout = Layout::horizontal([Constraint::Percentage(95)])
-            .flex(Flex::Center)
-            .split(top);
-
-        let opt_block = Block::new()
-            .borders(Borders::ALL)
-            .border_style(Style::new().fg(theme.accent.color()));
-
-        opt_block.render(options_layout[0], buf);
+        self.render_option_menu(top, buf);
 
         let main_area = Layout::horizontal([Constraint::Percentage(90)])
             .flex(Flex::Center)
             .split(main)[0];
+
         // rows displayable
         let rows = (main_area.height / ROW_H) as usize;
-        tracing::info!("ROWS: {rows}, height: {}", main_area.height);
         if rows <= 0 {
             tracing::error!("Not enough room to display a single row...");
             return;
@@ -132,20 +95,7 @@ impl<'a> Widget for WireguardMenu<'a> {
         };
 
         let items_per_page = rows * cols;
-        let mut selected_item =
-            self.state.file_cursor.x + (self.state.file_cursor.y * (cols as usize));
-        if self.state.file_cursor.x_alt > 0 {
-            let mult = self.state.file_cursor.x_alt / (cols + 1);
-            tracing::info!(
-                "X: {}, X_ALT: {}, Y: {}, MULT: {}",
-                self.state.file_cursor.x,
-                self.state.file_cursor.x_alt,
-                self.state.file_cursor.y,
-                mult
-            );
-            selected_item = (self.state.file_cursor.y * (cols as usize))
-                .saturating_sub(self.state.file_cursor.x_alt);
-        }
+        let selected_item = self.state.file_cursor;
         let current_page = selected_item / items_per_page;
 
         let mut item_areas: Vec<Rect> = vec![];
@@ -159,7 +109,6 @@ impl<'a> Widget for WireguardMenu<'a> {
 
             item_areas.append(&mut cols.to_vec());
         }
-        tracing::info!("ITEM AREAS: {:?}", item_areas);
 
         for (i, area) in item_areas.iter().enumerate() {
             let i = i + items_per_page * current_page;
@@ -203,6 +152,77 @@ pub fn calc_max_cols(area: Rect) -> Option<usize> {
         Some(max_cols)
     } else {
         None
+    }
+}
+
+impl<'a> WireguardMenu<'a> {
+    fn render_main_block(&self, area: Rect, buf: &mut Buffer) -> Rect {
+        let main_area = Layout::horizontal([Constraint::Percentage(80)])
+            .flex(Flex::Center)
+            .split(
+                Layout::vertical([Constraint::Percentage(90)])
+                    .flex(Flex::Center)
+                    .areas::<1>(area)[0],
+            )[0];
+
+        let main_block = Block::new()
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .borders(Borders::ALL)
+            .style(self.theme.primary.color())
+            .title_top(
+                Line::from(" WireGuard ")
+                    .centered()
+                    .style(self.theme.accent.color())
+                    .bold(),
+            );
+        main_block.render(main_area, buf);
+        main_area
+    }
+
+    fn render_option_menu(&self, area: Rect, buf: &mut Buffer) {
+        let options_layout = Layout::horizontal([Constraint::Percentage(95)])
+            .flex(Flex::Center)
+            .split(area);
+
+        let opt_block = Block::new()
+            .borders(Borders::ALL)
+            .border_style(Style::new().fg(self.theme.accent.color()));
+
+        opt_block.render(options_layout[0], buf);
+    }
+
+    fn alter_area_bounds(area: &mut Rect) {
+        area.y += 1;
+        area.height -= 1;
+        area.x += 1;
+        area.width -= 2;
+    }
+
+    // composes the ui without rendering it
+    // to find out how many cols there would be
+    pub fn calculate_cols_no_render(&self, area: Rect) -> usize {
+        let mut main_area = Layout::horizontal([Constraint::Percentage(80)])
+            .flex(Flex::Center)
+            .split(
+                Layout::vertical([Constraint::Percentage(90)])
+                    .flex(Flex::Center)
+                    .areas::<1>(area)[0],
+            )[0];
+        Self::alter_area_bounds(&mut main_area);
+        let [_, main] = Layout::vertical([Constraint::Percentage(7), Constraint::Fill(1)])
+            .areas::<2>(main_area);
+
+        let main_area = Layout::horizontal([Constraint::Percentage(90)])
+            .flex(Flex::Center)
+            .split(main)[0];
+
+        match calc_max_cols(main_area) {
+            Some(c) => c,
+            None => {
+                tracing::error!("Not enough room to display a single column...");
+                0
+            }
+        }
     }
 }
 
