@@ -1,11 +1,19 @@
+use futures::executor::block_on;
 use ratatui::{
+    prelude::{Backend, CrosstermBackend},
     style::{Color, Modifier, Style},
     text::Line,
-    widgets::{Block, BorderType, Borders},
-    Frame,
+    widgets::{Block, BorderType, Borders, Clear, Widget},
+    CompletedFrame, Frame, Terminal,
 };
 use serde::Deserialize;
-use std::{env, path::PathBuf, sync::OnceLock};
+use std::{
+    env,
+    io::{self, Stdout, Write},
+    path::PathBuf,
+    sync::OnceLock,
+};
+use tokio::sync::mpsc;
 use toml::Value;
 use tracing::info;
 
@@ -77,104 +85,119 @@ impl Theme {
     }
 }
 
-/// Renders title, border and conditionally renders main content depending on
-/// state
-pub fn render<'a>(frame: &mut Frame<'a>, state: &UiState, ctx: &AppContext) {
-    let outer_area = frame.area();
-    let theme: &Theme;
-    match THEME.get() {
-        Some(t) => {
-            theme = t;
-        }
-        None => {
-            return;
-        }
+pub struct UiContext {
+    pub message: Option<UiMessage>,
+}
+
+impl UiContext {
+    pub fn new() -> Self {
+        Self { message: None }
     }
 
-    let title_block = Block::new()
-        .border_type(BorderType::Rounded)
-        .borders(Borders::all())
-        .style(
-            Style::new()
-                .fg(theme.foreground.color())
-                .bg(theme.background.color()),
-        )
-        .title(
-            Line::from(" mannd ")
-                .style(
-                    Style::new()
-                        .fg(theme.primary.color())
-                        .add_modifier(Modifier::BOLD),
-                )
-                .centered(),
-        );
-
-    let inner_area = title_block.inner(outer_area);
-    frame.render_widget(title_block, outer_area);
-    frame.render_widget(
-        Block::new().style(
-            Style::new()
-                .fg(theme.background.color())
-                .bg(theme.background.color()),
-        ),
-        inner_area,
-    );
-
-    // will do this instead when rust stablises it
-    // let widget: impl Widget;
-    // frame.render_widget(widget, inner_area);
-
-    // we give the widget only the necessary selections to
-    // render
-    match &state.current_view {
-        View::MainMenu(list) => {
-            if let Some(menu) = MainMenu::new(&list) {
-                frame.render_widget(menu, inner_area);
-            } else {
+    /// Renders title, border and conditionally renders main content depending on
+    /// state
+    pub fn render<'a>(&mut self, frame: &mut Frame<'a>, state: &UiState, ctx: &AppContext) {
+        let outer_area = frame.area();
+        let theme: &Theme;
+        match THEME.get() {
+            Some(t) => {
+                theme = t;
+            }
+            None => {
                 return;
             }
         }
-        View::Connection(connection_state) => {
-            if let Some(con) = Connection::new(ctx.networks, &connection_state) {
-                frame.render_widget(con, inner_area);
-            }
 
-            for prompt in &state.prompt_stack {
-                match prompt {
-                    PromptState::PskConnect(psk_prompt) => {
-                        let Some(selected) = ctx.networks.get(connection_state.network_cursor)
+        let title_block = Block::new()
+            .border_type(BorderType::Rounded)
+            .borders(Borders::all())
+            .style(
+                Style::new()
+                    .fg(theme.foreground.color())
+                    .bg(theme.background.color()),
+            )
+            .title(
+                Line::from(" mannd ")
+                    .style(
+                        Style::new()
+                            .fg(theme.primary.color())
+                            .add_modifier(Modifier::BOLD),
+                    )
+                    .centered(),
+            );
+
+        let inner_area = title_block.inner(outer_area);
+        frame.render_widget(title_block, outer_area);
+        frame.render_widget(
+            Block::new().style(
+                Style::new()
+                    .fg(theme.background.color())
+                    .bg(theme.background.color()),
+            ),
+            inner_area,
+        );
+
+        // will do this instead when rust stablises it
+        // let widget: impl Widget;
+        // frame.render_widget(widget, inner_area);
+
+        // we give the widget only the necessary selections to
+        // render
+        match &state.current_view {
+            View::MainMenu(list) => {
+                if let Some(menu) = MainMenu::new(&list) {
+                    frame.render_widget(menu, inner_area);
+                } else {
+                    return;
+                }
+            }
+            View::Connection(connection_state) => {
+                if let Some(con) = Connection::new(ctx.networks, &connection_state) {
+                    frame.render_widget(con, inner_area);
+                }
+
+                for prompt in &state.prompt_stack {
+                    match prompt {
+                        PromptState::PskConnect(psk_prompt) => {
+                            let Some(selected) = ctx.networks.get(connection_state.network_cursor)
                         else {
                             return;
                         };
 
-                        if let Some(prompt_instance) = PasswordPrompt::new(selected, &psk_prompt) {
-                            frame.render_widget(prompt_instance, inner_area);
+                            if let Some(prompt_instance) =
+                                PasswordPrompt::new(selected, &psk_prompt)
+                            {
+                                frame.render_widget(prompt_instance, inner_area);
+                            }
                         }
-                    }
-                    PromptState::Info(info_prompt) => {
-                        if let Some(prompt_instance) =
-                            PopupPrompt::new(&info_prompt.reason, &info_prompt.kind)
-                        {
-                            frame.render_widget(prompt_instance, inner_area);
+                        PromptState::Info(info_prompt) => {
+                            if let Some(prompt_instance) =
+                                PopupPrompt::new(&info_prompt.reason, &info_prompt.kind)
+                            {
+                                frame.render_widget(prompt_instance, inner_area);
+                            }
                         }
                     }
                 }
             }
-        }
-        View::Vpn(vpn_state) => {
-            if let Some(vpn) = WireguardMenu::new(&vpn_state, &ctx.wg_files.0, ctx.wg_files.1) {
-                frame.render_widget(vpn, inner_area);
+            View::Vpn(vpn_state) => {
+                if let Some(vpn) = WireguardMenu::new(&vpn_state, &ctx.wg_files.0, ctx.wg_files.1) {
+                    let cols = vpn.calculate_cols_no_render(inner_area);
+                    if cols != state.vpn_cols {
+                        self.message = Some(UiMessage::SetVpnCols(cols));
+                    }
+                    frame.render_widget(vpn, inner_area);
+                }
             }
-        }
-        _ => {
-            return;
+            _ => {
+                return;
+            }
         }
     }
 }
 
-#[derive(Deserialize, Debug)]
-struct Config {
-    selected: String,
+pub enum UiMessage {
+    SetVpnCols(usize),
 }
 
 #[derive(Deserialize, Debug)]

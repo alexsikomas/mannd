@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     state::PskConnectionPrompt,
-    ui::{THEME, Theme},
+    ui::{Theme, THEME},
 };
 
 pub struct PasswordPrompt<'a> {
@@ -47,6 +47,7 @@ impl<'a> Widget for PasswordPrompt<'a> {
                     .flex(Flex::Center)
                     .areas::<1>(area)[0],
             );
+
         Clear.render(main_area, buf);
         buf.set_style(
             main_area,

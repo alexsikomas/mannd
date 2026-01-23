@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     state::PopupType,
-    ui::{THEME, Theme},
+    ui::{Theme, THEME},
 };
 
 // Style that should be displayed for each

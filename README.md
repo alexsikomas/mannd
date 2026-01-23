@@ -2,7 +2,7 @@
     <h1 style="border-bottom: none; margin-bottom: 1px;">
         mannd
     </h1>
-<a href="https://freerangesoftware.org"><img src="https://freerangesoftware.org/assets/frs-badge.png" alt="This Software is Free Range" height="25px" style="border-radius:0.25em;"/></a>
+<i>Human-written software</i>
 </div>
 
 ## Why mannd?

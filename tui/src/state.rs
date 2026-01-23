@@ -31,6 +31,7 @@ pub struct AppContext<'a> {
     pub networks: &'a [AccessPoint],
     pub wg_files: (&'a Vec<String>, &'a [WgMeta]),
     pub wifi_daemon: &'a Option<DaemonType>,
+    pub vpn_cols: usize,
 }
 
 /// Data used for UI, may be sent to threads through
@@ -40,6 +41,7 @@ pub struct UiState {
     pub should_block: bool,
     pub current_view: View,
     pub prompt_stack: Vec<PromptState>,
+    pub vpn_cols: usize,
 }
 
 impl<'a> AppContext<'a> {
@@ -50,11 +52,13 @@ impl<'a> AppContext<'a> {
         // because meta index is direct map to name
         // index, vice versa
         wg_files: (&'a Vec<String>, &'a [WgMeta]),
+        vpn_cols: usize,
     ) -> Self {
         Self {
             networks,
             wifi_daemon,
             wg_files,
+            vpn_cols,
         }
     }
 }
@@ -69,6 +73,7 @@ impl UiState {
             should_block: false,
             current_view: View::main_menu(),
             prompt_stack: vec![],
+            vpn_cols: 0,
         }
     }
 
@@ -619,32 +624,6 @@ impl MainMenuSelection {
     }
 }
 
-#[derive(Debug)]
-pub struct VpnState {
-    pub selection: SelectableList<VpnSelection>,
-    pub file_cursor: FileNav,
-}
-
-#[derive(Debug)]
-pub struct FileNav {
-    pub x: usize,
-    pub y: usize,
-    // alternative mode to be used
-    // when x = 0 and y > 0 and left
-    // is pressed
-    pub x_alt: usize,
-}
-
-impl FileNav {
-    fn new() -> Self {
-        Self {
-            x: 0,
-            y: 0,
-            x_alt: 0,
-        }
-    }
-}
-
 #[derive(Debug, PartialEq)]
 pub enum VpnSelection {
     // Connect,
@@ -667,11 +646,17 @@ impl VpnSelection {
     }
 }
 
+#[derive(Debug)]
+pub struct VpnState {
+    pub selection: SelectableList<VpnSelection>,
+    pub file_cursor: usize,
+}
+
 impl VpnState {
     fn new() -> Self {
         Self {
             selection: Self::get_actions(),
-            file_cursor: FileNav::new(),
+            file_cursor: 0,
         }
     }
 
@@ -697,18 +682,7 @@ impl Component for VpnState {
                 if let Some(selected) = self.selection.selected() {
                     match selected {
                         VpnSelection::Files => {
-                            // if index 0 but row has been skipped then undo skip and add
-                            // col skip
-                            if self.file_cursor.y > 0
-                                && self.file_cursor.x == 0
-                                && self.file_cursor.x_alt == 0
-                            {
-                                self.file_cursor.x_alt = self.file_cursor.x_alt.saturating_add(1);
-                            } else if self.file_cursor.x_alt > 0 {
-                                self.file_cursor.x_alt = self.file_cursor.x_alt.saturating_add(1);
-                            } else {
-                                self.file_cursor.x = self.file_cursor.x.saturating_sub(1);
-                            }
+                            self.file_cursor = self.file_cursor.saturating_sub(1);
                         }
                         VpnSelection::Scan => {
                             self.selection.selected_index = self.selection.items.len() - 2;
@@ -723,11 +697,7 @@ impl Component for VpnState {
                 if let Some(selected) = self.selection.selected() {
                     match selected {
                         VpnSelection::Files => {
-                            if self.file_cursor.x_alt > 0 {
-                                self.file_cursor.x_alt = self.file_cursor.x_alt.saturating_sub(1);
-                            } else {
-                                self.file_cursor.x = self.file_cursor.x.saturating_add(1);
-                            }
+                            self.file_cursor = self.file_cursor.saturating_add(1);
                         }
                         VpnSelection::Filter => {
                             self.selection.selected_index = 0;
@@ -741,8 +711,7 @@ impl Component for VpnState {
             KeyCode::Down => {
                 if let Some(selected) = self.selection.selected() {
                     if selected == &VpnSelection::Files {
-                        self.file_cursor.y = self.file_cursor.y.saturating_add(1);
-                        // file movement
+                        self.file_cursor = self.file_cursor.saturating_add(ctx.vpn_cols);
                     } else {
                         self.selection.set(VpnSelection::Files);
                     }
@@ -750,7 +719,7 @@ impl Component for VpnState {
             }
             KeyCode::Up => {
                 if let Some(selected) = self.selection.selected() {
-                    self.file_cursor.y = self.file_cursor.y.saturating_sub(1);
+                    self.file_cursor = self.file_cursor.saturating_sub(ctx.vpn_cols);
                     // BUG: you must be at first file to go back instead
                     // it should work for the entire top row
                     // if selected == &VpnSelection::Files && self.file_cursor == 0 {

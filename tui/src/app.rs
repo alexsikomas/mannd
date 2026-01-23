@@ -13,7 +13,7 @@ use tokio::sync::mpsc::{self, Sender};
 use crate::{
     error::TuiError,
     state::{AppContext, InfoPrompt, PopupType, PromptState, StateCommand, UiState, View},
-    ui::render,
+    ui::{UiContext, UiMessage},
 };
 
 pub struct App;
@@ -50,6 +50,7 @@ impl App {
         let (action_tx, action_rx) = mpsc::channel::<NetworkAction>(32);
         // from network thread
         let (state_tx, mut state_rx) = mpsc::channel::<NetworkState>(32);
+        let (ui_tx, mut ui_rx) = mpsc::channel::<UiMessage>(32);
 
         let action_tx_clone = action_tx.clone();
         tokio::spawn(async move {
@@ -61,15 +62,24 @@ impl App {
         let mut terminal = ratatui::init();
         let mut events = EventStream::new();
 
+        let mut ui_context = UiContext::new();
+
         while !state.should_quit {
             if state.redraw {
                 let context = AppContext::create(
                     &state.networks,
                     &state.daemon_type,
                     (&state.wg_info.0, &state.wg_info.1),
+                    state.ui.vpn_cols,
                 );
-                terminal.draw(|f| render(f, &state.ui, &context))?;
+                let _ = terminal.draw(|f| ui_context.render(f, &state.ui, &context));
                 state.redraw = false;
+                match &ui_context.message {
+                    Some(msg) => {
+                        handle_ui_message(&mut state, msg);
+                    }
+                    None => {}
+                };
             }
 
             tokio::select! {
@@ -87,11 +97,19 @@ impl App {
                     }
                     state.redraw = true;
                 }
+                Some(msg) = ui_rx.recv() => {
+                    match msg {
+                        UiMessage::SetVpnCols(cols) => {
+                            state.ui.vpn_cols = cols;
+                        }
+                    }
+                }
                 Some(Ok(event)) = events.next() => {
                     state.redraw = true;
                     let context = AppContext::create(&state.networks,
                         &state.daemon_type,
-                        (&state.wg_info.0, &state.wg_info.1)
+                        (&state.wg_info.0, &state.wg_info.1),
+                        state.ui.vpn_cols,
                     );
                     if let Some(action) = state.ui.handle_event(event, &context) {
                         handle_app_action(action, &mut state, &action_tx).await;
@@ -188,6 +206,14 @@ async fn handle_app_action(
         }
         AppAction::Exit => {
             state.should_quit = true;
+        }
+    }
+}
+
+fn handle_ui_message(state: &mut AppState, msg: &UiMessage) {
+    match msg {
+        UiMessage::SetVpnCols(cols) => {
+            state.ui.vpn_cols = *cols;
         }
     }
 }

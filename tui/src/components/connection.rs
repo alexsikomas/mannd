@@ -49,14 +49,6 @@ impl<'a> Widget for Connection<'a> {
             Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)])
                 .split(area);
 
-        Clear.render(area, buf);
-        buf.set_style(
-            area,
-            Style::new()
-                .fg(theme.background.color())
-                .bg(theme.background.color()),
-        );
-
         let network_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .borders(Borders::ALL)
