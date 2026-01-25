@@ -1,7 +1,5 @@
 #!/bin/bash
 
-dbus_dir="/usr/share/dbus-1/system.d/"
-
 display_help() {
     cat <<-EOF
     Usage: $(basename "$0") [OPTIONS] <argument>
@@ -14,7 +12,6 @@ display_help() {
                         Compiles and runs the TUI debug or release build.
                         'd' or 'debug' is the default build.
                         'r' or 'release' creates the release build.
-
         -c  --com       Compiles and tests the com package in debug mode.
         -i  --install   Installs the TUI.
 
@@ -24,9 +21,6 @@ display_help() {
 
         Run the TUI in release mode:
         $(basename "$0") -t release
-
-        Run the TUI in release mode with optimisation:
-        $(basename "$0") -t r opt
 
         Compile and test the com package in debug mode:
         $(basename "$0") -c

@@ -1,22 +1,31 @@
 use futures::StreamExt;
+use postcard::{from_bytes_cobs, to_stdvec_cobs};
 use tracing::info;
 
 use com::{
     controller::DaemonType,
+    error::ManndError,
     state::network::{NetFailure, NetStart, NetSuccess, NetworkAction, NetworkActor, NetworkState},
     wireguard::store::WgMeta,
     wireless::common::AccessPoint,
 };
 use crossterm::event::EventStream;
-use tokio::sync::mpsc::{self, Sender};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{UnixSocket, UnixStream},
+    process::Child,
+    sync::mpsc::{self, Sender},
+};
 
 use crate::{
-    error::TuiError,
     state::{AppContext, InfoPrompt, PopupType, PromptState, StateCommand, UiState, View},
     ui::{UiContext, UiMessage},
 };
 
-pub struct App;
+pub struct App {
+    stream: UnixStream,
+    child: Option<Child>,
+}
 
 pub struct AppState {
     // only used in main loop
@@ -43,21 +52,21 @@ impl AppState {
 }
 
 impl App {
-    pub async fn run() -> Result<(), TuiError> {
+    pub fn new(stream: UnixStream, child: Option<Child>) -> Self {
+        Self { stream, child }
+    }
+
+    pub async fn run(&mut self) -> Result<(), ManndError> {
         let mut state = AppState::new();
 
         // to network thread
-        let (action_tx, action_rx) = mpsc::channel::<NetworkAction>(32);
+        // let (action_tx, action_rx) = mpsc::channel::<NetworkAction>(32);
         // from network thread
-        let (state_tx, mut state_rx) = mpsc::channel::<NetworkState>(32);
-        let (ui_tx, mut ui_rx) = mpsc::channel::<UiMessage>(32);
+        // let (state_tx, mut state_rx) = mpsc::channel::<NetworkState>(32);
 
-        let action_tx_clone = action_tx.clone();
-        tokio::spawn(async move {
-            NetworkActor::new()
-                .run(action_rx, action_tx_clone, state_tx)
-                .await;
-        });
+        let (mut reader, mut writer) = self.stream.split();
+
+        let (sock_tx, mut sock_rx) = mpsc::channel::<Vec<u8>>(32);
 
         let mut terminal = ratatui::init();
         let mut events = EventStream::new();
@@ -65,6 +74,7 @@ impl App {
         let mut ui_context = UiContext::new();
 
         while !state.should_quit {
+            let mut data = vec![0u8; 1024];
             if state.redraw {
                 let context = AppContext::create(
                     &state.networks,
@@ -83,26 +93,23 @@ impl App {
             }
 
             tokio::select! {
-                Some(msg) = state_rx.recv() => {
+                Some(msg) = sock_rx.recv() => {
+                    writer.writable().await?;
+                    writer.write(&msg).await?;
+                }
+                Ok(_) = reader.readable() => {
+                    reader.read(&mut data).await?;
+                    let msg = from_bytes_cobs::<NetworkState>(&mut data)?;
                     match msg {
                         NetworkState::CallAction(action) => {
-                            let _ = action_tx.send(action).await;
                         }
                         _ => {
                             if let Some(cmd) = handle_state_update(&mut state, msg).await {
-                                info!("Connection failed and sent command");
                                 state.ui.process_command(cmd);
                             }
                         }
-                    }
+                    };
                     state.redraw = true;
-                }
-                Some(msg) = ui_rx.recv() => {
-                    match msg {
-                        UiMessage::SetVpnCols(cols) => {
-                            state.ui.vpn_cols = cols;
-                        }
-                    }
                 }
                 Some(Ok(event)) = events.next() => {
                     state.redraw = true;
@@ -112,14 +119,15 @@ impl App {
                         state.ui.vpn_cols,
                     );
                     if let Some(action) = state.ui.handle_event(event, &context) {
-                        handle_app_action(action, &mut state, &action_tx).await;
+                        handle_app_action(action, &mut state, &sock_tx).await;
                     }
                 }
                 else => break,
             }
         }
 
-        let _ = action_tx.send(NetworkAction::Exit).await;
+        let exit_msg = to_stdvec_cobs(&NetworkAction::Exit)?;
+        writer.write(&exit_msg).await?;
         Ok(())
     }
 }
@@ -192,14 +200,11 @@ fn handle_failure(state: &mut AppState, failed: NetFailure) -> Option<StateComma
     }
 }
 
-async fn handle_app_action(
-    action: AppAction,
-    state: &mut AppState,
-    net_tx: &Sender<NetworkAction>,
-) {
+async fn handle_app_action(action: AppAction, state: &mut AppState, net_tx: &Sender<Vec<u8>>) {
     match action {
         AppAction::Network(action) => {
-            let _ = net_tx.send(action).await;
+            let res = to_stdvec_cobs(&action).unwrap();
+            let _ = net_tx.send(res).await;
         }
         AppAction::AddPrompt(prompt) => {
             state.ui.prompt_stack.push(prompt);
@@ -218,6 +223,7 @@ fn handle_ui_message(state: &mut AppState, msg: &UiMessage) {
     }
 }
 
+#[derive(Debug)]
 pub enum AppAction {
     Network(NetworkAction),
     AddPrompt(PromptState),

@@ -1,82 +1,37 @@
 use std::path::PathBuf;
 
 use derive_builder::Builder;
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use postcard::to_stdvec_cobs;
+use serde::{Deserialize, Serialize};
+use tokio::{net::unix::WriteHalf, sync::mpsc::Sender};
 use tracing::info;
 
 use crate::{
     controller::{Controller, DaemonType},
+    error::ManndError,
     state::signals::{SignalManager, SignalUpdate},
     wireguard::store::WgMeta,
     wireless::common::{AccessPoint, Security},
 };
 
-pub struct NetworkActor {}
+pub struct NetworkActor<'a> {
+    pub controller: Controller,
+    pub signal_manager: SignalManager<'a>,
+}
 
-impl NetworkActor {
-    pub fn new() -> Self {
-        Self {}
-    }
-
-    pub async fn run(
-        &mut self,
-        mut action_rx: Receiver<NetworkAction>,
-        action_tx: Sender<NetworkAction>,
-        state_tx: Sender<NetworkState>,
-    ) {
-        // networking thread
-        // Signal <-> Network -> UI Update
-        //
-        // A signal update leads to a network update i.e. if networks are
-        // loaded and we get a signal then this leads to getting the
-        // network values via a network update
-        let (signal_tx, mut signal_rx) = mpsc::channel::<SignalUpdate>(32);
-        let mut signal_manager = SignalManager::new();
-
-        if let Ok(mut controller) = Controller::new().await {
-            controller.determine_adapter().await;
-            let daemon = controller.daemon_type();
-
-            if let Some(d) = &daemon {
-                let _ = state_tx.send(NetworkState::SetDaemon(d.clone())).await;
-            }
-
-            loop {
-                tokio::select! {
-                    Some(action) = action_rx.recv() => {
-                        if handle_action(&mut controller, state_tx.clone(), signal_tx.clone(), action).await {
-                            break;
-                        }
-                    }
-                    // add new signals to listen for
-                    Some(update) = signal_rx.recv() => {
-                        info!("New signal received");
-                        signal_manager.handle_update(update);
-                    }
-                    Some(msg) = signal_manager.recv() => {
-                        match daemon {
-                            // iwd
-                            Some(DaemonType::Iwd) => {
-                                signal_manager.process_iwd_msg(msg, action_tx.clone()).await;
-                            }
-                            // wpa
-                            Some(DaemonType::Wpa) => {
-                                signal_manager.process_wpa_msg(msg, action_tx.clone()).await;
-                            }
-                            _ => {
-                                break;
-                            }
-                        }
-                    }
-                };
-            }
-        } else {
-            tracing::error!("Fatal: Controller not initalised!");
-        }
+impl<'a> NetworkActor<'a> {
+    pub async fn new() -> Result<Self, ManndError> {
+        let mut controller = Controller::new().await?;
+        controller.determine_adapter().await;
+        let signal_manager = SignalManager::new();
+        Ok(Self {
+            controller,
+            signal_manager,
+        })
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum NetworkAction {
     Scan,
     // gets known & nearby networks
@@ -92,20 +47,24 @@ pub enum NetworkAction {
 
 // to update the ui, mainly
 // with prompts
+#[derive(Serialize, Deserialize)]
 pub enum NetStart {
     Connection,
     Scan,
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum NetSuccess {
     Connection,
     Scan,
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum NetFailure {
     Connection(String),
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum NetworkState {
     // Use when you want to update state
     // i.e. after connecting to a known network,
@@ -122,52 +81,53 @@ pub enum NetworkState {
 /// Returns true if we are quitting the application
 pub async fn handle_action<'a>(
     controller: &mut Controller,
-    state_update: Sender<NetworkState>,
-    signal_tx: Sender<SignalUpdate<'a>>,
     action: NetworkAction,
-) -> bool {
+    sock_tx: Sender<Vec<u8>>,
+    signal_tx: Sender<SignalUpdate<'a>>,
+) -> Result<bool, ManndError> {
     match action {
         // WIFI
         NetworkAction::GetNetworks => {
             if let Ok(aps) = controller.get_all_networks().await {
-                let _ = state_update.send(NetworkState::UpdateNetworks(aps)).await;
-                let _ = state_update
-                    .send(NetworkState::Success(NetSuccess::Scan))
-                    .await;
+                let update_msg = to_stdvec_cobs(&NetworkState::UpdateNetworks(aps))?;
+                if let Ok(()) = sock_tx.send(update_msg).await {
+                    let scan_start_msg = to_stdvec_cobs(&NetworkState::Success(NetSuccess::Scan))?;
+                    let _ = sock_tx.send(scan_start_msg).await;
+                }
             }
         }
         NetworkAction::Scan => {
-            let _ = state_update.send(NetworkState::Start(NetStart::Scan)).await;
-
-            if let Ok(()) = controller.scan(signal_tx.clone()).await {}
+            let start_scan_msg = to_stdvec_cobs(&NetworkState::Start(NetStart::Scan))?;
+            if let Ok(()) = sock_tx.send(start_scan_msg).await {
+                if let Ok(()) = controller.scan(signal_tx.clone()).await {}
+            }
         }
 
         NetworkAction::Connect(info) => {
-            let _ = state_update
-                .send(NetworkState::Start(NetStart::Connection))
-                .await;
+            let msg = to_stdvec_cobs(&NetworkState::Start(NetStart::Connection))?;
+            let _ = sock_tx.send(msg).await;
 
             match controller.network_connect(info).await {
                 Ok(()) => {
                     info!("Connection to network was successful");
-                    let _ = state_update
-                        .send(NetworkState::Success(NetSuccess::Connection))
-                        .await;
+                    let msg = to_stdvec_cobs(&NetworkState::Success(NetSuccess::Connection))?;
+                    let _ = sock_tx.send(msg).await;
                 }
                 Err(e) => {
                     tracing::error!("Connection to network was not successful.");
-                    let _ = state_update
-                        .send(NetworkState::Failed(NetFailure::Connection(e.to_string())))
-                        .await;
+                    let msg = to_stdvec_cobs(&NetworkState::Failed(NetFailure::Connection(
+                        e.to_string(),
+                    )))?;
+                    let _ = sock_tx.send(msg).await;
                 }
             }
         }
         NetworkAction::ConnectKnown(ssid, security) => {
             match controller.connect_known(ssid, security).await {
                 Ok(()) => {
-                    let _ = state_update
-                        .send(NetworkState::CallAction(NetworkAction::GetNetworks))
-                        .await;
+                    let msg =
+                        to_stdvec_cobs(&NetworkState::CallAction(NetworkAction::GetNetworks))?;
+                    let _ = sock_tx.send(msg).await;
                 }
                 Err(e) => {}
             }
@@ -190,39 +150,36 @@ pub async fn handle_action<'a>(
             if let Ok(()) = controller.start_wg().await {
                 if let Ok((names, meta)) = controller.update_wg() {
                     info!("Updated wireguard successfully");
-                    let _ = state_update
-                        .send(NetworkState::UpdateWgDb((names, meta)))
-                        .await;
-                    // info!("names: {:?}", names);
-                    // info!("meta: {:?}", meta);
+                    let msg = to_stdvec_cobs(&NetworkState::UpdateWgDb((names, meta)))?;
+                    let _ = sock_tx.send(msg).await;
                 }
             }
         }
         NetworkAction::Exit => {
             if let Ok(()) = controller.exit().await {
-                return true;
+                return Ok(true);
             }
         }
         _ => {}
     };
-    false
+    Ok(false)
 }
 
 /// For connecting to APs used by wpa and iwd
-#[derive(Builder, Debug, Clone)]
+#[derive(Builder, Debug, Serialize, Deserialize, Clone)]
 pub struct ApConnectInfo {
     pub ssid: String,
     pub security: Security,
     pub credentials: Credentials,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Credentials {
     Password(String),
     Eap(EapInfo),
 }
 
-#[derive(Builder, Debug, Clone)]
+#[derive(Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct EapInfo {
     pub eap_method: EapMethod,
     pub identity: String,
@@ -249,7 +206,7 @@ pub struct EapInfo {
     pub client_key_password: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PhaseTwo {
     Eap(EapMethod),
     // non-eap variants
@@ -261,7 +218,7 @@ pub enum PhaseTwo {
     Legacy(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EapMethod {
     TLS,
     PEAP,

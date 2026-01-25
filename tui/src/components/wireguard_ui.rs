@@ -1,14 +1,14 @@
 use com::wireguard::store::WgMeta;
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Flex, Layout, Rect},
+    layout::{Constraint, Flex, Layout, Margin, Rect},
     style::{Style, Stylize},
     text::Line,
-    widgets::{Block, Borders, Clear, Padding, Paragraph, Widget},
+    widgets::{Block, Borders, Widget},
 };
 
 use crate::{
-    state::{SelectableList, VpnSelection, VpnState},
+    state::{VpnSelection, VpnState},
     ui::{Theme, THEME},
 };
 
@@ -47,7 +47,6 @@ impl<'a> Widget for WireguardMenu<'a> {
     where
         Self: Sized,
     {
-        let theme = &self.theme;
         let mut main_area = self.render_main_block(area, buf);
 
         let item_count = match self.names.len().cmp(&self.meta.len()) {
@@ -110,48 +109,16 @@ impl<'a> Widget for WireguardMenu<'a> {
             item_areas.append(&mut cols.to_vec());
         }
 
-        for (i, area) in item_areas.iter().enumerate() {
-            let i = i + items_per_page * current_page;
+        for (mut i, area) in item_areas.iter().enumerate() {
+            i += items_per_page * current_page;
             if i > item_count {
                 break;
             }
 
-            let style = if selected_item == i {
-                Style::new().bg(theme.success.color())
-            } else {
-                Style::new().bg(theme.error.color())
-            };
-
-            match self.names.get(i) {
-                Some(name) => {
-                    let block = Block::new()
-                        .style(style)
-                        .title_top(Line::from(format!("{}", name)).left_aligned());
-                    block.render(*area, buf);
-                }
-                None => {
-                    return;
-                }
-            }
+            let is_selected =
+                selected_item == i && self.state.selection.selected() == Some(&VpnSelection::Files);
+            self.render_wg_item(*area, buf, is_selected, i);
         }
-    }
-}
-
-pub fn calc_max_cols(area: Rect) -> Option<usize> {
-    let mut max_cols = 0;
-    // from max col to min until
-    // first which provide enough pixels
-    for i in (COLS.0..=COLS.1).rev() {
-        tracing::info!("{}", area.width / (i as u16));
-        if area.width / (i as u16) > COLS.2 {
-            max_cols = i;
-            break;
-        }
-    }
-    if max_cols > 0 {
-        Some(max_cols)
-    } else {
-        None
     }
 }
 
@@ -184,11 +151,33 @@ impl<'a> WireguardMenu<'a> {
             .flex(Flex::Center)
             .split(area);
 
+        let is_block_selected = self.state.selection.selected() != Some(&VpnSelection::Files);
+
         let opt_block = Block::new()
             .borders(Borders::ALL)
-            .border_style(Style::new().fg(self.theme.accent.color()));
+            .border_style(if is_block_selected {
+                Style::new().fg(self.theme.accent.color())
+            } else {
+                Style::new().fg(self.theme.muted.color())
+            });
+
+        let opt_inner = opt_block.inner(options_layout[0]);
 
         opt_block.render(options_layout[0], buf);
+        let btn_areas = Layout::horizontal([
+            Constraint::Min(0),
+            Constraint::Length(4),
+            Constraint::Length(13),
+            Constraint::Length(6),
+            Constraint::Min(0),
+        ])
+        .flex(Flex::Center)
+        .spacing(4)
+        .split(opt_inner);
+
+        Line::from("Scan").render(btn_areas[1], buf);
+        Line::from("Get Countries").render(btn_areas[2], buf);
+        Line::from("Filter").render(btn_areas[3], buf);
     }
 
     fn alter_area_bounds(area: &mut Rect) {
@@ -224,9 +213,80 @@ impl<'a> WireguardMenu<'a> {
             }
         }
     }
+
+    fn render_wg_item(&self, area: Rect, buf: &mut Buffer, is_selected: bool, i: usize) {
+        let (border_style, text_style) = self.get_style(is_selected);
+        match self.names.get(i) {
+            Some(name) => {
+                let block = Block::new()
+                    .borders(Borders::ALL)
+                    .border_style(border_style)
+                    .border_type(ratatui::widgets::BorderType::Rounded)
+                    .style(text_style)
+                    .title_top(Line::from(format!(" {} ", name)).left_aligned());
+
+                let meta = &self.meta[i];
+                let mod_area = block.inner(area);
+
+                if meta.country != [0, 0] {
+                    let block = block.title_bottom(
+                        Line::from(format!(
+                            " [{}{}] ",
+                            char::from(meta.country[0]),
+                            char::from(meta.country[1])
+                        ))
+                        .right_aligned(),
+                    );
+                    block.render(area, buf);
+                } else {
+                    block.render(area, buf);
+                }
+
+                let mod_line = Line::from(format!(" Modified: {}", meta.last_modified));
+                let access_area = mod_area.inner(Margin::new(mod_line.width() as u16, 2));
+                mod_line.render(mod_area, buf);
+
+                if meta.last_used != 0 {
+                    let access_line = Line::from(format!(" Used: {}", meta.last_used));
+                    access_line.render(access_area, buf);
+                }
+            }
+            None => {
+                return;
+            }
+        }
+    }
+
+    // border, text
+    fn get_style(&self, is_selected: bool) -> (Style, Style) {
+        if is_selected {
+            let border = Style::new().fg(self.theme.accent.color());
+            let text = Style::new().fg(self.theme.info.color());
+            (border, text)
+        } else {
+            let border = Style::new().fg(self.theme.muted.color());
+            let text = Style::new().fg(self.theme.muted.color());
+            (border, text)
+        }
+    }
 }
 
-fn render_wg_item<'a>(name: &'a String, meta: &'a WgMeta) {}
+pub fn calc_max_cols(area: Rect) -> Option<usize> {
+    let mut max_cols = 0;
+    // from max col to min until
+    // first which provide enough pixels
+    for i in (COLS.0..=COLS.1).rev() {
+        if area.width / (i as u16) > COLS.2 {
+            max_cols = i;
+            break;
+        }
+    }
+    if max_cols > 0 {
+        Some(max_cols)
+    } else {
+        None
+    }
+}
 
 struct Entry<'a> {
     name: &'a String,

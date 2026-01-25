@@ -18,9 +18,9 @@ use neli::{
     utils::Groups,
 };
 
-use crate::error::ComError;
+use crate::error::ManndError;
 
-pub async fn get_name(index: u32) -> Result<String, ComError> {
+pub async fn get_name(index: u32) -> Result<String, ManndError> {
     let socket =
         NlSocketHandle::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty())?;
     let ifinfomsg = IfinfomsgBuilder::default()
@@ -56,7 +56,7 @@ pub async fn get_name(index: u32) -> Result<String, ComError> {
     Ok("".to_string())
 }
 
-pub async fn get_index(interface: &'static str) -> Result<u32, ComError> {
+pub async fn get_index(interface: &'static str) -> Result<u32, ManndError> {
     let socket =
         NlSocketHandle::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty())?;
 
@@ -101,7 +101,7 @@ pub async fn get_index(interface: &'static str) -> Result<u32, ComError> {
     }
 
     if index == 0 {
-        return Err(ComError::OperationFailed(
+        return Err(ManndError::OperationFailed(
             "Cannot find wg-mannd index!".to_string(),
         ));
     }

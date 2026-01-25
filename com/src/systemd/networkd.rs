@@ -5,11 +5,11 @@ use std::{
 };
 
 use tokio::{
-    fs::{File, read_dir},
+    fs::{read_dir, File},
     io::AsyncWriteExt,
 };
 
-use crate::error::ComError;
+use crate::error::ManndError;
 
 const NETWORK_FOLDER: &'static str = "/etc/systemd/network/";
 const VIRTUAL_INTERFACE: &'static str = "mannd";
@@ -37,7 +37,8 @@ impl Section {
     async fn write(&self, file: &mut File) -> io::Result<()> {
         file.write(format!("[{}]\n", self.name).as_bytes()).await?;
         for (key, val) in &self.props {
-            file.write_all(format!("{}={}\n", key, val).as_bytes()).await?;
+            file.write_all(format!("{}={}\n", key, val).as_bytes())
+                .await?;
             if &self.props[self.props.len() - 1].0 == key {
                 file.write_all(b"\n").await?;
             }
@@ -46,7 +47,7 @@ impl Section {
     }
 }
 
-pub async fn get_netd_files() -> Result<Vec<PathBuf>, ComError> {
+pub async fn get_netd_files() -> Result<Vec<PathBuf>, ManndError> {
     let extensions = vec!["netdev", "network"];
     let mut dirs: Vec<PathBuf> = vec![PathBuf::from(NETWORK_FOLDER)];
     let mut files: Vec<PathBuf> = vec![];
@@ -70,7 +71,7 @@ pub async fn get_netd_files() -> Result<Vec<PathBuf>, ComError> {
     Ok(files)
 }
 
-pub async fn init_virtual_interface(mut ips: Vec<IpAddr>, dns: IpAddr) -> Result<(), ComError> {
+pub async fn init_virtual_interface(mut ips: Vec<IpAddr>, dns: IpAddr) -> Result<(), ManndError> {
     // Since virt interface made by netlink we use .network file
     let path = PathBuf::from(format!("{}/30-mannd.network", NETWORK_FOLDER));
     let mut file = File::create(&path).await?;
@@ -100,13 +101,13 @@ mod tests {
     use std::net::Ipv4Addr;
 
     #[tokio::test]
-    async fn test_get_netd_files() -> Result<(), ComError> {
+    async fn test_get_netd_files() -> Result<(), ManndError> {
         let _ = get_netd_files().await?;
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_init_virt_interface() -> Result<(), ComError> {
+    async fn test_init_virt_interface() -> Result<(), ManndError> {
         init_virtual_interface(
             vec![IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))],
             IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),

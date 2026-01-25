@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
 use tokio_stream::{StreamExt, StreamMap};
 use tracing::info;
-use zbus::{Message, proxy::SignalStream, zvariant::OwnedValue};
+use zbus::{proxy::SignalStream, zvariant::OwnedValue, Message};
 
 use crate::state::network::NetworkAction;
 
@@ -57,7 +57,7 @@ impl<'a> SignalManager<'a> {
         self.signals.next().await
     }
 
-    pub async fn process_iwd_msg(&mut self, msg: (usize, Message), tx: Sender<NetworkAction>) {
+    pub async fn process_iwd_msg(&mut self, msg: (usize, Message)) -> Option<NetworkAction> {
         let (_, changed_properties, _): (String, HashMap<String, OwnedValue>, Vec<String>) =
             msg.1.body().deserialize().unwrap();
 
@@ -71,22 +71,24 @@ impl<'a> SignalManager<'a> {
             .get("Scanning")
             .is_some_and(|val| val.eq(&OwnedValue::from(false)))
         {
-            let _ = tx.send(NetworkAction::GetNetworks).await;
             SignalUpdate::Remove(msg.0);
+            return Some(NetworkAction::GetNetworks);
         }
+        None
     }
 
-    pub async fn process_wpa_msg(&mut self, msg: (usize, Message), tx: Sender<NetworkAction>) {
+    pub async fn process_wpa_msg(&mut self, msg: (usize, Message)) -> Option<NetworkAction> {
         let body = msg.1.body();
         if let Some(method) = body.message().header().member() {
             info!("PROCESSING: {:?}", method);
             match method.as_str() {
                 "ScanDone" => {
-                    let _ = tx.send(NetworkAction::GetNetworks).await;
                     self.handle_update(SignalUpdate::Remove(msg.0));
+                    return Some(NetworkAction::GetNetworks);
                 }
-                _ => {}
-            };
+                _ => return None,
+            }
         }
+        None
     }
 }
