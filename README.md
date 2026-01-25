@@ -57,7 +57,7 @@ Bad output (missing `-u` flag):
 root    682  0.0  0.0  16260  5504 ? Ss Nov08 0:00 /usr/bin/wpa_supplicant -u -s -O /run/wpa_supplicant
 root    715  0.0  0.0  17164 10972 ? Ss Nov08 0:01 /usr/bin/wpa_supplicant -c/etc/wpa_supplicant/wpa_supplicant-interface.conf -iinterface
 ```
-While there is a `-u` flag present it is for a general `wpa_supplicant` service not for our main Wi-Fi interface. The main interface is run on the second line, in-fact if this had a `-u` flag we would run into an error as only one can exist at a time.
+While there is a `-u` flag present it is for a general `wpa_supplicant` service not for our main Wi-Fi interface. The main interface is run on the second line, in fact if this had a `-u` flag we would run into an error as only one can exist at a time.
 
 Remove the `-u` flags from any `wpa_supplicant` service that isn't you main one. You will find the flag on the `ExecStart` section.
 
@@ -70,25 +70,10 @@ or
 sudo [your favourite editor] /etc/systemd/system/multi-user.target.wants/wpa_supplicant@interface.service
 ```
 
-Run:
+Finally reload everything with:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl restart wpa_supplicant@interface.service
-```
-Final step is finding the D-Bus policy file usually at: `/usr/share/dbus-1/system.d/wpa_supplicant.conf`
-
-Edit it with sudo adding the following section inside of the `<busconfig>` tags:
-```xml
-<policy user="your_username_here">
-    <allow own="fi.w1.wpa_supplicant1"/>
-    <allow send_destination="fi.w1.wpa_supplicant1"/>
-    <allow receive_sender="fi.w1.wpa_supplicant1" receive_type="signal"/>
-</policy>
-```
-
-Lastly restart the D-Bus:
-```bash
-sudo systemctl reload dbus
 ```
 
 </details>
