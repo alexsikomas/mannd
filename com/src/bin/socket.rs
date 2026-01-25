@@ -14,10 +14,15 @@ use com::{
     },
     UNIX_SOCK_PATH,
 };
+use futures::{SinkExt, StreamExt};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixListener,
     sync::mpsc,
+};
+use tokio_util::{
+    bytes::BufMut,
+    codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
 };
 
 struct UnixSocketGuard {
@@ -39,27 +44,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let guard = UnixSocketGuard::new(UNIX_SOCK_PATH).await?;
     let (mut sock, _) = guard.listener.accept().await?;
-    let (mut reader, mut writer) = sock.split();
+    let (sock_reader, sock_writer) = sock.split();
 
     let (sock_tx, mut sock_rx) = mpsc::channel::<Vec<u8>>(32);
     let (signal_tx, mut signal_rx) = mpsc::channel::<SignalUpdate>(32);
 
     let mut actor = NetworkActor::new().await?;
     let daemon = actor.controller.daemon_type();
+    let mut writer = FramedWrite::new(sock_writer, LengthDelimitedCodec::new());
+    let mut reader = FramedRead::new(sock_reader, LengthDelimitedCodec::new());
 
     loop {
-        let mut data = vec![0u8; 1024];
         tokio::select! {
             // write message for tui to read
             Some(msg) = sock_rx.recv() => {
-                if let Err(e) = writer.write_all(&msg).await {
-                    eprintln!("Failed to write to socket: {}", e);
-                    return Err(ManndError::SocketWrite)?;
-                }
+                writer.send(msg.into()).await.map_err(|_| ManndError::SocketWrite)?;
             },
-            Ok(_) = reader.readable() => {
-                reader.read(&mut data).await?;
-                let action = postcard::from_bytes_cobs::<NetworkAction>(&mut data)?;
+            Some(frame_res) = reader.next() => {
+                let mut frame = frame_res?;
+                let action = postcard::from_bytes_cobs::<NetworkAction>(&mut frame)?;
                 let res = handle_action(&mut actor.controller, action, sock_tx.clone(), signal_tx.clone()).await?;
                 if res == true {
                     return Ok(());

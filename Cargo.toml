@@ -13,6 +13,9 @@ tokio = { version = "1.47.1", features = [
     "sync",
     "signal",
 ] }
+tokio-util = { version = "0.7.18", default-features = false, features = [
+    "codec",
+] }
 futures = "0.3.31"
 futures-timer = "3.0.3"
 toml = "0.9.7"

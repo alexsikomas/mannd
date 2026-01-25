@@ -1,7 +1,11 @@
-use futures::StreamExt;
 use postcard::{from_bytes_cobs, to_stdvec_cobs};
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::info;
 
+use crate::{
+    state::{AppContext, InfoPrompt, PopupType, PromptState, StateCommand, UiState, View},
+    ui::{UiContext, UiMessage},
+};
 use com::{
     controller::DaemonType,
     error::ManndError,
@@ -10,16 +14,12 @@ use com::{
     wireless::common::AccessPoint,
 };
 use crossterm::event::EventStream;
+use futures::{SinkExt, StreamExt};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{UnixSocket, UnixStream},
     process::Child,
     sync::mpsc::{self, Sender},
-};
-
-use crate::{
-    state::{AppContext, InfoPrompt, PopupType, PromptState, StateCommand, UiState, View},
-    ui::{UiContext, UiMessage},
 };
 
 pub struct App {
@@ -64,7 +64,9 @@ impl App {
         // from network thread
         // let (state_tx, mut state_rx) = mpsc::channel::<NetworkState>(32);
 
-        let (mut reader, mut writer) = self.stream.split();
+        let (reader, writer) = self.stream.split();
+        let mut reader = FramedRead::new(reader, LengthDelimitedCodec::new());
+        let mut writer = FramedWrite::new(writer, LengthDelimitedCodec::new());
 
         let (sock_tx, mut sock_rx) = mpsc::channel::<Vec<u8>>(32);
 
@@ -94,12 +96,11 @@ impl App {
 
             tokio::select! {
                 Some(msg) = sock_rx.recv() => {
-                    writer.writable().await?;
-                    writer.write(&msg).await?;
+                    writer.send(msg.into()).await.map_err(|_| ManndError::SocketWrite)?;
                 }
-                Ok(_) = reader.readable() => {
-                    reader.read(&mut data).await?;
-                    let msg = from_bytes_cobs::<NetworkState>(&mut data)?;
+                Some(frame_res) = reader.next() => {
+                    let mut frame = frame_res?;
+                    let msg = from_bytes_cobs::<NetworkState>(&mut frame)?;
                     match msg {
                         NetworkState::CallAction(action) => {
                         }
@@ -127,7 +128,10 @@ impl App {
         }
 
         let exit_msg = to_stdvec_cobs(&NetworkAction::Exit)?;
-        writer.write(&exit_msg).await?;
+        writer
+            .send(exit_msg.into())
+            .await
+            .map_err(|_| ManndError::SocketWrite)?;
         Ok(())
     }
 }
