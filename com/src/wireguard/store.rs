@@ -5,9 +5,10 @@ use redb::{
     Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition, TypeName,
     Value,
 };
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::error::ComError;
+use crate::error::ManndError;
 
 const WG_TABLE: TableDefinition<String, WgMeta> = TableDefinition::new("wg_table");
 const WG_DIR: &'static str = "/etc/wireguard/";
@@ -17,7 +18,7 @@ pub struct WgStore {
 }
 
 impl WgStore {
-    pub fn init() -> Result<Self, ComError> {
+    pub fn init() -> Result<Self, ManndError> {
         let mut path = match env::var_os("XDG_STATE_HOME") {
             Some(val) => PathBuf::from(val),
             None => {
@@ -42,7 +43,7 @@ impl WgStore {
     /// Searches WG_DIR for .conf file, returning a hashmap of the filename
     /// and metadata information in the form of WgMeta, country field is
     /// uninitialised
-    pub fn update_files(&self) -> Result<(), ComError> {
+    pub fn update_files(&self) -> Result<(), ManndError> {
         let mut files: HashMap<String, WgMeta, RandomState> = HashMap::default();
         let mut dir = fs::read_dir(WG_DIR)?;
         while let Some(entry) = dir.next() {
@@ -69,7 +70,7 @@ impl WgStore {
         let db_data = match self.db_data() {
             Ok(data) => Some(data),
             Err(e) => match e {
-                ComError::RedbTable(ref table) => {
+                ManndError::RedbTable(ref table) => {
                     // if wg_table does not exist then we haven't written any data
                     // which is not an error
                     if table.to_string().eq("Table 'wg_table' does not exist") {
@@ -118,7 +119,7 @@ impl WgStore {
         Ok(())
     }
 
-    fn db_data(&self) -> Result<HashMap<String, WgMeta, RandomState>, ComError> {
+    fn db_data(&self) -> Result<HashMap<String, WgMeta, RandomState>, ManndError> {
         let read = self.database.begin_read()?;
         let table = read.open_table(WG_TABLE)?;
         let mut data: HashMap<String, WgMeta, RandomState> =
@@ -131,7 +132,7 @@ impl WgStore {
         Ok(data)
     }
 
-    pub fn get_ordered_files(&self) -> Result<(Vec<String>, Vec<WgMeta>), ComError> {
+    pub fn get_ordered_files(&self) -> Result<(Vec<String>, Vec<WgMeta>), ManndError> {
         let mut names: Vec<String> = vec![];
         let mut meta: Vec<WgMeta> = vec![];
 
@@ -154,13 +155,13 @@ impl WgStore {
 
 // since last_used is the first item derive eq
 // to compare by time
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct WgMeta {
     // unix timestamp if 0 not used
-    last_used: u64,
-    last_modified: u64,
+    pub last_used: u64,
+    pub last_modified: u64,
     // ISO 3166-1 alpha-2
-    country: [u8; 2],
+    pub country: [u8; 2],
 }
 
 impl Value for WgMeta {

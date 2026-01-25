@@ -11,12 +11,14 @@ use crossterm::event::{Event, KeyCode, KeyEvent};
 
 use crate::app::AppAction;
 
+#[derive(Debug)]
 pub enum StateResult {
     Consumed,
     Command(StateCommand),
     Ignored,
 }
 
+#[derive(Debug)]
 pub enum StateCommand {
     Exit,
     ChangeView(View),
@@ -627,6 +629,7 @@ impl MainMenuSelection {
 #[derive(Debug, PartialEq)]
 pub enum VpnSelection {
     // Connect,
+    Toggle,
     Scan,
     Country,
     Filter,
@@ -638,6 +641,7 @@ impl VpnSelection {
     pub fn as_str(&self) -> &'static str {
         match self {
             // Self::Connect => "Connect",
+            Self::Toggle => "Toggle",
             Self::Scan => "Scan Files",
             Self::Country => "Get Countries",
             Self::Filter => "Filter",
@@ -662,7 +666,7 @@ impl VpnState {
 
     fn get_actions() -> SelectableList<VpnSelection> {
         SelectableList::new(vec![
-            // VpnSelection::Connect,
+            VpnSelection::Toggle,
             VpnSelection::Scan,
             VpnSelection::Country,
             VpnSelection::Filter,
@@ -673,9 +677,6 @@ impl VpnState {
 
 impl Component for VpnState {
     fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
-        if let Some(selected) = self.selection.selected() {
-            tracing::info!("{:?}", selected)
-        }
         match key.code {
             // only down arrow gets into files
             KeyCode::Left => {
@@ -684,7 +685,7 @@ impl Component for VpnState {
                         VpnSelection::Files => {
                             self.file_cursor = self.file_cursor.saturating_sub(1);
                         }
-                        VpnSelection::Scan => {
+                        VpnSelection::Toggle => {
                             self.selection.selected_index = self.selection.items.len() - 2;
                         }
                         _ => {
@@ -719,7 +720,11 @@ impl Component for VpnState {
             }
             KeyCode::Up => {
                 if let Some(selected) = self.selection.selected() {
-                    self.file_cursor = self.file_cursor.saturating_sub(ctx.vpn_cols);
+                    if self.file_cursor < ctx.vpn_cols {
+                        self.selection.selected_index = 0;
+                    } else {
+                        self.file_cursor = self.file_cursor.saturating_sub(ctx.vpn_cols);
+                    }
                     // BUG: you must be at first file to go back instead
                     // it should work for the entire top row
                     // if selected == &VpnSelection::Files && self.file_cursor == 0 {

@@ -6,12 +6,14 @@
 </div>
 
 ## Why mannd?
-`systemd-networkd` is a powerful and lightweight networking daemon, but managing Wi-Fi or on-the-fly VPN connections often requires manual configurations or switching between various userspace tools like `iwctl` and `wg-quick`. `mannd` aims to condense the process into just one TUI, similar to `nmtui`.
+`systemd-networkd` is a powerful and lightweight networking daemon, but managing Wi-Fi or on-the-fly VPN connections often requires manual configurations or switching between various userspace tools like `iwctl` and `wg-quick`. 
+
+`mannd` aims to condense the process into just one TUI, similar to `nmtui`.
 
 ### Features
 #### Wi-Fi Management:
 - Scan for nearby networks
-- Connect to WPA2/WPA3 networks
+- Connect to WPA2/WPA3 networks (via Wi-Fi daemons)
 - Manage and switch between saved networks
 - Forget known networks
 #### VPN
@@ -61,19 +63,34 @@ Remove the `-u` flags from any `wpa_supplicant` service that isn't you main one.
 
 Edit your `.service` file with:
 ```bash
- sudo systemctl edit wpa_supplicant@interface.service
+sudo systemctl edit wpa_supplicant@interface.service
 ```
 or
 ```bash
 sudo [your favourite editor] /etc/systemd/system/multi-user.target.wants/wpa_supplicant@interface.service
 ```
 
-
-Finally run:
+Run:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl restart wpa_supplicant@interface.service
 ```
+Final step is finding the D-Bus policy file usually at: `/usr/share/dbus-1/system.d/wpa_supplicant.conf`
+
+Edit it with sudo adding the following section inside of the `<busconfig>` tags:
+```xml
+<policy user="your_username_here">
+    <allow own="fi.w1.wpa_supplicant1"/>
+    <allow send_destination="fi.w1.wpa_supplicant1"/>
+    <allow receive_sender="fi.w1.wpa_supplicant1" receive_type="signal"/>
+</policy>
+```
+
+Lastly restart the D-Bus:
+```bash
+sudo systemctl reload dbus
+```
+
 </details>
 
 ### Installation
@@ -82,8 +99,7 @@ sudo systemctl restart wpa_supplicant@interface.service
 git clone https://github.com/alexsikomas/mannd
 cd mannd
 
-# If you don't have UPX installed remove the opt keyword
-run.sh -t r opt
+./run.sh -t r
 sudo mv ./target/release/tui /usr/local/bin/mannd
 ```
 

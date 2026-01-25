@@ -1,19 +1,19 @@
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc::Sender};
+use tokio::sync::{mpsc::Sender, RwLock};
 
 use tracing::info;
 use zbus::{
-    Connection, Proxy,
     fdo::ObjectManagerProxy,
     zvariant::{ObjectPath, OwnedObjectPath},
+    Connection, Proxy,
 };
 
 use crate::{
-    error::ComError,
+    error::ManndError,
     state::{network::EapInfo, signals::SignalUpdate},
     wireless::{
         agent::AgentState,
-        common::{AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy},
+        common::{get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security},
     },
 };
 
@@ -34,7 +34,7 @@ impl Iwd {
     pub async fn new(
         conn: Connection,
         agent_state: Arc<RwLock<AgentState>>,
-    ) -> Result<Self, ComError> {
+    ) -> Result<Self, ManndError> {
         let service = "net.connman.iwd".to_string();
 
         match Self::find_adapter_path(&conn, &service).await {
@@ -44,10 +44,10 @@ impl Iwd {
                 path,
                 agent_state,
             }),
-            Err(e) => Err(ComError::AdapterNotFound(format!(
+            Err(e) => Err(ManndError::AdapterNotFound(format!(
                 "Could not find an adapter, is iwd installed?\n Error: {e}"
             ))),
-            _ => Err(ComError::AdapterNotFound(
+            _ => Err(ManndError::AdapterNotFound(
                 "Could not find an adapter, is iwd installed?".to_string(),
             )),
         }
@@ -57,7 +57,7 @@ impl Iwd {
     ///
     /// Since iwd does not allow connecting via BSSID the connection band is determined by signal
     /// strength internally by iwd, this can be tweaked in the iwd configuration file
-    pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ComError> {
+    pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ManndError> {
         match self.agent_state.try_write() {
             Ok(mut writer) => {
                 writer.password = Some(psk.clone());
@@ -95,16 +95,16 @@ impl Iwd {
             }
             Err(e) => {
                 tracing::error!("Error occured: {e}");
-                Err(ComError::OperationFailed(format!("{}", e)))
+                Err(ManndError::OperationFailed(format!("{}", e)))
             }
         }
     }
 
-    pub async fn connect_network_eap(&self, ssid: String, eap: EapInfo) -> Result<(), ComError> {
+    pub async fn connect_network_eap(&self, ssid: String, eap: EapInfo) -> Result<(), ManndError> {
         Ok(())
     }
 
-    pub async fn connect_known(&self, ssid: String, security: Security) -> Result<(), ComError> {
+    pub async fn connect_known(&self, ssid: String, security: Security) -> Result<(), ManndError> {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -124,7 +124,7 @@ impl Iwd {
     }
 
     /// Disconnects from the current WiFi network, does not remove the network
-    pub async fn disconnect(&self) -> Result<(), ComError> {
+    pub async fn disconnect(&self) -> Result<(), ManndError> {
         let proxy = self.get_interface_proxy("Station").await?;
         let resp: Result<(), zbus::Error> = proxy.call("Disconnect", &()).await;
         info!("Calling the disconnect function");
@@ -135,24 +135,24 @@ impl Iwd {
             }
             Err(err) => {
                 tracing::error!("Could not disconnect. {err}");
-                Err(ComError::OperationFailed("Disconnect".to_string()))
+                Err(ManndError::OperationFailed("Disconnect".to_string()))
             }
         }
     }
 
     /// Returns the current status of the connected WiFi network
-    pub async fn status(&self) -> Result<String, ComError> {
+    pub async fn status(&self) -> Result<String, ManndError> {
         todo!()
     }
 
     /// Lists all networks which are available to be connected to including networks that are out
     /// of range
-    pub async fn list_configured_networks(&self) -> Result<Vec<String>, ComError> {
+    pub async fn list_configured_networks(&self) -> Result<Vec<String>, ManndError> {
         todo!()
     }
 
     /// Removes a network from the configured networks
-    pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ComError> {
+    pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ManndError> {
         info!(
             "/net/connman/iwd/{}_{}",
             Self::ssid_to_hex(ssid.to_string()),
@@ -179,14 +179,14 @@ impl Iwd {
             }
             Err(e) => {
                 tracing::error!("Error occured while trying to forget network: {e}");
-                Err(ComError::OperationFailed("Remove Network".to_string()))
+                Err(ManndError::OperationFailed("Remove Network".to_string()))
             }
         }
     }
 
     // TODO: Research impl Drop for async/converting this func to
     // use blocking zbus instead of making this public
-    pub async fn unregister_agent(&self) -> Result<(), ComError> {
+    pub async fn unregister_agent(&self) -> Result<(), ManndError> {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -206,12 +206,15 @@ impl Iwd {
             }
             Err(e) => {
                 tracing::error!("Error unregistering agent: {:?}", e);
-                Err(ComError::OperationFailed(e.to_string()))
+                Err(ManndError::OperationFailed(e.to_string()))
             }
         }
     }
 
-    pub async fn scan<'a>(&mut self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
+    pub async fn scan<'a>(
+        &mut self,
+        signal_tx: Sender<SignalUpdate<'a>>,
+    ) -> Result<(), ManndError> {
         let proxy = self.get_interface_proxy("Station").await?;
         if !get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
             proxy.call_noreply("Scan", &()).await?;
@@ -229,7 +232,7 @@ impl Iwd {
     }
 
     // Gets nearby and known networks
-    pub async fn all_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+    pub async fn all_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
         let proxy = self.get_interface_proxy("Station").await?;
         let nearby_aps = proxy.call_method("GetOrderedNetworks", &()).await?.body();
         let nearby_aps: Vec<(OwnedObjectPath, i16)> = nearby_aps.deserialize()?;
@@ -254,7 +257,7 @@ impl Iwd {
         Ok(access_points)
     }
 
-    pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+    pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
         let mut known_networks: Vec<AccessPoint> = vec![];
         let proxy = ObjectManagerProxy::new(&self.conn, self.service.clone(), "/").await?;
         for (path, interface) in proxy.get_managed_objects().await? {
@@ -288,7 +291,7 @@ impl Iwd {
     async fn find_adapter_path(
         conn: &Connection,
         service: &String,
-    ) -> Result<Option<String>, ComError> {
+    ) -> Result<Option<String>, ManndError> {
         let proxy = ObjectManagerProxy::new(conn, service.clone(), "/").await?;
         for (path, interface) in proxy.get_managed_objects().await? {
             // BUG: if multiple adapters will just return first one
@@ -304,7 +307,7 @@ impl Iwd {
         bytes.into_iter().map(|b| format!("{:02x}", b)).collect()
     }
 
-    pub async fn register_agent(&self) -> Result<(), ComError> {
+    pub async fn register_agent(&self) -> Result<(), ManndError> {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -323,12 +326,12 @@ impl Iwd {
             }
             Err(e) => {
                 tracing::error!("Error registering agent: {:?}", e);
-                Err(ComError::OperationFailed(e.to_string()))
+                Err(ManndError::OperationFailed(e.to_string()))
             }
         }
     }
 
-    async fn get_interface_proxy(&self, interface: &'static str) -> Result<Proxy<'_>, ComError> {
+    async fn get_interface_proxy(&self, interface: &'static str) -> Result<Proxy<'_>, ManndError> {
         Ok(Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -338,7 +341,7 @@ impl Iwd {
         .await?)
     }
 
-    async fn get_ap_info(&self, network: impl Into<String>) -> Result<AccessPoint, ComError> {
+    async fn get_ap_info(&self, network: impl Into<String>) -> Result<AccessPoint, ManndError> {
         let network: String = network.into();
         let proxy = zbus::Proxy::new(
             &self.conn,
@@ -384,7 +387,7 @@ impl Iwd {
         Ok(ap)
     }
 
-    pub async fn get_modes(&self) -> Result<Vec<String>, ComError> {
+    pub async fn get_modes(&self) -> Result<Vec<String>, ManndError> {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
