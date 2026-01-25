@@ -6,12 +6,14 @@
 </div>
 
 ## Why mannd?
-`systemd-networkd` is a powerful and lightweight networking daemon, but managing Wi-Fi or on-the-fly VPN connections often requires manual configurations or switching between various userspace tools like `iwctl` and `wg-quick`. `mannd` aims to condense the process into just one TUI, similar to `nmtui`.
+`systemd-networkd` is a powerful and lightweight networking daemon, but managing Wi-Fi or on-the-fly VPN connections often requires manual configurations or switching between various userspace tools like `iwctl` and `wg-quick`. 
+
+`mannd` aims to condense the process into just one TUI, similar to `nmtui`.
 
 ### Features
 #### Wi-Fi Management:
 - Scan for nearby networks
-- Connect to WPA2/WPA3 networks
+- Connect to WPA2/WPA3 networks (via Wi-Fi daemons)
 - Manage and switch between saved networks
 - Forget known networks
 #### VPN
@@ -55,25 +57,25 @@ Bad output (missing `-u` flag):
 root    682  0.0  0.0  16260  5504 ? Ss Nov08 0:00 /usr/bin/wpa_supplicant -u -s -O /run/wpa_supplicant
 root    715  0.0  0.0  17164 10972 ? Ss Nov08 0:01 /usr/bin/wpa_supplicant -c/etc/wpa_supplicant/wpa_supplicant-interface.conf -iinterface
 ```
-While there is a `-u` flag present it is for a general `wpa_supplicant` service not for our main Wi-Fi interface. The main interface is run on the second line, in-fact if this had a `-u` flag we would run into an error as only one can exist at a time.
+While there is a `-u` flag present it is for a general `wpa_supplicant` service not for our main Wi-Fi interface. The main interface is run on the second line, in fact if this had a `-u` flag we would run into an error as only one can exist at a time.
 
 Remove the `-u` flags from any `wpa_supplicant` service that isn't you main one. You will find the flag on the `ExecStart` section.
 
 Edit your `.service` file with:
 ```bash
- sudo systemctl edit wpa_supplicant@interface.service
+sudo systemctl edit wpa_supplicant@interface.service
 ```
 or
 ```bash
 sudo [your favourite editor] /etc/systemd/system/multi-user.target.wants/wpa_supplicant@interface.service
 ```
 
-
-Finally run:
+Finally reload everything with:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl restart wpa_supplicant@interface.service
 ```
+
 </details>
 
 ### Installation
@@ -82,8 +84,7 @@ sudo systemctl restart wpa_supplicant@interface.service
 git clone https://github.com/alexsikomas/mannd
 cd mannd
 
-# If you don't have UPX installed remove the opt keyword
-run.sh -t r opt
+./run.sh -t r
 sudo mv ./target/release/tui /usr/local/bin/mannd
 ```
 

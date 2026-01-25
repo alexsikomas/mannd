@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum ComError {
+pub enum ManndError {
     #[error("Netlink Message Error: {0}")]
     NeliMsg(neli::err::MsgError),
     #[error("Netlink Deserialisation Error: {0}")]
@@ -81,20 +81,27 @@ pub enum ComError {
 
     #[error("Wireguard accessed while not initialised")]
     WgAccess,
+
+    #[error("Postcard error occured")]
+    Postcard(postcard::Error),
+    #[error("Not running as root!")]
+    NotRoot,
+    #[error("Cannot write to socket")]
+    SocketWrite,
 }
 
-impl<T, P> From<neli::err::RouterError<T, P>> for ComError
+impl<T, P> From<neli::err::RouterError<T, P>> for ManndError
 where
     T: Debug + Send + Sync + 'static,
     P: Debug + Send + Sync + 'static,
 {
     fn from(err: neli::err::RouterError<T, P>) -> Self {
-        ComError::NeliRouter(Box::new(err))
+        ManndError::NeliRouter(Box::new(err))
     }
 }
 
 pub trait NeliError {
-    fn to_wifi_error(&self, msg: &str) -> ComError;
+    fn to_wifi_error(&self, msg: &str) -> ManndError;
 }
 
 pub trait ThreadSafeError: std::error::Error + Send + Sync + 'static {}
@@ -103,10 +110,10 @@ impl<T> ThreadSafeError for T where T: std::error::Error + Send + Sync + 'static
 
 macro_rules! error_with_tracing {
     ($from_type:ty, $enum_variant:ident, $log_message:literal) => {
-        impl From<$from_type> for ComError {
+        impl From<$from_type> for ManndError {
             fn from(err: $from_type) -> Self {
                 tracing::error!($log_message, err);
-                ComError::$enum_variant(err)
+                ManndError::$enum_variant(err)
             }
         }
     };
@@ -199,3 +206,4 @@ error_with_tracing!(
 error_with_tracing!(redb::CommitError, RedbCommit, "Redb commit error: {}");
 error_with_tracing!(redb::TableError, RedbTable, "Redb table error: {}");
 error_with_tracing!(redb::StorageError, RedbStorage, "Redb storage error: {}");
+error_with_tracing!(postcard::Error, Postcard, "Postcard error occured: {}");

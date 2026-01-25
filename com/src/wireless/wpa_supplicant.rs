@@ -26,17 +26,17 @@ use futures::StreamExt;
 use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::info;
 use zbus::{
-    Connection, Proxy,
     names::MemberName,
     proxy::SignalStream,
     zvariant::{self, OwnedObjectPath, OwnedValue, Value},
+    Connection, Proxy,
 };
 
 use crate::{
-    error::ComError,
+    error::ManndError,
     state::{network::EapInfo, signals::SignalUpdate},
     wireless::common::{
-        AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy,
+        get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security,
     },
 };
 
@@ -61,7 +61,7 @@ pub struct WpaBss {
 
 // To be used externally
 impl WpaSupplicant {
-    pub fn new(conn: Connection) -> Result<Self, ComError> {
+    pub fn new(conn: Connection) -> Result<Self, ManndError> {
         let service = String::from("fi.w1.wpa_supplicant1");
         let path = String::from("/fi/w1/wpa_supplicant1/Interfaces/0");
 
@@ -72,10 +72,10 @@ impl WpaSupplicant {
         })
     }
 
-    pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ComError> {
+    pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ManndError> {
         let psk_len = psk.len();
         if (psk_len < 8 || psk_len > 63) && psk_len != 0 {
-            return Err(ComError::PasswordLength);
+            return Err(ManndError::PasswordLength);
         }
         // let networks = self.networks.get(&ssid).unwrap();
 
@@ -113,21 +113,21 @@ impl WpaSupplicant {
         }
     }
 
-    pub async fn connect_network_eap(&self, ssid: String, eap: EapInfo) -> Result<(), ComError> {
+    pub async fn connect_network_eap(&self, ssid: String, eap: EapInfo) -> Result<(), ManndError> {
         Ok(())
     }
 
-    pub async fn disconnect(&self) -> Result<(), ComError> {
+    pub async fn disconnect(&self) -> Result<(), ManndError> {
         self.call_interface_method_noreply("Disconnect", &())
             .await?;
         Ok(())
     }
 
-    pub async fn status(&self) -> Result<String, ComError> {
+    pub async fn status(&self) -> Result<String, ManndError> {
         todo!()
     }
 
-    pub async fn list_configured_networks(&self) -> Result<Vec<AccessPoint>, ComError> {
+    pub async fn list_configured_networks(&self) -> Result<Vec<AccessPoint>, ManndError> {
         let networks = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
             .await?;
@@ -140,11 +140,11 @@ impl WpaSupplicant {
         Ok(aps)
     }
 
-    pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ComError> {
+    pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ManndError> {
         todo!()
     }
 
-    pub async fn scan<'a>(&self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
+    pub async fn scan<'a>(&self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ManndError> {
         if self.get_interface_prop::<bool>("Scanning").await? {
             return Ok(());
         }
@@ -154,14 +154,14 @@ impl WpaSupplicant {
         dict.insert("Type".to_string(), Value::new("active").try_to_owned()?);
         self.call_interface_method_noreply("Scan", dict).await?;
 
-        let mut scan_signal = self.get_interface_signal("ScanDone").await?;
+        let scan_signal = self.get_interface_signal("ScanDone").await?;
         match signal_tx.send(SignalUpdate::Add(scan_signal)).await {
             Ok(()) => Ok(()),
-            Err(_) => Err(ComError::SignalSend("in wpa_supplicant scan".to_string())),
+            Err(_) => Err(ManndError::SignalSend("in wpa_supplicant scan".to_string())),
         }
     }
 
-    pub async fn nearby_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+    pub async fn nearby_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
         let networks = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("BSSs")
             .await?;
@@ -192,7 +192,7 @@ impl WpaSupplicant {
     }
 
     /// Used for networks which have already been connected to by wpa supplicant
-    pub async fn get_network_info(&self, net_path: OwnedObjectPath) -> Result<WpaBss, ComError> {
+    pub async fn get_network_info(&self, net_path: OwnedObjectPath) -> Result<WpaBss, ManndError> {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -221,7 +221,7 @@ impl WpaSupplicant {
 
     /// Used for networks which are nearby by may
     /// not have been connected to yet
-    pub async fn get_bss_info(&self, bss_path: OwnedObjectPath) -> Result<WpaBss, ComError> {
+    pub async fn get_bss_info(&self, bss_path: OwnedObjectPath) -> Result<WpaBss, ManndError> {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -249,7 +249,7 @@ impl WpaSupplicant {
         })
     }
 
-    pub async fn is_active(conn: &Connection) -> Result<bool, ComError> {
+    pub async fn is_active(conn: &Connection) -> Result<bool, ManndError> {
         let proxy = Proxy::new(
             conn,
             "fi.w1.wpa_supplicant1",
@@ -275,7 +275,7 @@ impl WpaSupplicant {
         &self,
         method_name: &'static str,
         body: T,
-    ) -> Result<U, ComError>
+    ) -> Result<U, ManndError>
     where
         T: serde::ser::Serialize + zvariant::DynamicType,
         U: for<'a> zvariant::DynamicDeserialize<'a>,
@@ -295,7 +295,7 @@ impl WpaSupplicant {
         &self,
         method_name: &'static str,
         body: T,
-    ) -> Result<(), ComError>
+    ) -> Result<(), ManndError>
     where
         T: serde::ser::Serialize + zvariant::DynamicType,
     {
@@ -347,7 +347,7 @@ impl WpaSupplicant {
         security
     }
 
-    async fn check_connection<'a>(&self, mut stream: SignalStream<'a>) -> Result<(), ComError> {
+    async fn check_connection<'a>(&self, mut stream: SignalStream<'a>) -> Result<(), ManndError> {
         let start = Instant::now();
         let max_wait = Duration::from_secs(15);
 
@@ -371,13 +371,13 @@ impl WpaSupplicant {
                                 // since success also uses disconnected we check
                                 // how long we have been going first
                                 if start.elapsed().as_secs() > 2 {
-                                    return Err(ComError::ConnectionFailed(
+                                    return Err(ManndError::ConnectionFailed(
                                         "WPA rejected network request, check password".into(),
                                     ));
                                 }
                             }
                             "inactive" => {
-                                return Err(ComError::ConnectionFailed(
+                                return Err(ManndError::ConnectionFailed(
                                     "Interface is inactive!".into(),
                                 ));
                             }
@@ -386,20 +386,20 @@ impl WpaSupplicant {
                     }
                 }
                 Ok(None) => {
-                    return Err(ComError::OperationFailed(
+                    return Err(ManndError::OperationFailed(
                         "DBus stream ended unexpectedly.".into(),
                     ));
                 }
                 Err(_) => {
                     if start.elapsed() > max_wait {
-                        return Err(ComError::Timeout);
+                        return Err(ManndError::Timeout);
                     }
                 }
             }
         }
     }
 
-    async fn get_interface_prop<'a, T>(&self, prop: &'static str) -> Result<T, ComError>
+    async fn get_interface_prop<'a, T>(&self, prop: &'static str) -> Result<T, ManndError>
     where
         T: TryFrom<Value<'a>>,
         <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
@@ -417,7 +417,7 @@ impl WpaSupplicant {
     async fn get_interface_signal<'a, M>(
         &self,
         signal_name: M,
-    ) -> Result<SignalStream<'a>, ComError>
+    ) -> Result<SignalStream<'a>, ManndError>
     where
         M: TryInto<MemberName<'a>>,
         M::Error: Into<zbus::Error>,
@@ -440,7 +440,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_wpa_scan() -> Result<(), ComError> {
+    async fn test_wpa_scan() -> Result<(), ManndError> {
         let conn = Connection::system().await.unwrap();
         let mut wpa = WpaSupplicant::new(conn)?;
         let _ = wpa.get_interface_prop::<Vec<u8>>("MACAddress").await?;

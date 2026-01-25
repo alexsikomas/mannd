@@ -1,7 +1,7 @@
 use zbus::Connection;
 use zbus_systemd::systemd1::UnitProxy;
 
-use crate::error::ComError;
+use crate::error::ManndError;
 
 pub struct Systemctl {
     conn: Connection,
@@ -41,7 +41,7 @@ impl Systemctl {
         return None;
     }
 
-    pub async fn restart_networkd(&self) -> Result<(), ComError> {
+    pub async fn restart_networkd(&self) -> Result<(), ManndError> {
         if let Ok(unit) = UnitProxy::new(
             &self.conn,
             "/org/freedesktop/systemd1/unit/systemd_2dnetworkd_2eservice",

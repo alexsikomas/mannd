@@ -12,17 +12,19 @@ futures = { workspace = true }
 futures-timer = { workspace = true }
 neli = { version = "0.7.1", features = ["async", "tokio"] }
 neli-proc-macros = "0.2.1"
+postcard = { workspace = true }
 redb = "3.1.0"
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 tokio-stream = "0.1.17"
 tracing = { workspace = true }
 zbus = { version = "5.10.0", default-features = false, features = ["tokio"] }
 zbus_systemd = { version = "0.25701.0", features = [
-  "network1",
-  "resolve1",
-  "systemd1",
+    "network1",
+    "resolve1",
+    "systemd1",
 ] }
 
 [target.'cfg(target_os = "linux")']

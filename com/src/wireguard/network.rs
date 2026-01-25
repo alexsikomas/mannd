@@ -16,7 +16,7 @@ use std::{
 };
 use tokio::process::Command;
 
-use crate::{error::ComError, utils::get_index, wireguard::store::WgStore};
+use crate::{error::ManndError, utils::get_index, wireguard::store::WgStore};
 
 const INTERFACE: &str = "wg-mannd";
 
@@ -29,7 +29,7 @@ pub struct Wireguard {
 // methods used by Network
 impl Wireguard {
     /// Connects socket and sets up `INTERFACE`
-    pub async fn start_interface(db: Option<Database>) -> Result<Self, ComError> {
+    pub async fn start_interface(db: Option<Database>) -> Result<Self, ManndError> {
         let (router, _) =
             NlRouter::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty()).await?;
 
@@ -93,7 +93,7 @@ impl Wireguard {
 }
 
 impl Wireguard {
-    async fn delete_interface(&self) -> Result<(), ComError> {
+    async fn delete_interface(&self) -> Result<(), ManndError> {
         let mut attrs = RtBuffer::new();
         attrs.push(
             RtattrBuilder::default()
@@ -120,7 +120,7 @@ impl Wireguard {
         Ok(())
     }
 
-    async fn set_conf(path: &'static str) -> Result<(), ComError> {
+    async fn set_conf(path: &'static str) -> Result<(), ManndError> {
         let _ = Command::new("wg")
             .args(vec!["setconf", INTERFACE, path])
             .output()
@@ -130,7 +130,7 @@ impl Wireguard {
     }
 
     /// Adds the IPv4/6 address to the `INTERFACE`
-    async fn set_addr(&self, ips: Vec<IpAddr>) -> Result<(), ComError> {
+    async fn set_addr(&self, ips: Vec<IpAddr>) -> Result<(), ManndError> {
         for ip in ips {
             match ip {
                 IpAddr::V4(addr) => {
@@ -199,7 +199,7 @@ impl Wireguard {
     ///
     /// MTU should typically be set to 1420 since
     /// standard ethernet = 1500, worst case overhead = 80
-    async fn set_mtu(&self, mtu: u32) -> Result<(), ComError> {
+    async fn set_mtu(&self, mtu: u32) -> Result<(), ManndError> {
         let mut attrs = RtBuffer::new();
 
         attrs.push(
@@ -226,7 +226,7 @@ impl Wireguard {
     }
 
     /// Set state of `INTERFACE` via Netlink
-    async fn set_state(&self, go_up: bool) -> Result<(), ComError> {
+    async fn set_state(&self, go_up: bool) -> Result<(), ManndError> {
         let ifi = match go_up {
             true => IfinfomsgBuilder::default()
                 .ifi_family(RtAddrFamily::Unspecified)
@@ -258,7 +258,7 @@ impl Wireguard {
     ///
     /// Applies firewall mark for port 51820 to it's outgoing
     /// packets
-    async fn add_wg_fwmark(&self) -> Result<(), ComError> {
+    async fn add_wg_fwmark(&self) -> Result<(), ManndError> {
         let command = Command::new("wg")
             .args(vec!["set", INTERFACE, "fwmark", "51820"])
             .output()
@@ -266,7 +266,7 @@ impl Wireguard {
         Ok(())
     }
 
-    async fn add_ip_fwmark(&self) -> Result<(), ComError> {
+    async fn add_ip_fwmark(&self) -> Result<(), ManndError> {
         let _ = Command::new("sudo")
             .args(vec![
                 "ip", "-6", "rule", "del", "not", "fwmark", "51820", "table", "51820",
@@ -341,7 +341,7 @@ impl Wireguard {
         //     .await?;
     }
 
-    async fn prevent_default_route(&self) -> Result<(), ComError> {
+    async fn prevent_default_route(&self) -> Result<(), ManndError> {
         // neli also doesn't implement FRA_SUPPRESS_PREFIXLEN
         let _ = Command::new("sudo")
             .args(vec![
@@ -402,7 +402,7 @@ impl Wireguard {
         Ok(())
     }
 
-    async fn route_traffic(&self) -> Result<(), ComError> {
+    async fn route_traffic(&self) -> Result<(), ManndError> {
         let mut attrs = RtBuffer::new();
         // ipv4
         attrs.push(
@@ -488,7 +488,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn wg_intergration_test() -> Result<(), ComError> {
+    async fn wg_intergration_test() -> Result<(), ManndError> {
         match caps::has_cap(
             None,
             caps::CapSet::Permitted,
@@ -497,12 +497,12 @@ mod tests {
             Ok(val) => {
                 if !val {
                     println!("Wireguard integration test must be run with net_admin permission");
-                    return Err(ComError::OperationFailed("Failed".to_string()));
+                    return Err(ManndError::OperationFailed("Failed".to_string()));
                 }
             }
             Err(e) => {
                 println!("Error occured while checking capabilities! {e}");
-                return Err(ComError::OperationFailed("Failed".to_string()));
+                return Err(ManndError::OperationFailed("Failed".to_string()));
             }
         }
 

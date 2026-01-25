@@ -1,10 +1,11 @@
 use bitflags::bitflags;
 use derive_builder::Builder;
-use zbus::{Connection, zvariant::Value};
+use serde::{Deserialize, Serialize};
+use zbus::{zvariant::Value, Connection};
 
-use crate::error::ComError;
+use crate::error::ManndError;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum Security {
     Open,
     Psk,
@@ -42,7 +43,7 @@ pub async fn get_prop<'a, T>(
     path: String,
     subpath: &str,
     prop: &str,
-) -> Result<T, ComError>
+) -> Result<T, ManndError>
 where
     T: TryFrom<Value<'a>>,
     <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
@@ -52,7 +53,7 @@ where
 
     match proxy.get_property(prop).await? {
         Some(val) => Ok(<zbus::zvariant::Value<'_> as Clone>::clone(&val).downcast::<T>()?),
-        None => Err(ComError::PropertyNotFound(format!(
+        None => Err(ManndError::PropertyNotFound(format!(
             "Could not find given property {} at {}",
             prop, interface_path
         ))),
@@ -62,14 +63,17 @@ where
 /// Returns the value of a property found under the `self.path` interfaces
 /// Proxy must be passed in, use this to reduce overhead
 /// Trait bounds follow from `zbus` downcast
-pub async fn get_prop_from_proxy<'a, T>(proxy: &zbus::Proxy<'a>, prop: &str) -> Result<T, ComError>
+pub async fn get_prop_from_proxy<'a, T>(
+    proxy: &zbus::Proxy<'a>,
+    prop: &str,
+) -> Result<T, ManndError>
 where
     T: TryFrom<Value<'a>>,
     <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
 {
     match proxy.get_property(prop).await {
         Ok(val) => Ok(<zbus::zvariant::Value<'_> as Clone>::clone(&val).downcast::<T>()?),
-        Err(_e) => Err(ComError::PropertyNotFound(format!(
+        Err(_e) => Err(ManndError::PropertyNotFound(format!(
             "Could not find given property {} at {}",
             prop,
             proxy.path()
@@ -83,7 +87,8 @@ pub fn ssid_to_hex(ssid: String) -> String {
 }
 
 bitflags! {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(transparent)]
     pub struct NetworkFlags: u8 {
         const KNOWN = 0b00000001;
         const CONNECTED = 0b00000010;
@@ -92,7 +97,7 @@ bitflags! {
     }
 }
 
-#[derive(Builder, Debug, Clone)]
+#[derive(Builder, Debug, Clone, Serialize, Deserialize)]
 #[builder(pattern = "owned")]
 pub struct AccessPoint {
     pub ssid: String,

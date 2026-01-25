@@ -1,8 +1,9 @@
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::{
-    error::ComError,
+    error::ManndError,
     state::{
         network::{ApConnectInfo, Credentials},
         signals::SignalUpdate,
@@ -20,7 +21,7 @@ use tracing::info;
 use zbus::Connection;
 
 // used in outside functions
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DaemonType {
     Iwd,
     Wpa,
@@ -42,7 +43,7 @@ pub struct Controller {
 
 // Initialisations
 impl Controller {
-    pub async fn new() -> Result<Self, ComError> {
+    pub async fn new() -> Result<Self, ManndError> {
         let connection = Connection::system().await?;
         Ok(Self {
             wifi: None,
@@ -80,7 +81,7 @@ impl Controller {
         tracing::error!("Neither iwd or wpa found!");
     }
 
-    async fn connect_iwd(&mut self) -> Result<(), ComError> {
+    async fn connect_iwd(&mut self) -> Result<(), ManndError> {
         let agent_state = Arc::new(RwLock::new(AgentState::new()));
         let conn = zbus::connection::Builder::system()?
             .serve_at("/org/mannd/IwdAgent", IwdAgent::new(agent_state.clone()))?
@@ -98,7 +99,7 @@ impl Controller {
         }
     }
 
-    async fn connect_wpa(&mut self) -> Result<(), ComError> {
+    async fn connect_wpa(&mut self) -> Result<(), ManndError> {
         match WpaSupplicant::new(self.connection.clone()) {
             Ok(wpa) => {
                 self.wifi = Some(WirelessAdapter::Wpa(wpa));
@@ -108,7 +109,7 @@ impl Controller {
         }
     }
 
-    pub async fn start_wg(&mut self) -> Result<(), ComError> {
+    pub async fn start_wg(&mut self) -> Result<(), ManndError> {
         match Wireguard::start_interface(None).await {
             Ok(wg) => {
                 self.wg = Some(wg);
@@ -118,24 +119,24 @@ impl Controller {
         }
     }
 
-    pub fn update_wg(&self) -> Result<(Vec<String>, Vec<WgMeta>), ComError> {
+    pub fn update_wg(&self) -> Result<(Vec<String>, Vec<WgMeta>), ManndError> {
         match &self.wg {
             Some(wg) => {
                 wg.store.update_files()?;
                 Ok(wg.store.get_ordered_files()?)
             }
 
-            _ => Err(ComError::WgAccess),
+            _ => Err(ManndError::WgAccess),
         }
     }
 }
 
 // run actions
 impl Controller {
-    pub async fn scan<'a>(&mut self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ComError> {
+    pub async fn scan<'a>(&mut self, sock_tx: Sender<SignalUpdate<'a>>) -> Result<(), ManndError> {
         match &mut self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
-                match iwd.scan(signal_tx).await {
+                match iwd.scan(sock_tx).await {
                     Ok(_) => {
                         info!("Scan succeeded.");
                     }
@@ -146,14 +147,14 @@ impl Controller {
                 Ok(())
             }
             Some(WirelessAdapter::Wpa(wpa)) => {
-                wpa.scan(signal_tx).await?;
+                wpa.scan(sock_tx).await?;
                 Ok(())
             }
-            _ => Err(ComError::NetworkNotFound),
+            _ => Err(ManndError::NetworkNotFound),
         }
     }
 
-    pub async fn network_connect(&self, info: ApConnectInfo) -> Result<(), ComError> {
+    pub async fn network_connect(&self, info: ApConnectInfo) -> Result<(), ManndError> {
         match info.credentials {
             Credentials::Password(psk) => {
                 match &self.wifi {
@@ -191,7 +192,7 @@ impl Controller {
     }
 
     /// security is required for iwd due to the way it stores network names
-    pub async fn connect_known(&self, ssid: String, security: Security) -> Result<(), ComError> {
+    pub async fn connect_known(&self, ssid: String, security: Security) -> Result<(), ManndError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 iwd.connect_known(ssid, security).await?;
@@ -202,7 +203,7 @@ impl Controller {
         Ok(())
     }
 
-    pub async fn disconenct(&self) -> Result<(), ComError> {
+    pub async fn disconenct(&self) -> Result<(), ManndError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 iwd.disconnect().await?;
@@ -212,7 +213,7 @@ impl Controller {
             }
             None => {
                 tracing::error!("Tried to disconnect but no wifi adapter was initalised.");
-                return Err(ComError::OperationFailed(
+                return Err(ManndError::OperationFailed(
                     "No adapter to be able to disconnect from networks".to_string(),
                 ));
             }
@@ -220,7 +221,7 @@ impl Controller {
         Ok(())
     }
 
-    pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ComError> {
+    pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ManndError> {
         info!("Removing network");
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => match iwd.remove_network(ssid, security).await {
@@ -238,7 +239,7 @@ impl Controller {
     }
 
     /// Performs cleanup before the application exits
-    pub async fn exit(&self) -> Result<(), ComError> {
+    pub async fn exit(&self) -> Result<(), ManndError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 iwd.unregister_agent().await?;
@@ -252,25 +253,25 @@ impl Controller {
 
 // get information
 impl Controller {
-    pub async fn get_all_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+    pub async fn get_all_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
         match &mut self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => match iwd.all_networks().await {
                 Ok(v) => Ok(v),
-                Err(_) => Err(ComError::OperationFailed(
+                Err(_) => Err(ManndError::OperationFailed(
                     "Error while getting scanned networks!".to_string(),
                 )),
             },
             Some(WirelessAdapter::Wpa(wpa)) => match wpa.nearby_networks().await {
                 Ok(v) => Ok(v),
-                Err(_) => Err(ComError::OperationFailed(
+                Err(_) => Err(ManndError::OperationFailed(
                     "Error while getting scanned networks!".to_string(),
                 )),
             },
-            _ => Err(ComError::NetworkNotFound),
+            _ => Err(ManndError::NetworkNotFound),
         }
     }
 
-    pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ComError> {
+    pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
         match &mut self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => match iwd.get_known_networks().await {
                 Ok(aps) => {
@@ -302,7 +303,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_new() -> Result<(), ComError> {
+    async fn test_new() -> Result<(), ManndError> {
         let controller = Controller::new().await;
         match controller {
             Ok(_) => Ok(()),
