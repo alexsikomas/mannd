@@ -3,6 +3,7 @@ use std::{
     ffi::CStr,
     fs::{File, OpenOptions},
     io,
+    os::raw::{c_char, c_uint},
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -17,8 +18,39 @@ use neli::{
     socket::asynchronous::NlSocketHandle,
     utils::Groups,
 };
+use tracing::Level;
+use tracing_error::ErrorLayer;
+use tracing_subscriber::{layer::SubscriberExt, FmtSubscriber};
 
 use crate::error::ManndError;
+
+pub fn setup_logging(path: &'static str) {
+    let subscriber = FmtSubscriber::builder()
+        .compact()
+        .with_file(true)
+        .with_writer(
+            OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(path)
+                .unwrap(),
+        )
+        .with_ansi(true)
+        .with_line_number(true)
+        .with_max_level(Level::INFO)
+        .finish();
+
+    let subscriber = subscriber.with(ErrorLayer::default());
+
+    match tracing::subscriber::set_global_default(subscriber) {
+        Err(e) => {
+            tracing::error!(
+                "{e}\nCould not set the default subscriber! Continuing without logging."
+            )
+        }
+        _ => {}
+    }
+}
 
 pub async fn get_name(index: u32) -> Result<String, ManndError> {
     let socket =
@@ -169,4 +201,36 @@ fn generate_random_suffix() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos()
+}
+
+#[repr(C)]
+pub struct passwd {
+    pub pw_name: *mut c_char,
+    pub pw_passwd: *mut c_char,
+    pub pw_uid: c_uint,
+    pub pw_gid: c_uint,
+    pub pw_gecos: *mut c_char,
+    pub pw_dir: *mut c_char,
+    pub pw_shell: *mut c_char,
+}
+
+#[link(name = "c")]
+unsafe extern "C" {
+    fn getpwuid(uid: c_uint) -> *mut passwd;
+}
+
+pub fn get_user_home_by_uid(uid: u32) -> Option<PathBuf> {
+    let pwd_ptr = unsafe { getpwuid(uid) };
+
+    if pwd_ptr.is_null() {
+        return None;
+    }
+
+    let pw_dir_ptr = unsafe { (*pwd_ptr).pw_dir };
+    if pw_dir_ptr.is_null() {
+        return None;
+    }
+
+    let c_str = unsafe { CStr::from_ptr(pw_dir_ptr) };
+    Some(PathBuf::from(c_str.to_string_lossy().into_owned()))
 }

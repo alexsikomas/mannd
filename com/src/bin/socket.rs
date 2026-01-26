@@ -9,12 +9,14 @@ use com::{
     controller::DaemonType,
     error::ManndError,
     state::{
-        network::{handle_action, NetworkAction, NetworkActor},
+        network::{handle_action, NetworkAction, NetworkActor, NetworkState},
         signals::SignalUpdate,
     },
+    utils::setup_logging,
     UNIX_SOCK_PATH,
 };
 use futures::{SinkExt, StreamExt};
+use postcard::to_stdvec_cobs;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixListener,
@@ -41,12 +43,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if uid != 0 {
         return Err(ManndError::NotRoot)?;
     }
+    setup_logging("./.logs/com.log");
 
     let guard = UnixSocketGuard::new(UNIX_SOCK_PATH).await?;
     let (mut sock, _) = guard.listener.accept().await?;
     let (sock_reader, sock_writer) = sock.split();
 
-    let (sock_tx, mut sock_rx) = mpsc::channel::<Vec<u8>>(32);
+    let (sock_tx, mut sock_rx) = mpsc::channel::<NetworkState>(32);
     let (signal_tx, mut signal_rx) = mpsc::channel::<SignalUpdate>(32);
 
     let mut actor = NetworkActor::new().await?;
@@ -58,7 +61,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         tokio::select! {
             // write message for tui to read
             Some(msg) = sock_rx.recv() => {
-                writer.send(msg.into()).await.map_err(|_| ManndError::SocketWrite)?;
+                if let Ok(res) = to_stdvec_cobs(&msg) {
+                    writer.send(res.into()).await.map_err(|_| ManndError::SocketWrite)?;
+                }
             },
             Some(frame_res) = reader.next() => {
                 let mut frame = frame_res?;

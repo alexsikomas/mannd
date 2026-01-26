@@ -36,17 +36,14 @@ tui() {
     # Release
     if [[ "$1" == "r" ]] || [[ "$1" == "release" ]]; then
         if cargo build --release;  then
-            if sudo setcap cap_net_admin,cap_dac_override=ep ./target/release/tui; then 
-                ./target/release/tui
-                exit 0
-            fi
+            ./target/release/tui
         fi
         exit 1
     fi
 
    # Debug 
    if cargo build; then 
-       if sudo setcap cap_net_admin,cap_dac_override=ep ./target/debug/tui; then 
+       if cargo build -p com --bin socket; then
            ./target/debug/tui
            exit 0
        fi

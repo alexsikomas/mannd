@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, fs, path::PathBuf};
+use std::{collections::HashMap, env, fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
 use ahash::RandomState;
 use redb::{
@@ -6,9 +6,10 @@ use redb::{
     Value,
 };
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use tokio::fs::metadata;
+use tracing::{info, warn};
 
-use crate::error::ManndError;
+use crate::{error::ManndError, utils::get_user_home_by_uid};
 
 const WG_TABLE: TableDefinition<String, WgMeta> = TableDefinition::new("wg_table");
 const WG_DIR: &'static str = "/etc/wireguard/";
@@ -19,20 +20,43 @@ pub struct WgStore {
 
 impl WgStore {
     pub fn init() -> Result<Self, ManndError> {
-        let mut path = match env::var_os("XDG_STATE_HOME") {
-            Some(val) => PathBuf::from(val),
+        // get uid of user who called sudo and make db
+        // in their XDG_STATE, note because we are running
+        // as sudo we can't respect the XDG_STATE if it has
+        // actually been set
+        let (mut home, in_root) = match env::var_os("SUDO_UID") {
+            Some(uid_str) => {
+                let uid_str = uid_str.to_str().unwrap();
+                let uid = u32::from_str_radix(uid_str, 10).unwrap();
+                match get_user_home_by_uid(uid) {
+                    Some(path) => (path, false),
+                    None => {
+                        tracing::warn!(
+                            "Got UID of the user who called sudo but cannot find home..."
+                        );
+                        (PathBuf::from("root"), false)
+                    }
+                }
+            }
             None => {
-                let home = env::var_os("HOME").expect("Could not find $HOME environment variable");
-                let mut p = PathBuf::from(home);
-                p.push(".local/state");
-                p
+                tracing::warn!(
+                    "Cannot get the UID of the user who called sudo... DB will be in /root/"
+                );
+                (PathBuf::from("root"), false)
             }
         };
 
-        path.push("mannd");
-        let _ = fs::create_dir_all(&path);
-        path.push("wg.redb");
-        let database = Database::create(path)?;
+        home.push(".local/state/mannd");
+        let _ = fs::create_dir_all(&home);
+        if !in_root {
+            fs::set_permissions(&home, fs::Permissions::from_mode(0o777))?;
+        }
+
+        home.push("wg.redb");
+        let database = Database::create(&home)?;
+        if !in_root {
+            fs::set_permissions(&home, fs::Permissions::from_mode(0o777))?;
+        }
         Ok(WgStore { database })
     }
 
@@ -121,6 +145,7 @@ impl WgStore {
 
     fn db_data(&self) -> Result<HashMap<String, WgMeta, RandomState>, ManndError> {
         let read = self.database.begin_read()?;
+
         let table = read.open_table(WG_TABLE)?;
         let mut data: HashMap<String, WgMeta, RandomState> =
             HashMap::with_capacity_and_hasher(table.len()? as usize, RandomState::new());

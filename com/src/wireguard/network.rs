@@ -1,12 +1,13 @@
 use neli::{
     consts::{
-        nl::NlmF,
+        nl::{NlmF, Nlmsg},
         rtnl::{Ifa, Iff, Ifla, IflaInfo, RtAddrFamily, Rta, Rtm},
     },
+    err::Nlmsgerr,
     nl::NlPayload,
     router::asynchronous::NlRouter,
     rtnl::{Ifaddrmsg, IfaddrmsgBuilder, Ifinfomsg, IfinfomsgBuilder, RtattrBuilder, RtmsgBuilder},
-    types::RtBuffer,
+    types::{Buffer, RtBuffer},
     utils::Groups,
 };
 use redb::Database;
@@ -28,7 +29,7 @@ pub struct Wireguard {
 
 // methods used by Network
 impl Wireguard {
-    /// Connects socket and sets up `INTERFACE`
+    /// Connects socket and sets up `INTERFACE` if not already done so
     pub async fn start_interface(db: Option<Database>) -> Result<Self, ManndError> {
         let (router, _) =
             NlRouter::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty()).await?;
@@ -73,22 +74,20 @@ impl Wireguard {
 
         let index = get_index(INTERFACE).await?;
 
-        match db {
-            // only used by the test case
-            Some(tmp) => Ok(Self {
-                router,
-                index,
-                store: WgStore::init_from_db(tmp),
-            }),
-            None => {
-                let store = WgStore::init()?;
-                Ok(Self {
-                    router,
-                    index,
-                    store,
-                })
-            }
-        }
+        let store = match db {
+            Some(tmp) => WgStore::init_from_db(tmp),
+            None => WgStore::init()?,
+        };
+
+        let s = Self {
+            router,
+            store,
+            index,
+        };
+
+        Self::set_state(&s, false).await?;
+
+        return Ok(s);
     }
 }
 

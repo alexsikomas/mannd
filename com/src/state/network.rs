@@ -82,52 +82,50 @@ pub enum NetworkState {
 pub async fn handle_action<'a>(
     controller: &mut Controller,
     action: NetworkAction,
-    sock_tx: Sender<Vec<u8>>,
+    sock_tx: Sender<NetworkState>,
     signal_tx: Sender<SignalUpdate<'a>>,
 ) -> Result<bool, ManndError> {
     match action {
         // WIFI
         NetworkAction::GetNetworks => {
             if let Ok(aps) = controller.get_all_networks().await {
-                let update_msg = to_stdvec_cobs(&NetworkState::UpdateNetworks(aps))?;
-                if let Ok(()) = sock_tx.send(update_msg).await {
-                    let scan_start_msg = to_stdvec_cobs(&NetworkState::Success(NetSuccess::Scan))?;
-                    let _ = sock_tx.send(scan_start_msg).await;
+                if let Ok(()) = sock_tx.send(NetworkState::UpdateNetworks(aps)).await {
+                    sock_tx.send(NetworkState::Success(NetSuccess::Scan)).await;
                 }
             }
         }
         NetworkAction::Scan => {
-            let start_scan_msg = to_stdvec_cobs(&NetworkState::Start(NetStart::Scan))?;
-            if let Ok(()) = sock_tx.send(start_scan_msg).await {
+            if let Ok(()) = sock_tx.send(NetworkState::Start(NetStart::Scan)).await {
                 if let Ok(()) = controller.scan(signal_tx.clone()).await {}
             }
         }
 
         NetworkAction::Connect(info) => {
-            let msg = to_stdvec_cobs(&NetworkState::Start(NetStart::Connection))?;
-            let _ = sock_tx.send(msg).await;
+            let _ = sock_tx
+                .send(NetworkState::Start(NetStart::Connection))
+                .await;
 
             match controller.network_connect(info).await {
                 Ok(()) => {
                     info!("Connection to network was successful");
-                    let msg = to_stdvec_cobs(&NetworkState::Success(NetSuccess::Connection))?;
-                    let _ = sock_tx.send(msg).await;
+                    let _ = sock_tx
+                        .send(NetworkState::Success(NetSuccess::Connection))
+                        .await;
                 }
                 Err(e) => {
                     tracing::error!("Connection to network was not successful.");
-                    let msg = to_stdvec_cobs(&NetworkState::Failed(NetFailure::Connection(
-                        e.to_string(),
-                    )))?;
-                    let _ = sock_tx.send(msg).await;
+                    let _ = sock_tx
+                        .send(NetworkState::Failed(NetFailure::Connection(e.to_string())))
+                        .await;
                 }
             }
         }
         NetworkAction::ConnectKnown(ssid, security) => {
             match controller.connect_known(ssid, security).await {
                 Ok(()) => {
-                    let msg =
-                        to_stdvec_cobs(&NetworkState::CallAction(NetworkAction::GetNetworks))?;
-                    let _ = sock_tx.send(msg).await;
+                    let _ = sock_tx
+                        .send(NetworkState::CallAction(NetworkAction::GetNetworks))
+                        .await;
                 }
                 Err(e) => {}
             }
@@ -149,9 +147,7 @@ pub async fn handle_action<'a>(
         NetworkAction::InitWireguard => {
             if let Ok(()) = controller.start_wg().await {
                 if let Ok((names, meta)) = controller.update_wg() {
-                    info!("Updated wireguard successfully");
-                    let msg = to_stdvec_cobs(&NetworkState::UpdateWgDb((names, meta)))?;
-                    let _ = sock_tx.send(msg).await;
+                    let _ = sock_tx.send(NetworkState::UpdateWgDb((names, meta))).await;
                 }
             }
         }

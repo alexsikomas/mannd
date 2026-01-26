@@ -1,4 +1,4 @@
-use com::{error::ManndError, UNIX_SOCK_PATH};
+use com::{error::ManndError, utils::setup_logging, UNIX_SOCK_PATH};
 use std::{env, fs::OpenOptions, path::PathBuf, process::Stdio};
 use tokio::{
     io::AsyncWriteExt,
@@ -15,10 +15,20 @@ const DEBUG_SOCK_BIN: &str = "target/debug/socket";
 
 #[tokio::main]
 async fn main() -> Result<(), ManndError> {
+    let (stream, child) = get_unix_socket().await?;
+    setup_logging("./.logs/tui.log");
+
+    let _ = Theme::new();
+    let _ = App::new(stream, child).run().await?;
+    ratatui::restore();
+    Ok(())
+}
+
+async fn get_unix_socket() -> Result<(UnixStream, Option<Child>), ManndError> {
     println!("Privileged access required for the socket service.");
     let password = rpassword::prompt_password("Enter sudo password: ")?;
 
-    let (stream, child): (UnixStream, Option<Child>) = match cfg!(debug_assertions) {
+    match cfg!(debug_assertions) {
         true => {
             let mut child = Command::new("sudo")
                 .arg("-S")
@@ -35,8 +45,9 @@ async fn main() -> Result<(), ManndError> {
                 stdin.flush().await?;
             }
 
-            let mut interval = time::interval(time::Duration::from_secs(1));
+            let mut interval = time::interval(time::Duration::from_millis(100));
             let mut attempts = 0;
+            let max_attempts = 20; // 2s
 
             loop {
                 interval.tick().await;
@@ -44,11 +55,11 @@ async fn main() -> Result<(), ManndError> {
                 let connect = socket.connect(UNIX_SOCK_PATH).await;
                 match connect {
                     Ok(s) => {
-                        break (s, Some(child));
+                        return Ok((s, Some(child)));
                     }
                     _ => {
                         attempts += 1;
-                        if attempts >= 5 {
+                        if attempts >= max_attempts {
                             panic!("Fatal Error: Cannot connect to socket.");
                         }
                         continue;
@@ -58,38 +69,7 @@ async fn main() -> Result<(), ManndError> {
         }
         false => {
             let socket = UnixSocket::new_stream()?;
-            (socket.connect(UNIX_SOCK_PATH).await?, None)
+            return Ok((socket.connect(UNIX_SOCK_PATH).await?, None));
         }
     };
-
-    let subscriber = FmtSubscriber::builder()
-        .compact()
-        .with_file(true)
-        .with_writer(
-            OpenOptions::new()
-                .append(true)
-                .create(true)
-                .open("./.logs/tui.log")
-                .unwrap(),
-        )
-        .with_ansi(true)
-        .with_line_number(true)
-        .with_max_level(Level::INFO)
-        .finish();
-
-    let subscriber = subscriber.with(ErrorLayer::default());
-
-    match tracing::subscriber::set_global_default(subscriber) {
-        Err(e) => {
-            tracing::error!(
-                "{e}\nCould not set the default subscriber! Continuing without logging."
-            )
-        }
-        _ => {}
-    }
-
-    let _ = Theme::new();
-    let _ = App::new(stream, child).run().await?;
-    ratatui::restore();
-    Ok(())
 }

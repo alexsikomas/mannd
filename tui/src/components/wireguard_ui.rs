@@ -22,10 +22,16 @@ pub struct WireguardMenu<'a> {
     names: &'a Vec<String>,
     meta: &'a [WgMeta],
     theme: &'a Theme,
+    areas: VpnAreas,
 }
 
 impl<'a> WireguardMenu<'a> {
-    pub fn new(state: &'a VpnState, names: &'a Vec<String>, meta: &'a [WgMeta]) -> Option<Self> {
+    pub fn new(
+        state: &'a VpnState,
+        names: &'a Vec<String>,
+        meta: &'a [WgMeta],
+        areas: VpnAreas,
+    ) -> Option<Self> {
         let theme: &Theme = match THEME.get() {
             Some(t) => t,
             None => {
@@ -38,17 +44,19 @@ impl<'a> WireguardMenu<'a> {
             names,
             meta,
             theme,
+            areas,
         })
     }
 }
 
 impl<'a> Widget for WireguardMenu<'a> {
-    fn render(self, area: Rect, buf: &mut Buffer)
+    fn render(self, _area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
     {
-        let mut main_area = self.render_main_block(area, buf);
+        self.render_main_block(self.areas.outer, buf);
 
+        // FIX: UI logic shouldn't concern itself with this
         let item_count = match self.names.len().cmp(&self.meta.len()) {
             std::cmp::Ordering::Equal => self.names.len(),
             std::cmp::Ordering::Less => {
@@ -64,28 +72,16 @@ impl<'a> Widget for WireguardMenu<'a> {
             return;
         }
 
-        // selection options
-
-        // without this it can extend beyond main border
-        Self::alter_area_bounds(&mut main_area);
-
-        let [top, main] = Layout::vertical([Constraint::Percentage(7), Constraint::Fill(1)])
-            .areas::<2>(main_area);
-
-        self.render_option_menu(top, buf);
-
-        let main_area = Layout::horizontal([Constraint::Percentage(90)])
-            .flex(Flex::Center)
-            .split(main)[0];
+        self.render_option_menu(self.areas.select, buf);
 
         // rows displayable
-        let rows = (main_area.height / ROW_H) as usize;
+        let rows = (self.areas.vpn.height / ROW_H) as usize;
         if rows <= 0 {
             tracing::error!("Not enough room to display a single row...");
             return;
         }
 
-        let cols = match calc_max_cols(main_area) {
+        let cols = match calc_max_cols(self.areas.vpn) {
             Some(c) => c,
             None => {
                 tracing::error!("Not enough room to display a single column...");
@@ -99,7 +95,7 @@ impl<'a> Widget for WireguardMenu<'a> {
 
         let mut item_areas: Vec<Rect> = vec![];
         let rows_layout = Layout::vertical(vec![Constraint::Percentage(100 / (rows as u16)); rows])
-            .split(main_area);
+            .split(self.areas.vpn);
 
         for row in rows_layout.into_iter() {
             let cols = Layout::horizontal(vec![Constraint::Percentage(100 / (cols as u16)); cols])
@@ -123,15 +119,7 @@ impl<'a> Widget for WireguardMenu<'a> {
 }
 
 impl<'a> WireguardMenu<'a> {
-    fn render_main_block(&self, area: Rect, buf: &mut Buffer) -> Rect {
-        let main_area = Layout::horizontal([Constraint::Percentage(80)])
-            .flex(Flex::Center)
-            .split(
-                Layout::vertical([Constraint::Percentage(90)])
-                    .flex(Flex::Center)
-                    .areas::<1>(area)[0],
-            )[0];
-
+    fn render_main_block(&self, area: Rect, buf: &mut Buffer) {
         let main_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .borders(Borders::ALL)
@@ -142,8 +130,7 @@ impl<'a> WireguardMenu<'a> {
                     .style(self.theme.accent.color())
                     .bold(),
             );
-        main_block.render(main_area, buf);
-        main_area
+        main_block.render(area, buf);
     }
 
     fn render_option_menu(&self, area: Rect, buf: &mut Buffer) {
@@ -187,30 +174,40 @@ impl<'a> WireguardMenu<'a> {
         area.width -= 2;
     }
 
-    // composes the ui without rendering it
-    // to find out how many cols there would be
-    pub fn calculate_cols_no_render(&self, area: Rect) -> usize {
-        let mut main_area = Layout::horizontal([Constraint::Percentage(80)])
+    // To reduce the amount of times this is performed this needs to be run
+    // before the ui element is initialised
+    pub fn build_layout_no_render(area: Rect, cols: &mut usize) -> VpnAreas {
+        let mut outer_area = Layout::horizontal([Constraint::Percentage(80)])
             .flex(Flex::Center)
             .split(
                 Layout::vertical([Constraint::Percentage(90)])
                     .flex(Flex::Center)
                     .areas::<1>(area)[0],
             )[0];
-        Self::alter_area_bounds(&mut main_area);
-        let [_, main] = Layout::vertical([Constraint::Percentage(7), Constraint::Fill(1)])
-            .areas::<2>(main_area);
 
-        let main_area = Layout::horizontal([Constraint::Percentage(90)])
+        let original_outer_area = outer_area.clone();
+        Self::alter_area_bounds(&mut outer_area);
+
+        let [select_area, vpn_vert_area] =
+            Layout::vertical([Constraint::Max(3), Constraint::Fill(1)]).areas::<2>(outer_area);
+
+        let vpn_area = Layout::horizontal([Constraint::Percentage(90)])
             .flex(Flex::Center)
-            .split(main)[0];
+            .split(vpn_vert_area)[0];
 
-        match calc_max_cols(main_area) {
+        let max_cols = match calc_max_cols(vpn_area) {
             Some(c) => c,
             None => {
                 tracing::error!("Not enough room to display a single column...");
                 0
             }
+        };
+
+        *cols = max_cols;
+        VpnAreas {
+            outer: original_outer_area,
+            vpn: vpn_area,
+            select: select_area,
         }
     }
 
@@ -288,21 +285,8 @@ pub fn calc_max_cols(area: Rect) -> Option<usize> {
     }
 }
 
-struct Entry<'a> {
-    name: &'a String,
-    info: &'a WgMeta,
-}
-
-impl<'a> Widget for Entry<'a> {
-    fn render(self, area: Rect, buf: &mut Buffer)
-    where
-        Self: Sized,
-    {
-    }
-}
-
-impl<'a> Entry<'a> {
-    fn new(name: &'a String, info: &'a WgMeta) -> Self {
-        Self { name, info }
-    }
+pub struct VpnAreas {
+    outer: Rect,
+    vpn: Rect,
+    select: Rect,
 }

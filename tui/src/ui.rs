@@ -181,8 +181,11 @@ impl UiContext {
                 }
             }
             View::Vpn(vpn_state) => {
-                if let Some(vpn) = WireguardMenu::new(&vpn_state, &ctx.wg_files.0, ctx.wg_files.1) {
-                    let cols = vpn.calculate_cols_no_render(inner_area);
+                let mut cols: usize = 0;
+                let vpn_areas = WireguardMenu::build_layout_no_render(inner_area, &mut cols);
+                if let Some(vpn) =
+                    WireguardMenu::new(&vpn_state, &ctx.wg_files.0, ctx.wg_files.1, vpn_areas)
+                {
                     if cols != state.vpn_cols {
                         self.message = Some(UiMessage::SetVpnCols(cols));
                     }

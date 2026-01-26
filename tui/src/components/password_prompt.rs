@@ -1,7 +1,8 @@
 use com::wireless::common::AccessPoint;
 use ratatui::{
-    layout::{Constraint, Flex, Layout},
+    layout::{Constraint, Flex, Layout, Margin, Rect, Spacing},
     style::{Style, Stylize},
+    symbols::border,
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
@@ -40,23 +41,17 @@ impl<'a> Widget for PasswordPrompt<'a> {
         Self: Sized,
     {
         let theme = &self.theme;
-        let [main_area] = Layout::vertical([Constraint::Percentage(75)])
-            .flex(Flex::Center)
-            .areas(
-                Layout::horizontal([Constraint::Percentage(75)])
-                    .flex(Flex::Center)
-                    .areas::<1>(area)[0],
-            );
 
-        Clear.render(main_area, buf);
+        let areas = build_areas(area);
+        Clear.render(areas.outer, buf);
         buf.set_style(
-            main_area,
+            areas.outer,
             Style::new()
                 .fg(theme.background.color())
                 .bg(theme.background.color()),
         );
 
-        let main_block = Block::new()
+        let border_block = Block::new()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
             .title_top(
@@ -70,19 +65,10 @@ impl<'a> Widget for PasswordPrompt<'a> {
                     .bg(theme.background.color()),
             );
 
-        let inner_area = main_block.inner(main_area);
-        main_block.render(main_area, buf);
+        border_block.render(areas.outer, buf);
 
-        let chunks = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(3),
-        ])
-        .margin(1)
-        .split(inner_area);
-
-        let ssid_area = chunks[0];
-        let password_area = chunks[2];
+        let ssid_area = areas.chunks[0];
+        let password_area = areas.chunks[2];
 
         let ssid_line = Line::from(vec![
             Span::styled("  SSID: ", Style::new().fg(theme.tertiary.color())),
@@ -112,14 +98,38 @@ impl<'a> Widget for PasswordPrompt<'a> {
             .border_type(ratatui::widgets::BorderType::Rounded)
             .style(styles[0]);
 
-        let password_text_area = Layout::horizontal([Constraint::Percentage(98)])
-            .flex(Flex::Center)
-            .split(password_box.inner(password_area))[0];
+        let show_block = Block::new()
+            .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
+            .style(styles[1])
+            .title_top(Line::from(" Show ").centered());
 
-        password_box.render(password_area, buf);
-        let password_text = Paragraph::new("*".repeat(self.info.password.len()));
+        let password_areas = Layout::horizontal([
+            Constraint::Percentage(95), // password box
+            Constraint::Min(0),         // space
+            Constraint::Max(10),        // show button
+        ])
+        .flex(Flex::Center)
+        .spacing(Spacing::Space(1))
+        .split(password_area);
+
+        let password_text_area = Layout::horizontal([Constraint::Percentage(95)])
+            .flex(Flex::Center)
+            .split(password_box.inner(password_areas[0]))[0];
+
+        password_box.render(password_areas[0], buf);
+        show_block.render(password_areas[2], buf);
+        let mut password_text = Paragraph::new("*".repeat(self.info.password.len()));
+        let mut select_text = Line::from(" ");
+
+        if self.info.show_password {
+            password_text = Paragraph::new(self.info.password.clone());
+            select_text = Line::from("X").centered();
+        }
 
         password_text.render(password_text_area, buf);
+        select_text.render(password_areas[2].inner(Margin::new(1, 1)), buf);
+
         let connect_block = Block::new()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
@@ -135,7 +145,7 @@ impl<'a> Widget for PasswordPrompt<'a> {
             .split(
                 Layout::horizontal([Constraint::Min(0), Constraint::Percentage(60)])
                     .flex(Flex::Center)
-                    .split(inner_area)[1],
+                    .split(areas.inner)[1],
             );
 
         let button_layouts = Layout::horizontal([
@@ -163,6 +173,36 @@ impl<'a> Widget for PasswordPrompt<'a> {
     }
 }
 
-// impl<'a> PasswordPrompt<'a> {
-//     fn button_styles(&self) {}
-// }
+fn build_areas(area: Rect) -> PasswordAreas {
+    let [outer_area] = Layout::vertical([Constraint::Percentage(75)])
+        .flex(Flex::Center)
+        .areas(
+            Layout::horizontal([Constraint::Percentage(75)])
+                .flex(Flex::Center)
+                .areas::<1>(area)[0],
+        );
+    let border_block = Block::new()
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded);
+    let inner_area = border_block.inner(outer_area);
+
+    let chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(3),
+    ])
+    .margin(1)
+    .split(inner_area);
+
+    PasswordAreas {
+        outer: outer_area,
+        inner: inner_area,
+        chunks: chunks.to_vec(),
+    }
+}
+
+pub struct PasswordAreas {
+    outer: Rect,
+    inner: Rect,
+    chunks: Vec<Rect>,
+}

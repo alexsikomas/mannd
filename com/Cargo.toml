@@ -20,6 +20,8 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 tokio-stream = "0.1.17"
 tracing = { workspace = true }
+tracing-error = { workspace = true }
+tracing-subscriber = { workspace = true }
 zbus = { version = "5.10.0", default-features = false, features = ["tokio"] }
 zbus_systemd = { version = "0.25701.0", features = [
     "network1",
