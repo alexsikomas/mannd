@@ -420,6 +420,7 @@ pub struct PskConnectionPrompt {
     pub ssid: String,
     pub password: String,
     pub select: SelectableList<PskPromptSelect>,
+    pub show_password: bool,
 }
 
 impl PskConnectionPrompt {
@@ -428,6 +429,7 @@ impl PskConnectionPrompt {
             ssid,
             password: String::new(),
             select: SelectableList::new(PskPromptSelect::as_vec()),
+            show_password: false,
         }
     }
 }
@@ -440,13 +442,12 @@ impl Component for PskConnectionPrompt {
 
         match key.code {
             KeyCode::Up | KeyCode::Down => match selected {
-                PskPromptSelect::Password => {
+                PskPromptSelect::Password | PskPromptSelect::Show => {
                     self.select.set(PskPromptSelect::Connect);
                 }
                 PskPromptSelect::Connect | PskPromptSelect::Back => {
                     self.select.set(PskPromptSelect::Password);
                 }
-                _ => {}
             },
             KeyCode::Left | KeyCode::Right => match selected {
                 PskPromptSelect::Password => {
@@ -485,6 +486,9 @@ impl Component for PskConnectionPrompt {
                 PskPromptSelect::Back => {
                     self.password.pop();
                     return StateResult::Command(StateCommand::PopPrompt);
+                }
+                PskPromptSelect::Show => {
+                    self.show_password = !self.show_password;
                 }
                 _ => {}
             },
