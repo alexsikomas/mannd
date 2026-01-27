@@ -94,7 +94,7 @@ impl<'a> Widget for WireguardMenu<'a> {
         let current_page = selected_item / items_per_page;
 
         let mut item_areas: Vec<Rect> = vec![];
-        let rows_layout = Layout::vertical(vec![Constraint::Percentage(100 / (rows as u16)); rows])
+        let rows_layout = Layout::vertical(vec![Constraint::Percentage(97 / (rows as u16)); rows])
             .split(self.areas.vpn);
 
         for row in rows_layout.into_iter() {
