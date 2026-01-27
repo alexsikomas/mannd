@@ -105,30 +105,34 @@ impl<'a> Widget for PasswordPrompt<'a> {
             .title_top(Line::from(" Show ").centered());
 
         let password_areas = Layout::horizontal([
-            Constraint::Percentage(95), // password box
-            Constraint::Min(0),         // space
-            Constraint::Max(10),        // show button
+            Constraint::Percentage(100), // password box
+            Constraint::Length(10),      // show password box
         ])
         .flex(Flex::Center)
         .spacing(Spacing::Space(1))
         .split(password_area);
 
-        let password_text_area = Layout::horizontal([Constraint::Percentage(95)])
+        let password_text_area = Layout::horizontal([Constraint::Percentage(98)])
             .flex(Flex::Center)
             .split(password_box.inner(password_areas[0]))[0];
 
         password_box.render(password_areas[0], buf);
-        show_block.render(password_areas[2], buf);
+        show_block.render(password_areas[1], buf);
         let mut password_text = Paragraph::new("*".repeat(self.info.password.len()));
         let mut select_text = Line::from(" ");
 
         if self.info.show_password {
-            password_text = Paragraph::new(self.info.password.clone());
+            let width = password_areas[0].width as usize;
+            if self.info.password.len() > width {
+                password_text = Paragraph::new(&self.info.password[width..]);
+            } else {
+                password_text = Paragraph::new(self.info.password.clone());
+            }
             select_text = Line::from("X").centered();
         }
 
         password_text.render(password_text_area, buf);
-        select_text.render(password_areas[2].inner(Margin::new(1, 1)), buf);
+        select_text.render(password_areas[1].inner(Margin::new(1, 1)), buf);
 
         let connect_block = Block::new()
             .borders(Borders::ALL)
