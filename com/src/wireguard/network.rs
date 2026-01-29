@@ -92,6 +92,31 @@ impl Wireguard {
 }
 
 impl Wireguard {
+    async fn check_state(&self) -> Result<(), ManndError> {
+        let mut buf = RtBuffer::new();
+
+        buf.push(
+            RtattrBuilder::default()
+                .rta_type(Ifla::Ifname)
+                .rta_payload(INTERFACE)
+                .build()?,
+        );
+
+        let ifimsg = IfinfomsgBuilder::default()
+            .ifi_family(RtAddrFamily::Unspecified)
+            .ifi_type(neli::consts::rtnl::Arphrd::Netrom)
+            .ifi_index(0)
+            .ifi_flags(0.into())
+            .ifi_change(0.into())
+            .rtattrs(buf)
+            .build()?;
+
+        self.router
+            .send::<Rtm, Ifinfomsg, (), ()>(Rtm::Getlink, NlmF::REQUEST, NlPayload::Payload(ifimsg))
+            .await?;
+        todo!()
+    }
+
     async fn delete_interface(&self) -> Result<(), ManndError> {
         let mut attrs = RtBuffer::new();
         attrs.push(
@@ -488,23 +513,6 @@ mod tests {
 
     #[tokio::test]
     async fn wg_intergration_test() -> Result<(), ManndError> {
-        match caps::has_cap(
-            None,
-            caps::CapSet::Permitted,
-            caps::Capability::CAP_NET_ADMIN,
-        ) {
-            Ok(val) => {
-                if !val {
-                    println!("Wireguard integration test must be run with net_admin permission");
-                    return Err(ManndError::OperationFailed("Failed".to_string()));
-                }
-            }
-            Err(e) => {
-                println!("Error occured while checking capabilities! {e}");
-                return Err(ManndError::OperationFailed("Failed".to_string()));
-            }
-        }
-
         let tmp = NamedTempFile::new().unwrap();
         let db = Database::create(tmp.path.clone()).unwrap();
 

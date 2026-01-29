@@ -6,35 +6,23 @@ use std::{
 };
 
 use com::{
+    UNIX_SOCK_PATH,
     controller::DaemonType,
     error::ManndError,
     state::{
-        network::{handle_action, NetworkAction, NetworkActor, NetworkState},
+        network::{NetworkAction, NetworkActor, NetworkState, handle_action},
         signals::SignalUpdate,
     },
     utils::setup_logging,
-    UNIX_SOCK_PATH,
 };
 use futures::{SinkExt, StreamExt};
 use postcard::to_stdvec_cobs;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::UnixListener,
-    sync::mpsc,
-};
-use tokio_util::{
-    bytes::BufMut,
-    codec::{FramedRead, FramedWrite, LengthDelimitedCodec},
-};
+use tokio::{net::UnixListener, sync::mpsc};
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 struct UnixSocketGuard {
     path: PathBuf,
     listener: UnixListener,
-}
-
-#[link(name = "c")]
-unsafe extern "C" {
-    fn geteuid() -> u32;
 }
 
 #[tokio::main]
@@ -97,7 +85,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             _ = tokio::signal::ctrl_c() => {
-                println!("Shutting down...");
+                tracing::info!("Shutting down...");
                 return Ok(());
             }
         };
@@ -121,4 +109,9 @@ impl Drop for UnixSocketGuard {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
     }
+}
+
+#[link(name = "c")]
+unsafe extern "C" {
+    fn geteuid() -> u32;
 }

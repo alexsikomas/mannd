@@ -60,9 +60,9 @@ make_config() {
     fi
 
     mkdir -p "${config_dir}"
-    if [ ! -f "${config_dir}/config.toml" ]; then
-        cp ./tui/example_config.toml "${config_dir}/config.toml"
-        echo "Config created at ${config_dir}/config.toml"
+    if [ ! -f "${config_dir}/settings.conf" ]; then
+        cp ./tui/example_settings.conf "${config_dir}/settings.conf"
+        echo "Config created at ${config_dir}/settings.conf"
     fi
 }
 

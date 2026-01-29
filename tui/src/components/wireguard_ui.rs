@@ -9,7 +9,7 @@ use ratatui::{
 
 use crate::{
     state::{VpnSelection, VpnState},
-    ui::{Theme, THEME},
+    ui::{THEME, Theme},
 };
 
 // min num of cols, max num of cols, target line amount
@@ -151,20 +151,58 @@ impl<'a> WireguardMenu<'a> {
         let opt_inner = opt_block.inner(options_layout[0]);
 
         opt_block.render(options_layout[0], buf);
-        let btn_areas = Layout::horizontal([
-            Constraint::Min(0),
-            Constraint::Length(4),
-            Constraint::Length(13),
-            Constraint::Length(6),
-            Constraint::Min(0),
-        ])
-        .flex(Flex::Center)
-        .spacing(4)
-        .split(opt_inner);
 
-        Line::from("Scan").render(btn_areas[1], buf);
-        Line::from("Get Countries").render(btn_areas[2], buf);
-        Line::from("Filter").render(btn_areas[3], buf);
+        // TODO: find better way to do this
+        let layouts = if !self.state.wg_on {
+            vec![
+                Constraint::Min(0),
+                Constraint::Length(5),
+                Constraint::Length(4),
+                Constraint::Length(13),
+                Constraint::Length(6),
+                Constraint::Min(0),
+            ]
+        } else {
+            vec![
+                Constraint::Min(0),
+                Constraint::Length(10),
+                Constraint::Length(4),
+                Constraint::Length(13),
+                Constraint::Length(6),
+                Constraint::Min(0),
+            ]
+        };
+
+        let btn_areas = Layout::horizontal(layouts)
+            .flex(Flex::Center)
+            .spacing(4)
+            .split(opt_inner);
+
+        let mut btn_styles = [self.theme.muted.color(); 4];
+
+        // order disconnect/start -> scan -> countries -> filter
+        if self.state.selection.selected() != Some(&VpnSelection::Files) {
+            btn_styles[self.state.selection.selected_index] = self.theme.info.color();
+        }
+
+        if self.state.wg_on {
+            Line::from("Disconnect")
+                .style(btn_styles[0])
+                .render(btn_areas[1], buf);
+        } else {
+            Line::from("Start")
+                .style(btn_styles[0])
+                .render(btn_areas[1], buf);
+        }
+        Line::from("Scan")
+            .style(btn_styles[1])
+            .render(btn_areas[2], buf);
+        Line::from("Get Countries")
+            .style(btn_styles[2])
+            .render(btn_areas[3], buf);
+        Line::from("Filter")
+            .style(btn_styles[3])
+            .render(btn_areas[4], buf);
     }
 
     fn alter_area_bounds(area: &mut Rect) {
@@ -278,11 +316,7 @@ pub fn calc_max_cols(area: Rect) -> Option<usize> {
             break;
         }
     }
-    if max_cols > 0 {
-        Some(max_cols)
-    } else {
-        None
-    }
+    if max_cols > 0 { Some(max_cols) } else { None }
 }
 
 pub struct VpnAreas {

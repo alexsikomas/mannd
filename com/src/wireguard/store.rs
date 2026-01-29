@@ -1,11 +1,11 @@
-use std::{collections::HashMap, env, fs, os::unix::fs::PermissionsExt, path::PathBuf};
-
 use ahash::RandomState;
+use nyquest::{Body, r#async::Request};
 use redb::{
     Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition, TypeName,
     Value,
 };
 use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, env, fs, os::unix::fs::PermissionsExt, path::PathBuf};
 use tokio::fs::metadata;
 use tracing::{info, warn};
 
@@ -13,6 +13,7 @@ use crate::{error::ManndError, utils::get_user_home_by_uid};
 
 const WG_TABLE: TableDefinition<String, WgMeta> = TableDefinition::new("wg_table");
 const WG_DIR: &'static str = "/etc/wireguard/";
+const IP_API: &'static str = "http://ip-api.com/batch?fields=status,countryCode";
 
 pub struct WgStore {
     database: Database,
@@ -176,6 +177,15 @@ impl WgStore {
 
         Ok(zipped.into_iter().unzip())
     }
+
+    pub async fn get_countries() {
+        // Request::post(IP_API).with_body(Body::json_bytes)
+    }
+
+    fn map_ips_to_json(&self) -> Result<(), ManndError> {
+        let info = self.db_data()?;
+        todo!()
+    }
 }
 
 // since last_used is the first item derive eq
@@ -187,6 +197,7 @@ pub struct WgMeta {
     pub last_modified: u64,
     // ISO 3166-1 alpha-2
     pub country: [u8; 2],
+    // TODO: encode ipv4 ips
 }
 
 impl Value for WgMeta {
