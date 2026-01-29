@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::{mpsc::Sender, RwLock};
+use std::{path::PathBuf, sync::Arc};
+use tokio::sync::{RwLock, mpsc::Sender};
 
 use crate::{
     error::ManndError,
@@ -129,6 +129,14 @@ impl Controller {
             _ => Err(ManndError::WgAccess),
         }
     }
+
+    // pub async fn connect_wg(&self, file: PathBuf) -> Result<(), ManndError> {
+    //     match &self.wg {
+    //         Some(wg) => wg,
+    //         _ => {}
+    //     }
+    //     todo!()
+    // }
 }
 
 // run actions

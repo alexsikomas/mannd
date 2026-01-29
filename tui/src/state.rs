@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::{fmt::Debug, usize};
 
 use com::state::network::NetworkAction;
@@ -630,7 +631,7 @@ impl MainMenuSelection {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum VpnSelection {
     // Connect,
     Toggle,
@@ -658,6 +659,7 @@ impl VpnSelection {
 pub struct VpnState {
     pub selection: SelectableList<VpnSelection>,
     pub file_cursor: usize,
+    pub wg_on: bool,
 }
 
 impl VpnState {
@@ -665,6 +667,7 @@ impl VpnState {
         Self {
             selection: Self::get_actions(),
             file_cursor: 0,
+            wg_on: false,
         }
     }
 
@@ -681,25 +684,33 @@ impl VpnState {
 
 impl Component for VpnState {
     fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
-        match key.code {
-            // only down arrow gets into files
-            KeyCode::Left => {
-                if let Some(selected) = self.selection.selected() {
-                    match selected {
-                        VpnSelection::Files => {
-                            self.file_cursor = self.file_cursor.saturating_sub(1);
-                        }
-                        VpnSelection::Toggle => {
-                            self.selection.selected_index = self.selection.items.len() - 2;
-                        }
-                        _ => {
-                            self.selection.prev();
-                        }
-                    };
-                }
-            }
-            KeyCode::Right => {
-                if let Some(selected) = self.selection.selected() {
+        if let Some(selected) = self.selection.selected() {
+            match key.code {
+                KeyCode::Enter => match selected {
+                    VpnSelection::Toggle => {
+                        self.wg_on = !self.wg_on;
+                    }
+                    VpnSelection::Files => {
+                        let mut wg_path = PathBuf::from("/etc/wireguard");
+                        wg_path.push(format!("{}.conf", &ctx.wg_files.0[self.file_cursor]));
+                        return StateResult::Command(StateCommand::NetworkAction(
+                            NetworkAction::ConnectWireguard(wg_path),
+                        ));
+                    }
+                    _ => {}
+                },
+                KeyCode::Left => match selected {
+                    VpnSelection::Files => {
+                        self.file_cursor = self.file_cursor.saturating_sub(1);
+                    }
+                    VpnSelection::Toggle => {
+                        self.selection.selected_index = self.selection.items.len() - 2;
+                    }
+                    _ => {
+                        self.selection.prev();
+                    }
+                },
+                KeyCode::Right => {
                     match selected {
                         VpnSelection::Files => {
                             self.file_cursor = self.file_cursor.saturating_add(1);
@@ -710,20 +721,16 @@ impl Component for VpnState {
                         _ => {
                             self.selection.next();
                         }
-                    }
-                };
-            }
-            KeyCode::Down => {
-                if let Some(selected) = self.selection.selected() {
+                    };
+                }
+                KeyCode::Down => {
                     if selected == &VpnSelection::Files {
                         self.file_cursor = self.file_cursor.saturating_add(ctx.vpn_cols);
                     } else {
                         self.selection.set(VpnSelection::Files);
                     }
-                };
-            }
-            KeyCode::Up => {
-                if let Some(selected) = self.selection.selected() {
+                }
+                KeyCode::Up => {
                     if self.file_cursor < ctx.vpn_cols {
                         self.selection.selected_index = 0;
                     } else {
@@ -735,8 +742,8 @@ impl Component for VpnState {
                     //     self.selection.selected_index = 0;
                     // }
                 }
+                _ => {}
             }
-            _ => {}
         }
         StateResult::Consumed
     }

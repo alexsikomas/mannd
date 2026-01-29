@@ -38,6 +38,7 @@ pub enum NetworkAction {
     GetNetworks,
     InitWireguard,
     UpdateWireguard,
+    ConnectWireguard(PathBuf),
     Connect(ApConnectInfo),
     ConnectKnown(String, Security),
     Forget(String, Security),
@@ -90,7 +91,7 @@ pub async fn handle_action<'a>(
         NetworkAction::GetNetworks => {
             if let Ok(aps) = controller.get_all_networks().await {
                 if let Ok(()) = sock_tx.send(NetworkState::UpdateNetworks(aps)).await {
-                    sock_tx.send(NetworkState::Success(NetSuccess::Scan)).await;
+                    let _ = sock_tx.send(NetworkState::Success(NetSuccess::Scan)).await;
                 }
             }
         }
@@ -119,6 +120,9 @@ pub async fn handle_action<'a>(
                         .await;
                 }
             }
+        }
+        NetworkAction::ConnectWireguard(file) => {
+            // controller.connect_wg(file).await?;
         }
         NetworkAction::ConnectKnown(ssid, security) => {
             match controller.connect_known(ssid, security).await {

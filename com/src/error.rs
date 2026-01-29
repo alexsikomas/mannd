@@ -49,6 +49,10 @@ pub enum ManndError {
 
     #[error("File not found: {0}")]
     FileNotFound(String),
+    #[error("Section: {0} not found in configuration file!")]
+    ConfigSectionNotFound(String),
+    #[error("Property {0} not found in configuration file!")]
+    ConfigPropertyNotFound(String),
     // io errors
     #[error("IO Error: {0}")]
     IoError(std::io::Error),
@@ -88,6 +92,11 @@ pub enum ManndError {
     NotRoot,
     #[error("Cannot write to socket")]
     SocketWrite,
+
+    #[error("Cannot parse to int")]
+    ParseInt(std::num::ParseIntError),
+    #[error("Serde issue deserialising: {0}")]
+    SerdeDe(serde::de::value::Error),
 }
 
 impl<T, P> From<neli::err::RouterError<T, P>> for ManndError
@@ -207,3 +216,8 @@ error_with_tracing!(redb::CommitError, RedbCommit, "Redb commit error: {}");
 error_with_tracing!(redb::TableError, RedbTable, "Redb table error: {}");
 error_with_tracing!(redb::StorageError, RedbStorage, "Redb storage error: {}");
 error_with_tracing!(postcard::Error, Postcard, "Postcard error occured: {}");
+error_with_tracing!(
+    serde::de::value::Error,
+    SerdeDe,
+    "Serde Deserialisation error: {}"
+);
