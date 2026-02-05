@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::{fmt::Debug, usize};
 
-use com::state::network::NetworkAction;
+use com::state::network::{Capability, NetworkAction};
 use com::wireguard::store::WgMeta;
 use com::{
     controller::DaemonType,
@@ -9,6 +9,7 @@ use com::{
     wireless::common::{AccessPoint, NetworkFlags, Security},
 };
 use crossterm::event::{Event, KeyCode, KeyEvent};
+use tracing::info;
 
 use crate::app::AppAction;
 
@@ -33,7 +34,7 @@ pub enum StateCommand {
 pub struct AppContext<'a> {
     pub networks: &'a [AccessPoint],
     pub wg_files: (&'a Vec<String>, &'a [WgMeta]),
-    pub wifi_daemon: &'a Option<DaemonType>,
+    pub capabilities: &'a Capability,
     pub vpn_cols: usize,
 }
 
@@ -45,21 +46,20 @@ pub struct UiState {
     pub current_view: View,
     pub prompt_stack: Vec<PromptState>,
     pub vpn_cols: usize,
+    pub caps: Capability,
 }
 
 impl<'a> AppContext<'a> {
     pub fn create(
         networks: &'a [AccessPoint],
-        wifi_daemon: &'a Option<DaemonType>,
-        // don't take as a tuple with a name here
-        // because meta index is direct map to name
-        // index, vice versa
+        capabilities: &'a Capability,
+        // one-to-one map
         wg_files: (&'a Vec<String>, &'a [WgMeta]),
         vpn_cols: usize,
     ) -> Self {
         Self {
             networks,
-            wifi_daemon,
+            capabilities,
             wg_files,
             vpn_cols,
         }
@@ -71,12 +71,22 @@ trait Component {
 }
 
 impl UiState {
-    pub fn new() -> Self {
+    pub fn new(caps: Capability) -> Self {
         UiState {
             should_block: false,
-            current_view: View::main_menu(),
+            current_view: View::main_menu(&caps),
             prompt_stack: vec![],
             vpn_cols: 0,
+            caps,
+        }
+    }
+
+    pub fn refresh_view(&mut self) {
+        match &self.current_view {
+            View::MainMenu(_) => {
+                self.current_view = View::main_menu(&self.caps);
+            }
+            _ => {}
         }
     }
 
@@ -119,7 +129,7 @@ impl UiState {
                 match self.current_view {
                     // improves usability by fetching any networks
                     // that are currently known in connection
-                    View::Connection(_) => Some(AppAction::Network(NetworkAction::GetNetworks)),
+                    View::Wifi(_) => Some(AppAction::Network(NetworkAction::GetNetworks)),
                     View::Vpn(_) => Some(AppAction::Network(NetworkAction::InitWireguard)),
                     _ => None,
                 }
@@ -138,7 +148,7 @@ impl UiState {
                 None
             }
             StateCommand::Back => {
-                self.current_view = View::main_menu();
+                self.current_view = View::main_menu(&self.caps);
                 None
             }
             StateCommand::NetworkAction(action) => Some(AppAction::Network(action)),
@@ -172,19 +182,26 @@ impl UiState {
 #[derive(Debug)]
 pub enum View {
     MainMenu(SelectableList<MainMenuSelection>),
-    Connection(ConnectionState),
+    Wifi(WifiState),
     Vpn(VpnState),
     Config,
 }
 
 impl View {
-    pub fn main_menu() -> Self {
-        View::MainMenu(SelectableList::new(vec![
-            MainMenuSelection::Connection,
-            MainMenuSelection::Vpn,
-            MainMenuSelection::Config,
-            MainMenuSelection::Exit,
-        ]))
+    pub fn main_menu(caps: &Capability) -> Self {
+        let mut options: SelectableList<MainMenuSelection> = SelectableList::new(vec![]);
+        if !caps.interfaces.is_empty() && caps.wifi_daemon.is_some() {
+            options.items.push(MainMenuSelection::Wifi);
+        }
+
+        if caps.wireguard {
+            options.items.push(MainMenuSelection::Vpn);
+        }
+
+        options
+            .items
+            .extend([MainMenuSelection::Config, MainMenuSelection::Exit]);
+        Self::MainMenu(options)
     }
 }
 
@@ -210,7 +227,7 @@ impl Component for View {
                     return StateResult::Consumed;
                 }
             }
-            View::Connection(state) => return state.on_key(key, ctx),
+            View::Wifi(state) => return state.on_key(key, ctx),
             View::Vpn(state) => return state.on_key(key, ctx),
             View::Config => {}
         };
@@ -223,7 +240,7 @@ impl Component for View {
 // Possible actions the user can take in the connection
 // menu and how the data should be stored
 #[derive(Debug)]
-pub struct ConnectionState {
+pub struct WifiState {
     pub focused_area: ConnectionFocus,
     pub actions: SelectableList<ConnectionAction>,
     // selected network
@@ -245,7 +262,7 @@ pub enum ConnectionFocus {
     Actions,
 }
 
-impl ConnectionState {
+impl WifiState {
     pub fn new() -> Self {
         Self {
             focused_area: ConnectionFocus::Actions,
@@ -274,7 +291,7 @@ impl ConnectionState {
     }
 }
 
-impl Component for ConnectionState {
+impl Component for WifiState {
     fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
         // check if up or down
         match key.code {
@@ -603,7 +620,7 @@ impl<T: PartialEq> SelectableList<T> {
 
 #[derive(Debug, PartialEq)]
 pub enum MainMenuSelection {
-    Connection,
+    Wifi,
     Vpn,
     Config,
     Exit,
@@ -612,9 +629,9 @@ pub enum MainMenuSelection {
 impl MainMenuSelection {
     fn execute(&self) -> StateResult {
         match self {
-            Self::Connection => StateResult::Command(StateCommand::ChangeView(View::Connection(
-                ConnectionState::new(),
-            ))),
+            Self::Wifi => {
+                StateResult::Command(StateCommand::ChangeView(View::Wifi(WifiState::new())))
+            }
             Self::Config => StateResult::Command(StateCommand::ChangeView(View::Config)),
             Self::Vpn => StateResult::Command(StateCommand::ChangeView(View::Vpn(VpnState::new()))),
             Self::Exit => StateResult::Command(StateCommand::Exit),
@@ -623,7 +640,7 @@ impl MainMenuSelection {
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Connection => "Connection",
+            Self::Wifi => "Wi-Fi",
             Self::Vpn => "VPN",
             Self::Config => "Config",
             Self::Exit => "Exit",

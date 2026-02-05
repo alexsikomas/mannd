@@ -6,19 +6,20 @@ use std::{
 };
 
 use com::{
-    UNIX_SOCK_PATH,
     controller::DaemonType,
     error::ManndError,
     state::{
-        network::{NetworkAction, NetworkActor, NetworkState, handle_action},
+        network::{handle_action, Capability, NetworkAction, NetworkActor, NetworkState},
         signals::SignalUpdate,
     },
-    utils::setup_logging,
+    utils::{list_interfaces, setup_logging},
+    UNIX_SOCK_PATH,
 };
 use futures::{SinkExt, StreamExt};
 use postcard::to_stdvec_cobs;
 use tokio::{net::UnixListener, sync::mpsc};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tracing::info;
 
 struct UnixSocketGuard {
     path: PathBuf,
@@ -41,9 +42,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (signal_tx, mut signal_rx) = mpsc::channel::<SignalUpdate>(32);
 
     let mut actor = NetworkActor::new().await?;
-    let daemon = actor.controller.daemon_type();
     let mut writer = FramedWrite::new(sock_writer, LengthDelimitedCodec::new());
     let mut reader = FramedRead::new(sock_reader, LengthDelimitedCodec::new());
+
+    let daemon = actor.controller.daemon_type();
 
     loop {
         tokio::select! {

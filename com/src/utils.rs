@@ -1,7 +1,7 @@
 use std::{
     env,
     ffi::CStr,
-    fs::{File, OpenOptions},
+    fs::{self, canonicalize, read_dir, File, OpenOptions},
     io,
     os::raw::{c_char, c_uint},
     path::PathBuf,
@@ -23,6 +23,9 @@ use tracing_error::ErrorLayer;
 use tracing_subscriber::{layer::SubscriberExt, FmtSubscriber};
 
 use crate::error::ManndError;
+
+const SYS_NET_PATH: &'static str = "/sys/class/net";
+const SYS_VIRT_PATH: &'static str = "/sys/devices/virtual";
 
 pub fn setup_logging(path: &'static str) {
     let subscriber = FmtSubscriber::builder()
@@ -138,6 +141,34 @@ pub async fn get_index(interface: &'static str) -> Result<u32, ManndError> {
         ));
     }
     Ok(index)
+}
+
+pub fn list_interfaces() -> Vec<String> {
+    let mut res: Vec<String> = vec![];
+    let virt_path = PathBuf::from(SYS_VIRT_PATH);
+    let virt_path_comp: Vec<_> = virt_path.components().collect();
+
+    if let Ok(mut dir) = read_dir(SYS_NET_PATH) {
+        while let Some(entry) = dir.next() {
+            if entry.is_err() {
+                continue;
+            }
+            let entry = entry.unwrap();
+
+            // check if device is virtual
+            if let Ok(real_path) = entry.path().canonicalize() {
+                let path_comp: Vec<_> = real_path.components().collect();
+                if !path_comp
+                    .as_slice()
+                    .windows(virt_path_comp.len())
+                    .any(|w| w == virt_path_comp.as_slice())
+                {
+                    res.push(entry.file_name().into_string().unwrap());
+                }
+            }
+        }
+    }
+    res
 }
 
 pub fn format_mac_address(mac: &[u8]) -> String {

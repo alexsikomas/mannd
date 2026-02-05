@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::Arc};
-use tokio::sync::{RwLock, mpsc::Sender};
+use tokio::sync::{mpsc::Sender, RwLock};
 
 use crate::{
     error::ManndError,
@@ -8,7 +8,7 @@ use crate::{
         network::{ApConnectInfo, Credentials},
         signals::SignalUpdate,
     },
-    systemd::systemctl,
+    systemd::systemctl::{self, is_service_active},
     wireguard::{network::Wireguard, store::WgMeta},
     wireless::{
         agent::{AgentState, IwdAgent},
@@ -54,8 +54,7 @@ impl Controller {
 
     /// Sets wifi to be either iwd, wpa or netlink
     pub async fn determine_adapter(&mut self) {
-        let ctl = systemctl::Systemctl::new(self.connection.clone());
-        match ctl.is_service_active("iwd".to_string()).await {
+        match is_service_active(&self.connection, "iwd".to_string()).await {
             Some(v) => {
                 if v {
                     let _ = self.connect_iwd().await;
@@ -100,12 +99,12 @@ impl Controller {
     }
 
     async fn connect_wpa(&mut self) -> Result<(), ManndError> {
-        match WpaSupplicant::new(self.connection.clone()) {
+        match WpaSupplicant::new(self.connection.clone()).await {
             Ok(wpa) => {
                 self.wifi = Some(WirelessAdapter::Wpa(wpa));
                 Ok(())
             }
-            Err(e) => Err(e),
+            Err(e) => return Err(e),
         }
     }
 
@@ -130,6 +129,12 @@ impl Controller {
         }
     }
 
+    pub async fn networkd_status(&self) -> bool {
+        match is_service_active(&self.connection, "systemd_2dnetworkd".to_string()).await {
+            Some(res) => res,
+            None => false,
+        }
+    }
     // pub async fn connect_wg(&self, file: PathBuf) -> Result<(), ManndError> {
     //     match &self.wg {
     //         Some(wg) => wg,
