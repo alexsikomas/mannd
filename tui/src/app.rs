@@ -9,15 +9,19 @@ use crate::{
 use com::{
     controller::DaemonType,
     error::ManndError,
-    state::network::{NetFailure, NetStart, NetSuccess, NetworkAction, NetworkActor, NetworkState},
+    state::network::{
+        Capability, NetFailure, NetStart, NetSuccess, NetworkAction, NetworkActor, NetworkState,
+    },
     wireguard::store::WgMeta,
     wireless::common::AccessPoint,
 };
 use crossterm::event::EventStream;
 use futures::{SinkExt, StreamExt};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{UnixSocket, UnixStream},
+    net::{
+        unix::{ReadHalf, WriteHalf},
+        UnixStream,
+    },
     process::Child,
     sync::mpsc::{self, Sender},
 };
@@ -31,10 +35,9 @@ pub struct AppState {
     // only used in main loop
     should_quit: bool,
     redraw: bool,
-    ui: UiState,
 
     networks: Vec<AccessPoint>,
-    daemon_type: Option<DaemonType>,
+    capabilities: Capability,
     wg_info: (Vec<String>, Vec<WgMeta>),
 }
 
@@ -43,9 +46,8 @@ impl AppState {
         AppState {
             should_quit: false,
             redraw: true,
-            ui: UiState::new(),
             networks: vec![],
-            daemon_type: None,
+            capabilities: Capability::default(),
             wg_info: (vec![], vec![]),
         }
     }
@@ -75,20 +77,23 @@ impl App {
 
         let mut ui_context = UiContext::new();
 
+        let caps = init_request(&mut writer, &mut reader).await?;
+        let mut ui = UiState::new(caps.clone());
+        state.capabilities = caps;
+
         while !state.should_quit {
-            let mut data = vec![0u8; 1024];
             if state.redraw {
                 let context = AppContext::create(
                     &state.networks,
-                    &state.daemon_type,
+                    &state.capabilities,
                     (&state.wg_info.0, &state.wg_info.1),
-                    state.ui.vpn_cols,
+                    ui.vpn_cols,
                 );
-                let _ = terminal.draw(|f| ui_context.render(f, &state.ui, &context));
+                let _ = terminal.draw(|f| ui_context.render(f, &ui, &context));
                 state.redraw = false;
                 match &ui_context.message {
                     Some(msg) => {
-                        handle_ui_message(&mut state, msg);
+                        handle_ui_message(&mut ui, msg);
                     }
                     None => {}
                 };
@@ -103,10 +108,11 @@ impl App {
                     let msg = from_bytes_cobs::<NetworkState>(&mut frame)?;
                     match msg {
                         NetworkState::CallAction(action) => {
+                            let _ = sock_tx.send(to_stdvec_cobs(&action)?).await;
                         }
                         _ => {
-                            if let Some(cmd) = handle_state_update(&mut state, msg).await {
-                                state.ui.process_command(cmd);
+                            if let Some(cmd) = handle_state_update(&mut state, &mut ui, msg).await {
+                                ui.process_command(cmd);
                             }
                         }
                     };
@@ -115,12 +121,12 @@ impl App {
                 Some(Ok(event)) = events.next() => {
                     state.redraw = true;
                     let context = AppContext::create(&state.networks,
-                        &state.daemon_type,
+                        &state.capabilities,
                         (&state.wg_info.0, &state.wg_info.1),
-                        state.ui.vpn_cols,
+                        ui.vpn_cols,
                     );
-                    if let Some(action) = state.ui.handle_event(event, &context) {
-                        handle_app_action(action, &mut state, &sock_tx).await;
+                    if let Some(action) = ui.handle_event(event, &context) {
+                        handle_app_action(action, &mut state, &mut ui, &sock_tx).await;
                     }
                 }
                 else => break,
@@ -136,36 +142,67 @@ impl App {
     }
 }
 
-async fn handle_state_update(state: &mut AppState, msg: NetworkState) -> Option<StateCommand> {
+async fn init_request(
+    writer: &mut FramedWrite<WriteHalf<'_>, LengthDelimitedCodec>,
+    reader: &mut FramedRead<ReadHalf<'_>, LengthDelimitedCodec>,
+) -> Result<Capability, ManndError> {
+    let req = to_stdvec_cobs(&NetworkAction::GetCapabilities)?;
+    writer
+        .send(req.into())
+        .await
+        .map_err(|_| ManndError::SocketWrite)?;
+
+    let max_tries = 10;
+    let mut tries = 0;
+    while let Some(frame_res) = reader.next().await {
+        if tries > max_tries {
+            return Err(ManndError::Timeout);
+        }
+
+        let mut frame = frame_res?;
+        let msg = from_bytes_cobs::<NetworkState>(&mut frame)?;
+        match msg {
+            NetworkState::SetCapabilities(caps) => return Ok(caps),
+            _ => {
+                tries += 1;
+            }
+        }
+    }
+
+    Err(ManndError::Timeout)
+}
+
+async fn handle_state_update(
+    state: &mut AppState,
+    ui: &mut UiState,
+    msg: NetworkState,
+) -> Option<StateCommand> {
     match msg {
         NetworkState::UpdateNetworks(aps) => {
             state.networks = aps;
-            match &mut state.ui.current_view {
-                View::Connection(conn_state) => {
-                    conn_state.refresh_available_actions(&state.networks);
+            match &mut ui.current_view {
+                View::Wifi(wifi_state) => {
+                    wifi_state.refresh_available_actions(&state.networks);
                 }
                 _ => {}
             }
-        }
-        NetworkState::SetDaemon(daemon) => {
-            state.daemon_type = Some(daemon);
         }
         NetworkState::UpdateWgDb((names, meta)) => {
             state.wg_info.0 = names;
             state.wg_info.1 = meta;
         }
-        NetworkState::Start(started) => return handle_start(state, started),
-        NetworkState::Success(succeeded) => return handle_success(state, succeeded),
-        NetworkState::Failed(failure) => return handle_failure(state, failure),
+        NetworkState::Start(started) => return handle_start(ui, started),
+        NetworkState::Success(succeeded) => return handle_success(ui, succeeded),
+        NetworkState::Failed(failure) => return handle_failure(ui, failure),
         _ => {}
     };
     None
 }
 
-fn handle_start(state: &mut AppState, started: NetStart) -> Option<StateCommand> {
+fn handle_start(ui: &mut UiState, started: NetStart) -> Option<StateCommand> {
     match started {
-        NetStart::Connection => {
-            state.ui.should_block = true;
+        NetStart::Wifi => {
+            ui.should_block = true;
             Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
                 "Connecting...".to_string(),
                 PopupType::General,
@@ -178,10 +215,10 @@ fn handle_start(state: &mut AppState, started: NetStart) -> Option<StateCommand>
     }
 }
 
-fn handle_success(state: &mut AppState, succeeded: NetSuccess) -> Option<StateCommand> {
+fn handle_success(ui: &mut UiState, succeeded: NetSuccess) -> Option<StateCommand> {
     match succeeded {
-        NetSuccess::Connection => {
-            state.ui.should_block = false;
+        NetSuccess::Wifi => {
+            ui.should_block = false;
             return Some(StateCommand::ClearPrompts);
         }
         NetSuccess::Scan => {
@@ -192,10 +229,10 @@ fn handle_success(state: &mut AppState, succeeded: NetSuccess) -> Option<StateCo
     None
 }
 
-fn handle_failure(state: &mut AppState, failed: NetFailure) -> Option<StateCommand> {
+fn handle_failure(ui: &mut UiState, failed: NetFailure) -> Option<StateCommand> {
     match failed {
-        NetFailure::Connection(err) => {
-            state.ui.should_block = false;
+        NetFailure::Wifi(err) => {
+            ui.should_block = false;
             return Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
                 err,
                 PopupType::Error,
@@ -204,14 +241,19 @@ fn handle_failure(state: &mut AppState, failed: NetFailure) -> Option<StateComma
     }
 }
 
-async fn handle_app_action(action: AppAction, state: &mut AppState, net_tx: &Sender<Vec<u8>>) {
+async fn handle_app_action(
+    action: AppAction,
+    state: &mut AppState,
+    ui: &mut UiState,
+    net_tx: &Sender<Vec<u8>>,
+) {
     match action {
         AppAction::Network(action) => {
             let res = to_stdvec_cobs(&action).unwrap();
             let _ = net_tx.send(res).await;
         }
         AppAction::AddPrompt(prompt) => {
-            state.ui.prompt_stack.push(prompt);
+            ui.prompt_stack.push(prompt);
         }
         AppAction::Exit => {
             state.should_quit = true;
@@ -219,10 +261,10 @@ async fn handle_app_action(action: AppAction, state: &mut AppState, net_tx: &Sen
     }
 }
 
-fn handle_ui_message(state: &mut AppState, msg: &UiMessage) {
+fn handle_ui_message(ui: &mut UiState, msg: &UiMessage) {
     match msg {
         UiMessage::SetVpnCols(cols) => {
-            state.ui.vpn_cols = *cols;
+            ui.vpn_cols = *cols;
         }
     }
 }

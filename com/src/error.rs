@@ -97,6 +97,9 @@ pub enum ManndError {
     ParseInt(std::num::ParseIntError),
     #[error("Serde issue deserialising: {0}")]
     SerdeDe(serde::de::value::Error),
+
+    #[error("wpa_supplicant has no interfaces")]
+    WpaNoInterfaces,
 }
 
 impl<T, P> From<neli::err::RouterError<T, P>> for ManndError

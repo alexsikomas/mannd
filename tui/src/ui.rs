@@ -1,15 +1,15 @@
 use com::{error::ManndError, ini_parse::IniConfig};
 use futures::executor::block_on;
 use ratatui::{
-    CompletedFrame, Frame, Terminal,
     prelude::{Backend, CrosstermBackend},
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, BorderType, Borders, Clear, Widget},
+    CompletedFrame, Frame, Terminal,
 };
 use serde::{
+    de::{value::MapDeserializer, IntoDeserializer},
     Deserialize,
-    de::{IntoDeserializer, value::MapDeserializer},
 };
 use std::{
     borrow::Cow,
@@ -25,8 +25,8 @@ use tracing::info;
 
 use crate::{
     components::{
-        connection::Connection, main_menu::MainMenu, password_prompt::PasswordPrompt,
-        popup_prompt::PopupPrompt, wireguard_ui::WireguardMenu,
+        main_menu::MainMenu, password_prompt::PasswordPrompt, popup_prompt::PopupPrompt,
+        wifi_menu::Connection, wireguard_ui::WireguardMenu,
     },
     state::{AppContext, PromptState, UiState, View},
 };
@@ -165,7 +165,7 @@ impl UiContext {
                     return;
                 }
             }
-            View::Connection(connection_state) => {
+            View::Wifi(connection_state) => {
                 if let Some(con) = Connection::new(ctx.networks, &connection_state) {
                     frame.render_widget(con, inner_area);
                 }

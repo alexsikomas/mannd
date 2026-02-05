@@ -35,6 +35,7 @@ use zbus::{
 use crate::{
     error::ManndError,
     state::{network::EapInfo, signals::SignalUpdate},
+    utils::list_interfaces,
     wireless::common::{
         get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security,
     },
@@ -43,9 +44,11 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct WpaSupplicant {
     service: String,
-
     path: String,
     conn: Connection,
+    // only one interface dealing with Wi-Fi
+    // at a time
+    active_interfaces: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,14 +64,18 @@ pub struct WpaBss {
 
 // To be used externally
 impl WpaSupplicant {
-    pub fn new(conn: Connection) -> Result<Self, ManndError> {
+    pub async fn new(conn: Connection) -> Result<Self, ManndError> {
         let service = String::from("fi.w1.wpa_supplicant1");
-        let path = String::from("/fi/w1/wpa_supplicant1/Interfaces/0");
+        let path = String::from("/fi/w1/wpa_supplicant1");
+        let proxy = Proxy::new(&conn, service.clone(), path.clone(), service.clone()).await?;
+        let active_interfaces = get_prop_from_proxy::<Vec<String>>(&proxy, "Interfaces").await?;
 
+        info!("Active: {:?}", active_interfaces);
         Ok(Self {
             conn,
             service,
             path,
+            active_interfaces,
         })
     }
 

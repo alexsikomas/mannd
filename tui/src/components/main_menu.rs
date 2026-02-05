@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     state::{MainMenuSelection, SelectableList},
-    ui::{THEME, Theme},
+    ui::{Theme, THEME},
 };
 
 pub struct MainMenu<'a> {
@@ -42,7 +42,7 @@ impl<'a> Widget for MainMenu<'a> {
             .map(|item| item.as_str().len() as u16)
             .max()
             .unwrap_or(10);
-        let box_width = max_item_width + 16;
+        let box_width = max_item_width + 18;
 
         let box_height = self.list.items.len() as u16 + 4;
 
