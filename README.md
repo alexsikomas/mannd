@@ -6,9 +6,11 @@
 </div>
 
 ## Why mannd?
-`systemd-networkd` is a powerful and lightweight networking daemon, but managing Wi-Fi or on-the-fly VPN connections often requires manual configurations or switching between various userspace tools like `iwctl` and `wg-quick`. 
+`mannd` is an unopinionated manager for various networking daemons. This means if all you want is a cleaner interface for connecting to Wi-Fi networks with either `iwd` or `wpa_supplicant` you can do that.
 
-`mannd` aims to condense the process into just one TUI, similar to `nmtui`.
+If instead you just want to connect to your VPN through `WireGuard` you can just do that.
+
+If you want to do any assortment of these things, you are free to do so.
 
 ### Features
 #### Wi-Fi Management:
@@ -25,58 +27,13 @@
 
 ## Prerequisites
 Before you can use `mannd`, you must have the following installed on your system:
-- `systemd-networkd`
 - Rust
 - For Wi-Fi: `wpa_supplicant` or `iwd`
 - For VPN: `wireguard-tools`
+- For `networkd`: ...`networkd` as an active service
 - Font Awesome Free (Optional)
 
-`mannd` expects that a `.network` rule already exists for allowing you to connect to the Internet via Wi-Fi.
-
-<details>
-<summary><strong>Setup with wpa_supplicant</strong></summary>
-
-`mannd` communicates with `wpa_supplicant` through the D-Bus control interface, this has to be explicitly enabled on your main Wi-Fi adapter. This is not always the default.
-
-Find your main interface name with: `ip a`
-
-Check if `wpa_supplicant` is running with the correct flags already by using:
-```bash
-ps aux | grep wpa_supplicant
-```
-
-Note: below `interface` is used as a placeholder you should expect your main interface name there.
-
-Correct output:
-```bash
-root    210470  0.0  0.0  17168 11192 ? Ss 16:50  0:00 /usr/bin/wpa_supplicant -c/etc/wpa_supplicant/wpa_supplicant-interface.conf -iinterface -u
-```
-
-Bad output (missing `-u` flag):
-```bash
-root    682  0.0  0.0  16260  5504 ? Ss Nov08 0:00 /usr/bin/wpa_supplicant -u -s -O /run/wpa_supplicant
-root    715  0.0  0.0  17164 10972 ? Ss Nov08 0:01 /usr/bin/wpa_supplicant -c/etc/wpa_supplicant/wpa_supplicant-interface.conf -iinterface
-```
-While there is a `-u` flag present it is for a general `wpa_supplicant` service not for our main Wi-Fi interface. The main interface is run on the second line, in fact if this had a `-u` flag we would run into an error as only one can exist at a time.
-
-Remove the `-u` flags from any `wpa_supplicant` service that isn't you main one. You will find the flag on the `ExecStart` section.
-
-Edit your `.service` file with:
-```bash
-sudo systemctl edit wpa_supplicant@interface.service
-```
-or
-```bash
-sudo [your favourite editor] /etc/systemd/system/multi-user.target.wants/wpa_supplicant@interface.service
-```
-
-Finally reload everything with:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart wpa_supplicant@interface.service
-```
-
-</details>
+*Note: Your Wi-Fi daemons only allow you to connect to a network but your PC internally needs an IP address assigned to your Wi-Fi interface. This means if you're using `networkd` without any `.network` rules you will need to create them either manually or through the TUI*
 
 ### Installation
 #### Source
