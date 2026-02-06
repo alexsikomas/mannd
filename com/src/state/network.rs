@@ -10,6 +10,7 @@ use crate::{
     controller::{Controller, DaemonType},
     error::ManndError,
     state::signals::{SignalManager, SignalUpdate},
+    systemd::networkd::get_netd_files,
     utils::list_interfaces,
     wireguard::store::WgMeta,
     wireless::common::{AccessPoint, Security},
@@ -32,18 +33,37 @@ impl<'a> NetworkActor<'a> {
     }
 }
 
+pub struct NetworkContext {
+    pub networks: Vec<AccessPoint>,
+    pub interfaces: Vec<String>,
+    pub wg_info: (Vec<String>, Vec<WgMeta>),
+    pub netd_files: Vec<String>,
+}
+
+impl Default for NetworkContext {
+    fn default() -> Self {
+        Self {
+            networks: vec![],
+            interfaces: vec![],
+            wg_info: (vec![], vec![]),
+            netd_files: vec![],
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum NetworkAction {
     Scan,
     // gets known & nearby networks
     GetNetworks,
+    GetNetworkdFiles,
+    GetCapabilities,
     InitWireguard,
     UpdateWireguard,
     ConnectWireguard(PathBuf),
     Connect(ApConnectInfo),
     ConnectKnown(String, Security),
     Forget(String, Security),
-    GetCapabilities,
     Exit,
     Disconnect,
 }
@@ -74,6 +94,7 @@ pub enum NetworkState {
     // i.e. after connecting to a known network,
     // without recursive call in handle_action
     CallAction(NetworkAction),
+    SetNetworkdFiles(Vec<PathBuf>),
     UpdateNetworks(Vec<AccessPoint>),
     UpdateWgDb((Vec<String>, Vec<WgMeta>)),
     Start(NetStart),
@@ -89,44 +110,38 @@ pub async fn handle_action<'a>(
     signal_tx: Sender<SignalUpdate<'a>>,
 ) -> Result<bool, ManndError> {
     // check if wifi then allow wifi requests
+    let mut state_send: Vec<NetworkState> = vec![];
     if controller.wifi.is_some() {
         match action.clone() {
             // WIFI
             NetworkAction::GetNetworks => {
                 if let Ok(aps) = controller.get_all_networks().await {
-                    if let Ok(()) = sock_tx.send(NetworkState::UpdateNetworks(aps)).await {
-                        let _ = sock_tx.send(NetworkState::Success(NetSuccess::Scan)).await;
-                    }
+                    state_send.push(NetworkState::UpdateNetworks(aps));
+                    state_send.push(NetworkState::Success(NetSuccess::Scan));
                 }
             }
             NetworkAction::Scan => {
-                if let Ok(()) = sock_tx.send(NetworkState::Start(NetStart::Scan)).await {
-                    if let Ok(()) = controller.scan(signal_tx.clone()).await {}
-                }
+                state_send.push(NetworkState::Start(NetStart::Scan));
+                let _ = controller.scan(signal_tx.clone()).await;
             }
-
             NetworkAction::Connect(info) => {
-                let _ = sock_tx.send(NetworkState::Start(NetStart::Wifi)).await;
+                state_send.push(NetworkState::Start(NetStart::Wifi));
 
                 match controller.network_connect(info).await {
                     Ok(()) => {
                         info!("Connection to network was successful");
-                        let _ = sock_tx.send(NetworkState::Success(NetSuccess::Wifi)).await;
+                        state_send.push(NetworkState::Success(NetSuccess::Wifi));
                     }
                     Err(e) => {
                         tracing::error!("Connection to network was not successful.");
-                        let _ = sock_tx
-                            .send(NetworkState::Failed(NetFailure::Wifi(e.to_string())))
-                            .await;
+                        state_send.push(NetworkState::Failed(NetFailure::Wifi(e.to_string())));
                     }
                 }
             }
             NetworkAction::ConnectKnown(ssid, security) => {
                 match controller.connect_known(ssid, security).await {
                     Ok(()) => {
-                        let _ = sock_tx
-                            .send(NetworkState::CallAction(NetworkAction::GetNetworks))
-                            .await;
+                        state_send.push(NetworkState::CallAction(NetworkAction::GetNetworks));
                     }
                     Err(e) => {}
                 }
@@ -136,18 +151,6 @@ pub async fn handle_action<'a>(
                     info!("Disconnected from a network");
                 } else {
                 }
-            }
-            NetworkAction::GetCapabilities => {
-                let interfaces = list_interfaces();
-                let wifi_daemon = controller.daemon_type();
-                let networkd_active = controller.networkd_status().await;
-                let wg = Command::new("wg")
-                    .arg("--version")
-                    .output()
-                    .map_or(false, |_| true);
-
-                let caps = Capability::new(interfaces, wifi_daemon, networkd_active, wg);
-                let _ = sock_tx.send(NetworkState::SetCapabilities(caps)).await;
             }
             NetworkAction::Forget(ssid, sec) => {
                 if let Ok(()) = controller.remove_network(ssid, sec).await {
@@ -162,6 +165,21 @@ pub async fn handle_action<'a>(
 
     // Wi-Fi not needed
     match action {
+        NetworkAction::GetCapabilities => {
+            let wifi_daemon = controller.daemon_type();
+            let networkd_active = controller.networkd_status().await;
+            let wg = Command::new("wg")
+                .arg("--version")
+                .output()
+                .map_or(false, |_| true);
+
+            let caps = Capability::new(wifi_daemon, networkd_active, wg);
+            state_send.push(NetworkState::SetCapabilities(caps));
+        }
+        NetworkAction::GetNetworkdFiles => {
+            let files = get_netd_files().await?;
+            state_send.push(NetworkState::SetNetworkdFiles(files));
+        }
         NetworkAction::ConnectWireguard(file) => {
             // controller.connect_wg(file).await?;
         }
@@ -169,7 +187,7 @@ pub async fn handle_action<'a>(
         NetworkAction::InitWireguard => {
             if let Ok(()) = controller.start_wg().await {
                 if let Ok((names, meta)) = controller.update_wg() {
-                    let _ = sock_tx.send(NetworkState::UpdateWgDb((names, meta))).await;
+                    state_send.push(NetworkState::UpdateWgDb((names, meta)));
                 }
             }
         }
@@ -180,37 +198,35 @@ pub async fn handle_action<'a>(
         }
         _ => {}
     };
+
+    for req in state_send {
+        let _ = sock_tx.send(req).await;
+    }
+
     Ok(false)
 }
 
 // determines what options will be visible/selectable
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Capability {
-    // non-virtual interfaces
-    pub interfaces: Vec<String>,
     pub wifi_daemon: Option<DaemonType>,
     pub networkd_active: bool,
     pub wireguard: bool,
 }
 
 impl Capability {
-    pub fn new(
-        interfaces: Vec<String>,
-        wifi_daemon: Option<DaemonType>,
-        networkd_active: bool,
-        wireguard: bool,
-    ) -> Self {
+    pub fn new(wifi_daemon: Option<DaemonType>, networkd_active: bool, wireguard: bool) -> Self {
         Capability {
-            interfaces,
             wifi_daemon,
             networkd_active,
             wireguard,
         }
     }
+}
 
-    pub fn default() -> Self {
+impl Default for Capability {
+    fn default() -> Self {
         Capability {
-            interfaces: vec![],
             wifi_daemon: None,
             networkd_active: false,
             wireguard: false,
