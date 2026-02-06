@@ -1,32 +1,17 @@
 use com::{error::ManndError, ini_parse::IniConfig};
-use futures::executor::block_on;
 use ratatui::{
-    prelude::{Backend, CrosstermBackend},
     style::{Color, Modifier, Style},
     text::Line,
-    widgets::{Block, BorderType, Borders, Clear, Widget},
-    CompletedFrame, Frame, Terminal,
+    widgets::{Block, BorderType, Borders},
+    Frame,
 };
-use serde::{
-    de::{value::MapDeserializer, IntoDeserializer},
-    Deserialize,
-};
-use std::{
-    borrow::Cow,
-    collections::HashMap,
-    env,
-    fmt::format,
-    io::{self, Stdout, Write},
-    path::PathBuf,
-    sync::OnceLock,
-};
-use tokio::sync::mpsc;
-use tracing::info;
+use serde::{de::IntoDeserializer, Deserialize};
+use std::{borrow::Cow, env, path::PathBuf, sync::OnceLock};
 
 use crate::{
     components::{
-        main_menu::MainMenu, password_prompt::PasswordPrompt, popup_prompt::PopupPrompt,
-        wifi_menu::Connection, wireguard_ui::WireguardMenu,
+        main_menu::MainMenu, networkd_ui::NetdMenu, password_prompt::PasswordPrompt,
+        popup_prompt::PopupPrompt, wifi_menu::Connection, wireguard_ui::WireguardMenu,
     },
     state::{AppContext, PromptState, UiState, View},
 };
@@ -39,7 +24,6 @@ pub static THEME: OnceLock<Theme> = OnceLock::new();
 impl Theme {
     /// Reads config toml from a predefined location and sets the
     /// global value of `THEME`
-    #[inline(never)]
     pub fn new() -> Result<(), ManndError> {
         let mut path = match env::var("XDG_CONFIG_HOME") {
             Ok(val) => PathBuf::from(val),
@@ -70,14 +54,11 @@ impl Theme {
             .get("theme")
             .ok_or_else(|| ManndError::ConfigSectionNotFound("theme".to_string()))?;
 
-        info!("THEME: {:?}", theme);
         let selected_theme = theme
             .get("selected")
             .ok_or_else(|| ManndError::ConfigPropertyNotFound("selected".to_string()))?;
 
-        info!("THEME: {selected_theme}");
         let theme_name = format!("theme.{}", selected_theme);
-        info!("THEME: {theme_name}");
 
         let selected_theme_section = config
             .sections
@@ -108,8 +89,8 @@ impl UiContext {
         Self { message: None }
     }
 
-    /// Renders title, border and conditionally renders main content depending on
-    /// state
+    /// Renders title, border and conditionally
+    /// renders main content depending on state
     pub fn render<'a>(&mut self, frame: &mut Frame<'a>, state: &UiState, ctx: &AppContext) {
         let outer_area = frame.area();
         let theme: &Theme;
@@ -121,6 +102,8 @@ impl UiContext {
                 return;
             }
         }
+
+        let net_ctx = ctx.net_ctx;
 
         let title_block = Block::new()
             .border_type(BorderType::Rounded)
@@ -166,14 +149,14 @@ impl UiContext {
                 }
             }
             View::Wifi(connection_state) => {
-                if let Some(con) = Connection::new(ctx.networks, &connection_state) {
+                if let Some(con) = Connection::new(&net_ctx.networks, &connection_state) {
                     frame.render_widget(con, inner_area);
                 }
 
                 for prompt in &state.prompt_stack {
                     match prompt {
                         PromptState::PskConnect(psk_prompt) => {
-                            let Some(selected) = ctx.networks.get(connection_state.network_cursor)
+                            let Some(selected) = net_ctx.networks.get(connection_state.network_cursor)
                             else {
                                 return;
                             };
@@ -197,14 +180,21 @@ impl UiContext {
             View::Vpn(vpn_state) => {
                 let mut cols: usize = 0;
                 let vpn_areas = WireguardMenu::build_layout_no_render(inner_area, &mut cols);
-                if let Some(vpn) =
-                    WireguardMenu::new(&vpn_state, &ctx.wg_files.0, ctx.wg_files.1, vpn_areas)
-                {
+                if let Some(vpn) = WireguardMenu::new(
+                    &vpn_state,
+                    &net_ctx.wg_info.0,
+                    &net_ctx.wg_info.1,
+                    vpn_areas,
+                ) {
                     if cols != state.vpn_cols {
                         self.message = Some(UiMessage::SetVpnCols(cols));
                     }
                     frame.render_widget(vpn, inner_area);
                 }
+            }
+            View::Networkd(netd_state) => {
+                let tmp: Vec<PathBuf> = vec![];
+                NetdMenu::new(&netd_state, &tmp);
             }
             _ => {
                 return;

@@ -1,16 +1,14 @@
 use postcard::{from_bytes_cobs, to_stdvec_cobs};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tracing::info;
 
 use crate::{
     state::{AppContext, InfoPrompt, PopupType, PromptState, StateCommand, UiState, View},
     ui::{UiContext, UiMessage},
 };
 use com::{
-    controller::DaemonType,
     error::ManndError,
     state::network::{
-        Capability, NetFailure, NetStart, NetSuccess, NetworkAction, NetworkActor, NetworkState,
+        Capability, NetFailure, NetStart, NetSuccess, NetworkAction, NetworkContext, NetworkState,
     },
     wireguard::store::WgMeta,
     wireless::common::AccessPoint,
@@ -36,9 +34,8 @@ pub struct AppState {
     should_quit: bool,
     redraw: bool,
 
-    networks: Vec<AccessPoint>,
-    capabilities: Capability,
-    wg_info: (Vec<String>, Vec<WgMeta>),
+    caps: Capability,
+    net_ctx: NetworkContext,
 }
 
 impl AppState {
@@ -46,9 +43,8 @@ impl AppState {
         AppState {
             should_quit: false,
             redraw: true,
-            networks: vec![],
-            capabilities: Capability::default(),
-            wg_info: (vec![], vec![]),
+            caps: Capability::default(),
+            net_ctx: NetworkContext::default(),
         }
     }
 }
@@ -79,16 +75,11 @@ impl App {
 
         let caps = init_request(&mut writer, &mut reader).await?;
         let mut ui = UiState::new(caps.clone());
-        state.capabilities = caps;
+        state.caps = caps;
 
         while !state.should_quit {
             if state.redraw {
-                let context = AppContext::create(
-                    &state.networks,
-                    &state.capabilities,
-                    (&state.wg_info.0, &state.wg_info.1),
-                    ui.vpn_cols,
-                );
+                let context = AppContext::create(&state.net_ctx, &state.caps, ui.vpn_cols);
                 let _ = terminal.draw(|f| ui_context.render(f, &ui, &context));
                 state.redraw = false;
                 match &ui_context.message {
@@ -120,9 +111,8 @@ impl App {
                 }
                 Some(Ok(event)) = events.next() => {
                     state.redraw = true;
-                    let context = AppContext::create(&state.networks,
-                        &state.capabilities,
-                        (&state.wg_info.0, &state.wg_info.1),
+                    let context = AppContext::create(&state.net_ctx,
+                        &state.caps,
                         ui.vpn_cols,
                     );
                     if let Some(action) = ui.handle_event(event, &context) {
@@ -179,17 +169,17 @@ async fn handle_state_update(
 ) -> Option<StateCommand> {
     match msg {
         NetworkState::UpdateNetworks(aps) => {
-            state.networks = aps;
+            state.net_ctx.networks = aps;
             match &mut ui.current_view {
                 View::Wifi(wifi_state) => {
-                    wifi_state.refresh_available_actions(&state.networks);
+                    wifi_state.refresh_available_actions(&state.net_ctx.networks);
                 }
                 _ => {}
             }
         }
         NetworkState::UpdateWgDb((names, meta)) => {
-            state.wg_info.0 = names;
-            state.wg_info.1 = meta;
+            state.net_ctx.wg_info.0 = names;
+            state.net_ctx.wg_info.1 = meta;
         }
         NetworkState::Start(started) => return handle_start(ui, started),
         NetworkState::Success(succeeded) => return handle_success(ui, succeeded),

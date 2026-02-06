@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::{fmt::Debug, usize};
 
-use com::state::network::{Capability, NetworkAction};
+use com::state::network::{Capability, NetworkAction, NetworkContext};
 use com::wireguard::store::WgMeta;
 use com::{
     controller::DaemonType,
@@ -32,8 +32,7 @@ pub enum StateCommand {
 }
 
 pub struct AppContext<'a> {
-    pub networks: &'a [AccessPoint],
-    pub wg_files: (&'a Vec<String>, &'a [WgMeta]),
+    pub net_ctx: &'a NetworkContext,
     pub capabilities: &'a Capability,
     pub vpn_cols: usize,
 }
@@ -51,16 +50,14 @@ pub struct UiState {
 
 impl<'a> AppContext<'a> {
     pub fn create(
-        networks: &'a [AccessPoint],
+        net_ctx: &'a NetworkContext,
         capabilities: &'a Capability,
         // one-to-one map
-        wg_files: (&'a Vec<String>, &'a [WgMeta]),
         vpn_cols: usize,
     ) -> Self {
         Self {
-            networks,
+            net_ctx,
             capabilities,
-            wg_files,
             vpn_cols,
         }
     }
@@ -184,18 +181,24 @@ pub enum View {
     MainMenu(SelectableList<MainMenuSelection>),
     Wifi(WifiState),
     Vpn(VpnState),
+    Networkd(NetdState),
     Config,
 }
 
 impl View {
     pub fn main_menu(caps: &Capability) -> Self {
         let mut options: SelectableList<MainMenuSelection> = SelectableList::new(vec![]);
-        if !caps.interfaces.is_empty() && caps.wifi_daemon.is_some() {
+        // possibly no interface
+        if caps.wifi_daemon.is_some() {
             options.items.push(MainMenuSelection::Wifi);
         }
 
         if caps.wireguard {
             options.items.push(MainMenuSelection::Vpn);
+        }
+
+        if caps.networkd_active {
+            options.items.push(MainMenuSelection::Networkd);
         }
 
         options
@@ -229,6 +232,7 @@ impl Component for View {
             }
             View::Wifi(state) => return state.on_key(key, ctx),
             View::Vpn(state) => return state.on_key(key, ctx),
+            View::Networkd(_state) => {}
             View::Config => {}
         };
         StateResult::Ignored
@@ -293,6 +297,7 @@ impl WifiState {
 
 impl Component for WifiState {
     fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
+        let net_ctx = ctx.net_ctx;
         // check if up or down
         match key.code {
             KeyCode::Right | KeyCode::Left => {
@@ -314,7 +319,7 @@ impl Component for WifiState {
                             StateResult::Command(StateCommand::NetworkAction(NetworkAction::Scan))
                         }
                         Some(ConnectionAction::Connect) => {
-                            if let Some(network) = ctx.networks.get(self.network_cursor) {
+                            if let Some(network) = net_ctx.networks.get(self.network_cursor) {
                                 if network.flags.contains(NetworkFlags::KNOWN) {
                                     return StateResult::Command(StateCommand::NetworkAction(
                                         NetworkAction::ConnectKnown(
@@ -341,7 +346,7 @@ impl Component for WifiState {
                             StateCommand::NetworkAction(NetworkAction::Disconnect),
                         ),
                         Some(ConnectionAction::Forget) => {
-                            if let Some(network) = ctx.networks.get(self.network_cursor) {
+                            if let Some(network) = net_ctx.networks.get(self.network_cursor) {
                                 if network.flags.contains(NetworkFlags::KNOWN) {
                                     return StateResult::Command(StateCommand::NetworkAction(
                                         NetworkAction::Forget(
@@ -361,19 +366,19 @@ impl Component for WifiState {
             }
             ConnectionFocus::Networks => match key.code {
                 KeyCode::Down => {
-                    if !ctx.networks.is_empty() {
-                        self.network_cursor = (self.network_cursor + 1) % ctx.networks.len();
-                        self.refresh_available_actions(ctx.networks);
+                    if !ctx.net_ctx.networks.is_empty() {
+                        self.network_cursor = (self.network_cursor + 1) % net_ctx.networks.len();
+                        self.refresh_available_actions(&net_ctx.networks);
                     }
                 }
                 KeyCode::Up => {
-                    if !ctx.networks.is_empty() {
+                    if !net_ctx.networks.is_empty() {
                         if self.network_cursor == 0 {
-                            self.network_cursor = ctx.networks.len() - 1;
+                            self.network_cursor = net_ctx.networks.len() - 1;
                         } else {
                             self.network_cursor -= 1;
                         }
-                        self.refresh_available_actions(ctx.networks);
+                        self.refresh_available_actions(&net_ctx.networks);
                     }
                 }
                 _ => {}
@@ -622,6 +627,7 @@ impl<T: PartialEq> SelectableList<T> {
 pub enum MainMenuSelection {
     Wifi,
     Vpn,
+    Networkd,
     Config,
     Exit,
 }
@@ -633,6 +639,9 @@ impl MainMenuSelection {
                 StateResult::Command(StateCommand::ChangeView(View::Wifi(WifiState::new())))
             }
             Self::Config => StateResult::Command(StateCommand::ChangeView(View::Config)),
+            Self::Networkd => {
+                StateResult::Command(StateCommand::ChangeView(View::Networkd(NetdState::new())))
+            }
             Self::Vpn => StateResult::Command(StateCommand::ChangeView(View::Vpn(VpnState::new()))),
             Self::Exit => StateResult::Command(StateCommand::Exit),
         }
@@ -642,6 +651,7 @@ impl MainMenuSelection {
         match self {
             Self::Wifi => "Wi-Fi",
             Self::Vpn => "VPN",
+            Self::Networkd => "Networkd",
             Self::Config => "Config",
             Self::Exit => "Exit",
         }
@@ -709,7 +719,7 @@ impl Component for VpnState {
                     }
                     VpnSelection::Files => {
                         let mut wg_path = PathBuf::from("/etc/wireguard");
-                        wg_path.push(format!("{}.conf", &ctx.wg_files.0[self.file_cursor]));
+                        wg_path.push(format!("{}.conf", &ctx.net_ctx.wg_info.0[self.file_cursor]));
                         return StateResult::Command(StateCommand::NetworkAction(
                             NetworkAction::ConnectWireguard(wg_path),
                         ));
@@ -763,5 +773,30 @@ impl Component for VpnState {
             }
         }
         StateResult::Consumed
+    }
+}
+
+#[derive(Debug)]
+pub struct NetdState {
+    pub selection: SelectableList<NetdSelection>,
+    pub config_cursor: usize,
+}
+
+#[derive(Debug)]
+pub enum NetdSelection {
+    Configs,
+    Create,
+}
+
+impl NetdState {
+    fn new() -> Self {
+        Self {
+            selection: SelectableList::new(Self::get_actions()),
+            config_cursor: 0,
+        }
+    }
+
+    fn get_actions() -> Vec<NetdSelection> {
+        vec![NetdSelection::Configs, NetdSelection::Create]
     }
 }
