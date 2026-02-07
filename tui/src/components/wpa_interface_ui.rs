@@ -72,18 +72,29 @@ impl<'a> Widget for WpaInterfaceUi<'a> {
             .alignment(ratatui::layout::Alignment::Center)
             .wrap(Wrap { trim: true });
 
-        let layouts = Layout::horizontal(
+        let layouts = Layout::vertical(
             self.ifaces
                 .iter()
                 .map(|_| Constraint::Length(1))
                 .collect::<Vec<_>>(),
         )
-        .split(areas.list);
+        .split(
+            Layout::horizontal([Constraint::Percentage(70)])
+                .flex(Flex::Center)
+                .split(areas.list)[0],
+        );
 
         for (i, iface) in self.ifaces.iter().enumerate() {
             let mut iface_text = Line::from(iface.clone());
             if i == self.info.interface_cursor {
-                iface_text.style = Style::new().bg(theme.info.color());
+                iface_text.style = Style::new()
+                    .bg(theme.secondary.color())
+                    .fg(theme.background.color())
+                    .bold();
+            } else {
+                iface_text.style = Style::new()
+                    .bg(theme.background.color())
+                    .fg(theme.foreground.color());
             }
 
             iface_text.render(layouts[i], buf);

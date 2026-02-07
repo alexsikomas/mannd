@@ -176,6 +176,9 @@ async fn handle_state_update(
             state.net_ctx.wg_info.0 = names;
             state.net_ctx.wg_info.1 = meta;
         }
+        NetworkState::SetInterfaces(ifaces) => {
+            state.net_ctx.interfaces = ifaces;
+        }
         NetworkState::Start(started) => return handle_start(ui, started),
         NetworkState::Success(succeeded) => return handle_success(ui, succeeded),
         NetworkState::Failed(failure) => return handle_failure(ui, failure),
