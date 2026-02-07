@@ -8,6 +8,7 @@ use com::{
     wireless::common::{AccessPoint, NetworkFlags, Security},
 };
 use crossterm::event::{Event, KeyCode, KeyEvent};
+use tracing::info;
 
 use crate::app::AppAction;
 
@@ -101,11 +102,16 @@ impl UiState {
 
             if let Some(prompt) = self.prompt_stack.last_mut() {
                 let res = prompt.on_key(&key, ctx);
-                if let StateResult::Command(cmd) = res {
-                    return self.process_commands([cmd]);
-                } else if let StateResult::Commands(cmds) = res {
-                    return self.process_commands(cmds);
-                }
+                match res {
+                    StateResult::Command(cmd) => {
+                        return self.process_commands([cmd]);
+                    }
+                    StateResult::Commands(cmds) => {
+                        return self.process_commands(cmds);
+                    }
+                    StateResult::Consumed => return vec![],
+                    StateResult::Ignored => {}
+                };
             }
 
             let res = self.current_view.on_key(&key, ctx);
@@ -249,6 +255,44 @@ impl Component for View {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum MainMenuSelection {
+    Wifi,
+    Vpn,
+    Networkd,
+    Config,
+    Exit,
+}
+
+impl MainMenuSelection {
+    fn execute(&self, daemon: &Option<DaemonType>) -> StateResult {
+        match self {
+            Self::Wifi => {
+                // if we are here DaemonType should be defined
+                StateResult::Command(StateCommand::ChangeView(View::Wifi(WifiState::new(
+                    daemon.as_ref().unwrap(),
+                ))))
+            }
+            Self::Config => StateResult::Command(StateCommand::ChangeView(View::Config)),
+            Self::Networkd => {
+                StateResult::Command(StateCommand::ChangeView(View::Networkd(NetdState::new())))
+            }
+            Self::Vpn => StateResult::Command(StateCommand::ChangeView(View::Vpn(VpnState::new()))),
+            Self::Exit => StateResult::Command(StateCommand::Exit),
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Wifi => "Wi-Fi",
+            Self::Vpn => "VPN",
+            Self::Networkd => "Networkd",
+            Self::Config => "Config",
+            Self::Exit => "Exit",
+        }
+    }
+}
+
 // Connection
 //
 // Possible actions the user can take in the connection
@@ -377,9 +421,14 @@ impl Component for WifiState {
                             }
                         }
                         Some(ConnectionAction::Interfaces) => {
-                            return StateResult::Command(StateCommand::Prompt(
-                                PromptState::WpaInterface(WpaInterfacePrompt::new()),
+                            let mut cmds: Vec<StateCommand> = vec![];
+                            cmds.push(StateCommand::Prompt(PromptState::WpaInterface(
+                                WpaInterfacePrompt::new(),
+                            )));
+                            cmds.push(StateCommand::NetworkAction(
+                                NetworkAction::GetNetworkContext(NetCtxFlags::Interfaces),
                             ));
+                            return StateResult::Commands(cmds);
                         }
                         _ => StateResult::Consumed,
                     };
@@ -443,9 +492,12 @@ impl Component for PromptState {
             PromptState::Info(prompt) => {
                 return prompt.on_key(key, ctx);
             }
+            PromptState::WpaInterface(prompt) => {
+                return prompt.on_key(key, ctx);
+            }
             _ => {}
         };
-        StateResult::Ignored
+        StateResult::Consumed
     }
 }
 
@@ -648,44 +700,6 @@ impl<T: PartialEq> SelectableList<T> {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum MainMenuSelection {
-    Wifi,
-    Vpn,
-    Networkd,
-    Config,
-    Exit,
-}
-
-impl MainMenuSelection {
-    fn execute(&self, daemon: &Option<DaemonType>) -> StateResult {
-        match self {
-            Self::Wifi => {
-                // if we are here DaemonType should be defined
-                StateResult::Command(StateCommand::ChangeView(View::Wifi(WifiState::new(
-                    daemon.as_ref().unwrap(),
-                ))))
-            }
-            Self::Config => StateResult::Command(StateCommand::ChangeView(View::Config)),
-            Self::Networkd => {
-                StateResult::Command(StateCommand::ChangeView(View::Networkd(NetdState::new())))
-            }
-            Self::Vpn => StateResult::Command(StateCommand::ChangeView(View::Vpn(VpnState::new()))),
-            Self::Exit => StateResult::Command(StateCommand::Exit),
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Wifi => "Wi-Fi",
-            Self::Vpn => "VPN",
-            Self::Networkd => "Networkd",
-            Self::Config => "Config",
-            Self::Exit => "Exit",
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum VpnSelection {
     // Connect,
@@ -831,20 +845,12 @@ impl NetdState {
 
 #[derive(Debug)]
 pub struct WpaInterfacePrompt {
-    pub selection: SelectableList<WpaSelection>,
     pub interface_cursor: usize,
-}
-
-#[derive(Debug, PartialEq, PartialOrd)]
-pub enum WpaSelection {
-    Exit,
-    Files,
 }
 
 impl WpaInterfacePrompt {
     fn new() -> Self {
         Self {
-            selection: SelectableList::new(vec![WpaSelection::Exit, WpaSelection::Files]),
             interface_cursor: 0,
         }
     }
@@ -853,11 +859,24 @@ impl WpaInterfacePrompt {
 impl Component for WpaInterfacePrompt {
     fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
         match key.code {
-            KeyCode::Enter => match self.selection.selected() {
-                Some(WpaSelection::Files) => {}
-                Some(WpaSelection::Exit) => {}
-                _ => {}
-            },
+            KeyCode::Enter => {
+                if let Some(iface) = ctx.net_ctx.interfaces.get(self.interface_cursor) {
+                    return StateResult::Command(StateCommand::NetworkAction(
+                        NetworkAction::CreateWpaInterface(iface.clone()),
+                    ));
+                }
+            }
+            KeyCode::Up => {
+                if self.interface_cursor == 0 {
+                    self.interface_cursor = ctx.net_ctx.interfaces.len() - 1;
+                } else {
+                    self.interface_cursor -= 1;
+                }
+            }
+            KeyCode::Down => {
+                self.interface_cursor =
+                    { self.interface_cursor + 1 } % ctx.net_ctx.interfaces.len();
+            }
             _ => {}
         };
         StateResult::Consumed
