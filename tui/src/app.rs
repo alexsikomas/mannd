@@ -8,7 +8,8 @@ use crate::{
 use com::{
     error::ManndError,
     state::network::{
-        Capability, NetFailure, NetStart, NetSuccess, NetworkAction, NetworkContext, NetworkState,
+        Capability, InterfaceTypes, NetFailure, NetStart, NetSuccess, NetworkAction,
+        NetworkContext, NetworkState,
     },
 };
 use crossterm::event::EventStream;
@@ -177,7 +178,10 @@ async fn handle_state_update(
             state.net_ctx.wg_info.1 = meta;
         }
         NetworkState::SetInterfaces(ifaces) => {
-            state.net_ctx.interfaces = ifaces;
+            state.net_ctx.interfaces = Some(InterfaceTypes::Normal(ifaces));
+        }
+        NetworkState::SetWpaInterfaces(ifaces) => {
+            state.net_ctx.interfaces = Some(InterfaceTypes::Wpa(ifaces));
         }
         NetworkState::Start(started) => return handle_start(ui, started),
         NetworkState::Success(succeeded) => return handle_success(ui, succeeded),

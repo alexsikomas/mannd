@@ -1,4 +1,4 @@
-use com::{error::ManndError, ini_parse::IniConfig};
+use com::{error::ManndError, ini_parse::IniConfig, state::network::InterfaceTypes};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::Line,
@@ -7,6 +7,7 @@ use ratatui::{
 };
 use serde::{de::IntoDeserializer, Deserialize};
 use std::{borrow::Cow, env, path::PathBuf, sync::OnceLock};
+use tracing::info;
 
 use crate::{
     components::{
@@ -204,11 +205,15 @@ impl UiContext {
                         frame.render_widget(prompt_instance, inner_area);
                     }
                 }
-                PromptState::WpaInterface(wpa_iface) => {
-                    if let Some(prompt_instance) =
-                        WpaInterfaceUi::new(wpa_iface, &ctx.net_ctx.interfaces)
-                    {
-                        frame.render_widget(prompt_instance, inner_area);
+                PromptState::WpaInterface(wpa_prompt) => {
+                    info!("HERE x1");
+                    if let Some(InterfaceTypes::Wpa(wpa_ifaces)) = &net_ctx.interfaces {
+                        info!("HERE x2");
+                        if let Some(prompt_instance) = WpaInterfaceUi::new(wpa_prompt, &wpa_ifaces)
+                        {
+                            info!("HERE x3");
+                            frame.render_widget(prompt_instance, inner_area);
+                        }
                     }
                 }
                 _ => {}

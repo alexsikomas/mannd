@@ -3,6 +3,7 @@ use std::{fmt::Debug, usize};
 
 use com::controller::DaemonType;
 use com::state::network::{Capability, NetCtxFlags, NetworkAction, NetworkContext};
+use com::wireless::wpa_supplicant::WpaInterface;
 use com::{
     state::network::ApConnectInfoBuilder,
     wireless::common::{AccessPoint, NetworkFlags, Security},
@@ -315,6 +316,13 @@ pub enum ConnectionAction {
     Forget,
 }
 
+impl ConnectionAction {
+    // actions which once enabled shouldn't be able to go away
+    fn perma_actions() -> Vec<Self> {
+        vec![Self::Scan, Self::Interfaces]
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum ConnectionFocus {
     Networks,
@@ -324,6 +332,7 @@ pub enum ConnectionFocus {
 impl WifiState {
     pub fn new(daemon: &DaemonType) -> Self {
         let mut actions = SelectableList::new(vec![ConnectionAction::Scan]);
+        info!("DAEMON TYPE: {:?}", daemon);
         if daemon == &DaemonType::Wpa {
             actions.items.push(ConnectionAction::Interfaces);
         }
@@ -336,7 +345,8 @@ impl WifiState {
     }
 
     pub fn refresh_available_actions(&mut self, networks: &[AccessPoint]) {
-        self.actions = SelectableList::new(vec![ConnectionAction::Scan]);
+        let perma_actions = ConnectionAction::perma_actions();
+        self.actions.items.retain(|a| perma_actions.contains(a));
 
         if let Some(ap) = networks.get(self.network_cursor) {
             let flags = ap.flags;
@@ -426,7 +436,7 @@ impl Component for WifiState {
                                 WpaInterfacePrompt::new(),
                             )));
                             cmds.push(StateCommand::NetworkAction(
-                                NetworkAction::GetNetworkContext(NetCtxFlags::Interfaces),
+                                NetworkAction::GetNetworkContext(NetCtxFlags::InterfacesWpa),
                             ));
                             return StateResult::Commands(cmds);
                         }
@@ -858,27 +868,29 @@ impl WpaInterfacePrompt {
 
 impl Component for WpaInterfacePrompt {
     fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
-        match key.code {
-            KeyCode::Enter => {
-                if let Some(iface) = ctx.net_ctx.interfaces.get(self.interface_cursor) {
-                    return StateResult::Command(StateCommand::NetworkAction(
-                        NetworkAction::CreateWpaInterface(iface.clone()),
-                    ));
+        if let Some(ifaces) = &ctx.net_ctx.interfaces {
+            match key.code {
+                KeyCode::Enter => {
+                    if let Some(iface) = ifaces.wpa_get(self.interface_cursor) {
+                        return StateResult::Command(StateCommand::NetworkAction(
+                            NetworkAction::CreateWpaInterface(iface.into()),
+                        ));
+                    }
                 }
-            }
-            KeyCode::Up => {
-                if self.interface_cursor == 0 {
-                    self.interface_cursor = ctx.net_ctx.interfaces.len() - 1;
-                } else {
-                    self.interface_cursor -= 1;
+                KeyCode::Up => {
+                    if self.interface_cursor == 0 {
+                        self.interface_cursor = ifaces.len() - 1;
+                    } else {
+                        self.interface_cursor -= 1;
+                    }
                 }
-            }
-            KeyCode::Down => {
-                self.interface_cursor =
-                    { self.interface_cursor + 1 } % ctx.net_ctx.interfaces.len();
-            }
-            _ => {}
-        };
+                KeyCode::Down => {
+                    self.interface_cursor = { self.interface_cursor + 1 } % ifaces.len();
+                }
+                _ => {}
+            };
+        }
+
         StateResult::Consumed
     }
 }

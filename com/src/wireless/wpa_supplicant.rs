@@ -23,18 +23,20 @@ use std::{
 };
 
 use futures::StreamExt;
+use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::info;
 use zbus::{
     names::MemberName,
     proxy::SignalStream,
-    zvariant::{self, OwnedObjectPath, OwnedValue, Value},
+    zvariant::{self, NoneValue, OwnedObjectPath, OwnedValue, Value},
     Connection, Proxy,
 };
 
 use crate::{
     error::ManndError,
     state::signals::SignalUpdate,
+    utils::list_interfaces,
     wireless::common::{
         get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security,
     },
@@ -47,7 +49,22 @@ pub struct WpaSupplicant {
     conn: Connection,
     // only one interface dealing with Wi-Fi
     // at a time
-    active_interfaces: Vec<String>,
+    active_interface: OwnedObjectPath,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum WpaInterface {
+    Managed(String),
+    Unmanaged(String),
+}
+
+impl<'a> Into<String> for &'a WpaInterface {
+    fn into(self) -> String {
+        match self {
+            WpaInterface::Managed(v) => v.clone(),
+            WpaInterface::Unmanaged(v) => v.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -68,15 +85,59 @@ impl WpaSupplicant {
         let service = String::from("fi.w1.wpa_supplicant1");
         let path = String::from("/fi/w1/wpa_supplicant1");
         let proxy = Proxy::new(&conn, service.clone(), path.clone(), service.clone()).await?;
-        let active_interfaces = get_prop_from_proxy::<Vec<String>>(&proxy, "Interfaces").await?;
 
-        info!("Active: {:?}", active_interfaces);
+        let mut active_interfaces =
+            get_prop_from_proxy::<Vec<OwnedObjectPath>>(&proxy, "Interfaces").await?;
+        let active_interface: OwnedObjectPath;
+
+        if active_interfaces.is_empty() {
+            active_interface = OwnedObjectPath::null_value();
+        } else {
+            active_interface = active_interfaces.swap_remove(0);
+        }
+
         Ok(Self {
             conn,
             service,
             path,
-            active_interfaces,
+            active_interface,
         })
+    }
+
+    pub async fn get_interfaces(&self) -> Result<Vec<WpaInterface>, ManndError> {
+        let mut res: Vec<WpaInterface> = vec![];
+        let mut wpa_interfaces: Vec<String> = vec![];
+        let mut interfaces = list_interfaces();
+        // read list from wpa ifaces and see if ifnames match
+
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            self.service.clone(),
+        )
+        .await?;
+
+        let iface_paths: Vec<OwnedObjectPath> = get_prop_from_proxy(&proxy, "Interfaces").await?;
+        for path in iface_paths {
+            let path_proxy = Proxy::new(
+                &self.conn,
+                self.service.clone(),
+                path,
+                "fi.w1.wpa_supplicant1.Interface",
+            )
+            .await?;
+            let ifname: String = get_prop_from_proxy(&path_proxy, "Ifname").await?;
+            res.push(WpaInterface::Managed(ifname.clone()));
+            wpa_interfaces.push(ifname);
+        }
+        interfaces.retain(|v| !wpa_interfaces.contains(v));
+
+        interfaces
+            .iter()
+            .for_each(|v| res.push(WpaInterface::Unmanaged(v.clone())));
+
+        Ok(res)
     }
 
     pub async fn create_interface(&self, ifname: String) -> Result<(), ManndError> {
@@ -102,7 +163,7 @@ impl WpaSupplicant {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            self.path.clone(),
+            self.active_interface.clone(),
             "fi.w1.wpa_supplicant1.Interface",
         )
         .await?;
@@ -303,7 +364,7 @@ impl WpaSupplicant {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            self.path.clone(),
+            self.active_interface.clone(),
             "fi.w1.wpa_supplicant1.Interface",
         )
         .await?;
@@ -322,7 +383,7 @@ impl WpaSupplicant {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            self.path.clone(),
+            self.active_interface.clone(),
             "fi.w1.wpa_supplicant1.Interface",
         )
         .await?;
@@ -427,7 +488,7 @@ impl WpaSupplicant {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            self.path.clone(),
+            self.active_interface.clone(),
             "fi.w1.wpa_supplicant1.Interface",
         )
         .await?;
@@ -445,7 +506,7 @@ impl WpaSupplicant {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            self.path.clone(),
+            self.active_interface.clone(),
             "fi.w1.wpa_supplicant1.Interface",
         )
         .await?;
