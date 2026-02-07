@@ -12,7 +12,7 @@ use tokio::{
 use crate::error::ManndError;
 
 const NETWORK_FOLDER: &'static str = "/etc/systemd/network/";
-const VIRTUAL_INTERFACE: &'static str = "mannd";
+// const VIRTUAL_INTERFACE: &'static str = "mannd";
 
 struct Section {
     name: String,
@@ -47,10 +47,10 @@ impl Section {
     }
 }
 
-pub async fn get_netd_files() -> Result<Vec<PathBuf>, ManndError> {
+pub async fn get_netd_files() -> Result<Vec<String>, ManndError> {
     let extensions = vec!["netdev", "network"];
     let mut dirs: Vec<PathBuf> = vec![PathBuf::from(NETWORK_FOLDER)];
-    let mut files: Vec<PathBuf> = vec![];
+    let mut files: Vec<String> = vec![];
 
     while let Some(path) = dirs.pop() {
         let mut cur_dir = read_dir(path).await?;
@@ -61,7 +61,7 @@ pub async fn get_netd_files() -> Result<Vec<PathBuf>, ManndError> {
             } else {
                 if let Some(ext) = path.extension() {
                     if extensions.contains(&ext.to_str().unwrap()) {
-                        files.push(path);
+                        files.push(path.to_string_lossy().into_owned());
                     }
                 }
             }
@@ -116,4 +116,3 @@ mod tests {
         Ok(())
     }
 }
-

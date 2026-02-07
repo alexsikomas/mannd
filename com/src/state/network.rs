@@ -1,9 +1,9 @@
 use std::{path::PathBuf, process::Command};
 
+use bitflags::bitflags;
 use derive_builder::Builder;
-use postcard::to_stdvec_cobs;
 use serde::{Deserialize, Serialize};
-use tokio::{net::unix::WriteHalf, sync::mpsc::Sender};
+use tokio::sync::mpsc::Sender;
 use tracing::info;
 
 use crate::{
@@ -19,17 +19,158 @@ use crate::{
 pub struct NetworkActor<'a> {
     pub controller: Controller,
     pub signal_manager: SignalManager<'a>,
+    signal_tx: Sender<SignalUpdate<'a>>,
+    sock_tx: Sender<NetworkState>,
 }
 
 impl<'a> NetworkActor<'a> {
-    pub async fn new() -> Result<Self, ManndError> {
+    pub async fn new(
+        signal_tx: Sender<SignalUpdate<'a>>,
+        sock_tx: Sender<NetworkState>,
+    ) -> Result<Self, ManndError> {
         let mut controller = Controller::new().await?;
         controller.determine_adapter().await;
         let signal_manager = SignalManager::new();
         Ok(Self {
             controller,
             signal_manager,
+            signal_tx,
+            sock_tx,
         })
+    }
+
+    /// Returns true if we are quitting the application
+    pub async fn handle_action(&mut self, action: NetworkAction) -> Result<bool, ManndError> {
+        // check if wifi then allow wifi requests
+        let mut state_send: Vec<NetworkState> = vec![];
+        if self.controller.wifi.is_some() {
+            self.handle_wifi_action(action.clone(), &mut state_send)
+                .await;
+        };
+
+        // Wi-Fi not needed
+        match action {
+            NetworkAction::GetCapabilities => {
+                let wifi_daemon = self.controller.daemon_type();
+                let networkd_active = self.controller.networkd_status().await;
+                let wg = Command::new("wg")
+                    .arg("--version")
+                    .output()
+                    .map_or(false, |_| true);
+
+                let caps = Capability::new(wifi_daemon, networkd_active, wg);
+                state_send.push(NetworkState::SetCapabilities(caps));
+            }
+            // WIREGUARD
+            NetworkAction::ConnectWireguard(file) => {
+                // controller.connect_wg(file).await?;
+            }
+            NetworkAction::InitWireguard => {
+                if let Ok(()) = self.controller.start_wg().await {
+                    self.handle_net_ctx(NetCtxFlags::Wireguard, &mut state_send)
+                        .await?;
+                }
+            }
+            NetworkAction::GetNetworkContext(flags) => {
+                self.handle_net_ctx(flags, &mut state_send).await?;
+            }
+            NetworkAction::Exit => {
+                if let Ok(()) = self.controller.exit().await {
+                    return Ok(true);
+                }
+            }
+            _ => {}
+        };
+
+        for req in state_send {
+            let _ = self.sock_tx.send(req).await;
+        }
+
+        Ok(false)
+    }
+
+    async fn handle_wifi_action(
+        &mut self,
+        action: NetworkAction,
+        state_send: &mut Vec<NetworkState>,
+    ) {
+        match action {
+            // WIFI
+            // NetworkAction::GetNetworks => {
+            //     if let Ok(aps) = self.controller.get_all_networks().await {
+            //         state_send.push(NetworkState::SetNetworks(aps));
+            //     }
+            // }
+            NetworkAction::Scan => {
+                state_send.push(NetworkState::Start(NetStart::Scan));
+                let _ = self.controller.scan(self.signal_tx.clone()).await;
+            }
+            NetworkAction::Connect(info) => {
+                state_send.push(NetworkState::Start(NetStart::Wifi));
+
+                match self.controller.network_connect(info).await {
+                    Ok(()) => {
+                        info!("Connection to network was successful");
+                        state_send.push(NetworkState::Success(NetSuccess::Wifi));
+                    }
+                    Err(e) => {
+                        tracing::error!("Connection to network was not successful.");
+                        state_send.push(NetworkState::Failed(NetFailure::Wifi(e.to_string())));
+                    }
+                }
+            }
+            NetworkAction::ConnectKnown(ssid, security) => {
+                match self.controller.connect_known(ssid, security).await {
+                    Ok(()) => {
+                        state_send.push(NetworkState::CallAction(
+                            NetworkAction::GetNetworkContext(NetCtxFlags::Network),
+                        ));
+                    }
+                    Err(e) => {}
+                }
+            }
+            NetworkAction::Disconnect => {
+                if let Ok(()) = self.controller.disconenct().await {
+                    info!("Disconnected from a network");
+                } else {
+                }
+            }
+            NetworkAction::Forget(ssid, sec) => {
+                if let Ok(()) = self.controller.remove_network(ssid, sec).await {
+                    //     if let Ok(aps) = controller.get_networks().await {
+                    //         let _ = state_update.send(NetUpdate::UpdateAps(aps)).await;
+                    //     }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn handle_net_ctx(
+        &mut self,
+        flags: NetCtxFlags,
+        state_send: &mut Vec<NetworkState>,
+    ) -> Result<(), ManndError> {
+        if flags.intersects(NetCtxFlags::Network) {
+            if let Ok(aps) = self.controller.get_all_networks().await {
+                state_send.push(NetworkState::SetNetworks(aps));
+                state_send.push(NetworkState::Success(NetSuccess::Scan));
+            }
+        }
+        if flags.intersects(NetCtxFlags::Interfaces) {
+            let interfaces = list_interfaces();
+            state_send.push(NetworkState::SetInterfaces(interfaces));
+        }
+        if flags.intersects(NetCtxFlags::Wireguard) {
+            if let Ok((names, meta)) = self.controller.update_wg() {
+                state_send.push(NetworkState::SetWireguardInfo((names, meta)));
+            }
+        }
+        if flags.intersects(NetCtxFlags::Netd) {
+            let files = get_netd_files().await?;
+            state_send.push(NetworkState::SetNetdFiles(files));
+        }
+        Ok(())
     }
 }
 
@@ -51,19 +192,31 @@ impl Default for NetworkContext {
     }
 }
 
+bitflags! {
+    #[derive(Debug, Serialize, Deserialize, Clone)]
+    pub struct NetCtxFlags: u8 {
+        const Network = 0b00000001;
+        const Interfaces = 0b00000010;
+        const Wireguard = 0b00000100;
+        const Netd = 0b00001000;
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum NetworkAction {
     Scan,
     // gets known & nearby networks
-    GetNetworks,
-    GetNetworkdFiles,
     GetCapabilities,
+    GetNetworkContext(NetCtxFlags),
     InitWireguard,
-    UpdateWireguard,
+    GetWireguard,
+    CreateWpaInterface(String),
     ConnectWireguard(PathBuf),
+
     Connect(ApConnectInfo),
     ConnectKnown(String, Security),
     Forget(String, Security),
+
     Exit,
     Disconnect,
 }
@@ -94,116 +247,16 @@ pub enum NetworkState {
     // i.e. after connecting to a known network,
     // without recursive call in handle_action
     CallAction(NetworkAction),
+
+    SetNetworks(Vec<AccessPoint>),
+    SetInterfaces(Vec<String>),
+    SetWireguardInfo((Vec<String>, Vec<WgMeta>)),
+    SetNetdFiles(Vec<String>),
+
     SetNetworkdFiles(Vec<PathBuf>),
-    UpdateNetworks(Vec<AccessPoint>),
-    UpdateWgDb((Vec<String>, Vec<WgMeta>)),
     Start(NetStart),
     Success(NetSuccess),
     Failed(NetFailure),
-}
-
-/// Returns true if we are quitting the application
-pub async fn handle_action<'a>(
-    controller: &mut Controller,
-    action: NetworkAction,
-    sock_tx: Sender<NetworkState>,
-    signal_tx: Sender<SignalUpdate<'a>>,
-) -> Result<bool, ManndError> {
-    // check if wifi then allow wifi requests
-    let mut state_send: Vec<NetworkState> = vec![];
-    if controller.wifi.is_some() {
-        match action.clone() {
-            // WIFI
-            NetworkAction::GetNetworks => {
-                if let Ok(aps) = controller.get_all_networks().await {
-                    state_send.push(NetworkState::UpdateNetworks(aps));
-                    state_send.push(NetworkState::Success(NetSuccess::Scan));
-                }
-            }
-            NetworkAction::Scan => {
-                state_send.push(NetworkState::Start(NetStart::Scan));
-                let _ = controller.scan(signal_tx.clone()).await;
-            }
-            NetworkAction::Connect(info) => {
-                state_send.push(NetworkState::Start(NetStart::Wifi));
-
-                match controller.network_connect(info).await {
-                    Ok(()) => {
-                        info!("Connection to network was successful");
-                        state_send.push(NetworkState::Success(NetSuccess::Wifi));
-                    }
-                    Err(e) => {
-                        tracing::error!("Connection to network was not successful.");
-                        state_send.push(NetworkState::Failed(NetFailure::Wifi(e.to_string())));
-                    }
-                }
-            }
-            NetworkAction::ConnectKnown(ssid, security) => {
-                match controller.connect_known(ssid, security).await {
-                    Ok(()) => {
-                        state_send.push(NetworkState::CallAction(NetworkAction::GetNetworks));
-                    }
-                    Err(e) => {}
-                }
-            }
-            NetworkAction::Disconnect => {
-                if let Ok(()) = controller.disconenct().await {
-                    info!("Disconnected from a network");
-                } else {
-                }
-            }
-            NetworkAction::Forget(ssid, sec) => {
-                if let Ok(()) = controller.remove_network(ssid, sec).await {
-                    //     if let Ok(aps) = controller.get_networks().await {
-                    //         let _ = state_update.send(NetUpdate::UpdateAps(aps)).await;
-                    //     }
-                }
-            }
-            _ => {}
-        }
-    };
-
-    // Wi-Fi not needed
-    match action {
-        NetworkAction::GetCapabilities => {
-            let wifi_daemon = controller.daemon_type();
-            let networkd_active = controller.networkd_status().await;
-            let wg = Command::new("wg")
-                .arg("--version")
-                .output()
-                .map_or(false, |_| true);
-
-            let caps = Capability::new(wifi_daemon, networkd_active, wg);
-            state_send.push(NetworkState::SetCapabilities(caps));
-        }
-        NetworkAction::GetNetworkdFiles => {
-            let files = get_netd_files().await?;
-            state_send.push(NetworkState::SetNetworkdFiles(files));
-        }
-        NetworkAction::ConnectWireguard(file) => {
-            // controller.connect_wg(file).await?;
-        }
-        // WIREGUARD
-        NetworkAction::InitWireguard => {
-            if let Ok(()) = controller.start_wg().await {
-                if let Ok((names, meta)) = controller.update_wg() {
-                    state_send.push(NetworkState::UpdateWgDb((names, meta)));
-                }
-            }
-        }
-        NetworkAction::Exit => {
-            if let Ok(()) = controller.exit().await {
-                return Ok(true);
-            }
-        }
-        _ => {}
-    };
-
-    for req in state_send {
-        let _ = sock_tx.send(req).await;
-    }
-
-    Ok(false)
 }
 
 // determines what options will be visible/selectable
@@ -245,62 +298,62 @@ pub struct ApConnectInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Credentials {
     Password(String),
-    Eap(EapInfo),
+    // Eap(EapInfo),
 }
 
-#[derive(Builder, Debug, Clone, Serialize, Deserialize)]
-pub struct EapInfo {
-    pub eap_method: EapMethod,
-    pub identity: String,
-    #[builder(default = "None")]
-    pub anonymous_identity: Option<String>,
-
-    // Optional because EAP-TLS uses certs instead.
-    pub password: Option<String>,
-    pub ca_cert: PathBuf,
-
-    // limits accepted certs
-    #[builder(default = "None")]
-    pub domain_match: Option<String>,
-
-    // Required for PEAP and TTLS
-    pub phase2: Option<PhaseTwo>,
-    // EAP-TLS
-    #[builder(default = "None")]
-    pub client_cert: Option<PathBuf>,
-    #[builder(default = "None")]
-    pub client_key: Option<PathBuf>,
-    // Used if client key is encrypted
-    #[builder(default = "None")]
-    pub client_key_password: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PhaseTwo {
-    Eap(EapMethod),
-    // non-eap variants
-    Pap,
-    Chap,
-    Mschap,
-    Mschapv2,
-    // user can specify custom
-    Legacy(String),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum EapMethod {
-    TLS,
-    PEAP,
-    TTLS,
-    PWD,
-    SIM,
-    AKA,
-    // AKA'
-    AKA_PRIME,
-    MSCHAPV2,
-    GTC,
-    // methods below not in iwd
-    MD5,
-    FAST,
-    LEAP,
-}
+// #[derive(Builder, Debug, Clone, Serialize, Deserialize)]
+// pub struct EapInfo {
+//     pub eap_method: EapMethod,
+//     pub identity: String,
+//     #[builder(default = "None")]
+//     pub anonymous_identity: Option<String>,
+//
+//     // Optional because EAP-TLS uses certs instead.
+//     pub password: Option<String>,
+//     pub ca_cert: PathBuf,
+//
+//     // limits accepted certs
+//     #[builder(default = "None")]
+//     pub domain_match: Option<String>,
+//
+//     // Required for PEAP and TTLS
+//     pub phase2: Option<PhaseTwo>,
+//     // EAP-TLS
+//     #[builder(default = "None")]
+//     pub client_cert: Option<PathBuf>,
+//     #[builder(default = "None")]
+//     pub client_key: Option<PathBuf>,
+//     // Used if client key is encrypted
+//     #[builder(default = "None")]
+//     pub client_key_password: Option<String>,
+// }
+//
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub enum PhaseTwo {
+//     Eap(EapMethod),
+//     // non-eap variants
+//     Pap,
+//     Chap,
+//     Mschap,
+//     Mschapv2,
+//     // user can specify custom
+//     Legacy(String),
+// }
+//
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub enum EapMethod {
+//     TLS,
+//     PEAP,
+//     TTLS,
+//     PWD,
+//     SIM,
+//     AKA,
+//     // AKA'
+//     AKA_PRIME,
+//     MSCHAPV2,
+//     GTC,
+//     // methods below not in iwd
+//     MD5,
+//     FAST,
+//     LEAP,
+// }

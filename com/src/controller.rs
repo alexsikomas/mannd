@@ -21,7 +21,7 @@ use tracing::info;
 use zbus::Connection;
 
 // used in outside functions
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum DaemonType {
     Iwd,
     Wpa,
@@ -183,22 +183,21 @@ impl Controller {
                         );
                     }
                 };
-            }
-            Credentials::Eap(eap) => {
-                match &self.wifi {
-                    Some(WirelessAdapter::Iwd(iwd)) => {
-                        iwd.connect_network_eap(info.ssid, eap).await?;
-                    }
-                    Some(WirelessAdapter::Wpa(wpa)) => {
-                        wpa.connect_network_eap(info.ssid, eap).await?;
-                    }
-                    None => {
-                        tracing::error!(
-                            "Tried to connect to network without an initalised adapter?"
-                        );
-                    }
-                };
-            }
+            } // Credentials::Eap(eap) => {
+              //     match &self.wifi {
+              //         Some(WirelessAdapter::Iwd(iwd)) => {
+              //             iwd.connect_network_eap(info.ssid, eap).await?;
+              //         }
+              //         Some(WirelessAdapter::Wpa(wpa)) => {
+              //             wpa.connect_network_eap(info.ssid, eap).await?;
+              //         }
+              //         None => {
+              //             tracing::error!(
+              //                 "Tried to connect to network without an initalised adapter?"
+              //             );
+              //         }
+              //     };
+              // }
         }
 
         Ok(())

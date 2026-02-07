@@ -1,15 +1,38 @@
-use zbus::Connection;
+use zbus::{zvariant::OwnedObjectPath, Connection, Proxy};
 use zbus_systemd::systemd1::UnitProxy;
 
 use crate::error::ManndError;
 
-pub async fn is_service_active(conn: &Connection, service: String) -> Option<bool> {
-    if let Ok(unit) = UnitProxy::new(
+const SYSTEMD_BUS: &'static str = "org.freedesktop.systemd1";
+const SYSTEMD_PATH: &'static str = "/org/freedesktop/systemd1";
+
+pub async fn get_system_unit(
+    conn: &Connection,
+    service: String,
+) -> Result<OwnedObjectPath, ManndError> {
+    let proxy = Proxy::new(
         conn,
-        format!("/org/freedesktop/systemd1/unit/{}_2eservice", service),
+        SYSTEMD_BUS,
+        SYSTEMD_PATH,
+        format!("{}.Manager", SYSTEMD_BUS),
     )
-    .await
-    {
+    .await?;
+    let res: Result<OwnedObjectPath, _> =
+        proxy.call("GetUnit", &format!("{service}.service")).await;
+    match res {
+        Ok(path) => Ok(path),
+        Err(e) => Err(ManndError::Zbus(e)),
+    }
+}
+
+pub async fn is_service_active(conn: &Connection, service: String) -> Option<bool> {
+    let path = get_system_unit(conn, service).await;
+    if path.is_err() {
+        return None;
+    }
+    let path = path.unwrap();
+
+    if let Ok(unit) = UnitProxy::new(conn, path).await {
         if let Ok(status) = unit.active_state().await {
             if status == "active" {
                 return Some(true);
@@ -20,12 +43,8 @@ pub async fn is_service_active(conn: &Connection, service: String) -> Option<boo
 }
 
 pub async fn restart_networkd(conn: &Connection) -> Result<(), ManndError> {
-    if let Ok(unit) = UnitProxy::new(
-        conn,
-        "/org/freedesktop/systemd1/unit/systemd_2dnetworkd_2eservice",
-    )
-    .await
-    {
+    let path = get_system_unit(conn, "systemd-networkd".to_string()).await?;
+    if let Ok(unit) = UnitProxy::new(conn, path).await {
         unit.restart("replace".to_string()).await?;
     }
     Ok(())

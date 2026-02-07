@@ -5,7 +5,7 @@ use tokio_stream::{StreamExt, StreamMap};
 use tracing::info;
 use zbus::{proxy::SignalStream, zvariant::OwnedValue, Message};
 
-use crate::state::network::NetworkAction;
+use crate::state::network::{NetCtxFlags, NetworkAction};
 
 pub struct SignalManager<'a> {
     pub signals: StreamMap<usize, SignalStream<'a>>,
@@ -72,7 +72,7 @@ impl<'a> SignalManager<'a> {
             .is_some_and(|val| val.eq(&OwnedValue::from(false)))
         {
             SignalUpdate::Remove(msg.0);
-            return Some(NetworkAction::GetNetworks);
+            return Some(NetworkAction::GetNetworkContext(NetCtxFlags::Network));
         }
         None
     }
@@ -84,7 +84,7 @@ impl<'a> SignalManager<'a> {
             match method.as_str() {
                 "ScanDone" => {
                     self.handle_update(SignalUpdate::Remove(msg.0));
-                    return Some(NetworkAction::GetNetworks);
+                    return Some(NetworkAction::GetNetworkContext(NetCtxFlags::Network));
                 }
                 _ => return None,
             }

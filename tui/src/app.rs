@@ -10,8 +10,6 @@ use com::{
     state::network::{
         Capability, NetFailure, NetStart, NetSuccess, NetworkAction, NetworkContext, NetworkState,
     },
-    wireguard::store::WgMeta,
-    wireless::common::AccessPoint,
 };
 use crossterm::event::EventStream;
 use futures::{SinkExt, StreamExt};
@@ -57,11 +55,6 @@ impl App {
     pub async fn run(&mut self) -> Result<(), ManndError> {
         let mut state = AppState::new();
 
-        // to network thread
-        // let (action_tx, action_rx) = mpsc::channel::<NetworkAction>(32);
-        // from network thread
-        // let (state_tx, mut state_rx) = mpsc::channel::<NetworkState>(32);
-
         let (reader, writer) = self.stream.split();
         let mut reader = FramedRead::new(reader, LengthDelimitedCodec::new());
         let mut writer = FramedWrite::new(writer, LengthDelimitedCodec::new());
@@ -103,7 +96,7 @@ impl App {
                         }
                         _ => {
                             if let Some(cmd) = handle_state_update(&mut state, &mut ui, msg).await {
-                                ui.process_command(cmd);
+                                ui.process_commands([cmd]);
                             }
                         }
                     };
@@ -115,7 +108,7 @@ impl App {
                         &state.caps,
                         ui.vpn_cols,
                     );
-                    if let Some(action) = ui.handle_event(event, &context) {
+                    for action in ui.handle_event(event, &context) {
                         handle_app_action(action, &mut state, &mut ui, &sock_tx).await;
                     }
                 }
@@ -132,6 +125,8 @@ impl App {
     }
 }
 
+/// Requests the capabilities of the system to know what
+/// to display on screen i.e. wifi, wireguard, networkd
 async fn init_request(
     writer: &mut FramedWrite<WriteHalf<'_>, LengthDelimitedCodec>,
     reader: &mut FramedRead<ReadHalf<'_>, LengthDelimitedCodec>,
@@ -168,7 +163,7 @@ async fn handle_state_update(
     msg: NetworkState,
 ) -> Option<StateCommand> {
     match msg {
-        NetworkState::UpdateNetworks(aps) => {
+        NetworkState::SetNetworks(aps) => {
             state.net_ctx.networks = aps;
             match &mut ui.current_view {
                 View::Wifi(wifi_state) => {
@@ -177,7 +172,7 @@ async fn handle_state_update(
                 _ => {}
             }
         }
-        NetworkState::UpdateWgDb((names, meta)) => {
+        NetworkState::SetWireguardInfo((names, meta)) => {
             state.net_ctx.wg_info.0 = names;
             state.net_ctx.wg_info.1 = meta;
         }

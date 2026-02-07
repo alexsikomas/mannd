@@ -1,13 +1,12 @@
 use neli::{
     consts::{
-        nl::{NlmF, Nlmsg},
+        nl::NlmF,
         rtnl::{Ifa, Iff, Ifla, IflaInfo, RtAddrFamily, Rta, Rtm},
     },
-    err::Nlmsgerr,
     nl::NlPayload,
     router::asynchronous::NlRouter,
     rtnl::{Ifaddrmsg, IfaddrmsgBuilder, Ifinfomsg, IfinfomsgBuilder, RtattrBuilder, RtmsgBuilder},
-    types::{Buffer, RtBuffer},
+    types::RtBuffer,
     utils::Groups,
 };
 use redb::Database;
@@ -91,6 +90,7 @@ impl Wireguard {
     }
 }
 
+#[allow(dead_code)]
 impl Wireguard {
     async fn check_state(&self) -> Result<(), ManndError> {
         let mut buf = RtBuffer::new();

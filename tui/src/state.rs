@@ -1,15 +1,13 @@
 use std::path::PathBuf;
 use std::{fmt::Debug, usize};
 
-use com::state::network::{Capability, NetworkAction, NetworkContext};
-use com::wireguard::store::WgMeta;
+use com::controller::DaemonType;
+use com::state::network::{Capability, NetCtxFlags, NetworkAction, NetworkContext};
 use com::{
-    controller::DaemonType,
     state::network::ApConnectInfoBuilder,
     wireless::common::{AccessPoint, NetworkFlags, Security},
 };
 use crossterm::event::{Event, KeyCode, KeyEvent};
-use tracing::info;
 
 use crate::app::AppAction;
 
@@ -17,6 +15,7 @@ use crate::app::AppAction;
 pub enum StateResult {
     Consumed,
     Command(StateCommand),
+    Commands(Vec<StateCommand>),
     Ignored,
 }
 
@@ -87,79 +86,90 @@ impl UiState {
         }
     }
 
-    pub fn handle_event(&mut self, event: Event, ctx: &AppContext) -> Option<AppAction> {
+    pub fn handle_event(&mut self, event: Event, ctx: &AppContext) -> Vec<AppAction> {
         if self.should_block {
-            return None;
+            return vec![];
         }
 
         if let Event::Key(key) = event {
             if key.code == KeyCode::Esc {
                 if !self.prompt_stack.is_empty() {
                     self.prompt_stack.pop();
-                    return None;
+                    return vec![];
                 }
             }
 
             if let Some(prompt) = self.prompt_stack.last_mut() {
-                match prompt.on_key(&key, ctx) {
-                    StateResult::Command(cmd) => return self.process_command(cmd),
-                    _ => return None,
+                let res = prompt.on_key(&key, ctx);
+                if let StateResult::Command(cmd) = res {
+                    return self.process_commands([cmd]);
+                } else if let StateResult::Commands(cmds) = res {
+                    return self.process_commands(cmds);
                 }
             }
 
-            let result = self.current_view.on_key(&key, ctx);
-            if let StateResult::Command(cmd) = result {
-                return self.process_command(cmd);
+            let res = self.current_view.on_key(&key, ctx);
+            if let StateResult::Command(cmd) = res {
+                return self.process_commands([cmd]);
+            } else if let StateResult::Commands(cmds) = res {
+                return self.process_commands(cmds);
             }
         }
-        None
+        vec![]
     }
 
     /// May be used by external files to make something happen in the UI
     /// like adding a prompt based on something the UiState doesn't know
     /// directly
-    pub fn process_command(&mut self, cmd: StateCommand) -> Option<AppAction> {
-        match cmd {
-            StateCommand::Exit => Some(AppAction::Exit),
-            StateCommand::ChangeView(view) => {
-                self.current_view = view;
-                match self.current_view {
-                    // improves usability by fetching any networks
-                    // that are currently known in connection
-                    View::Wifi(_) => Some(AppAction::Network(NetworkAction::GetNetworks)),
-                    View::Vpn(_) => Some(AppAction::Network(NetworkAction::InitWireguard)),
-                    _ => None,
-                }
-            }
-            StateCommand::Prompt(prompt) => {
-                match &prompt {
-                    PromptState::Info(info) => {
-                        // removes clutter of general messages if we have error
-                        if info.kind == PopupType::Error {
-                            self.remove_general_prompts();
+    pub fn process_commands(
+        &mut self,
+        cmds: impl IntoIterator<Item = StateCommand>,
+    ) -> Vec<AppAction> {
+        let mut actions: Vec<AppAction> = vec![];
+        for cmd in cmds {
+            match cmd {
+                StateCommand::Exit => actions.push(AppAction::Exit),
+                StateCommand::ChangeView(view) => {
+                    self.current_view = view;
+                    match self.current_view {
+                        // improves usability by fetching any networks
+                        // that are currently known in connection
+                        View::Wifi(_) => actions.push(AppAction::Network(
+                            NetworkAction::GetNetworkContext(NetCtxFlags::Network),
+                        )),
+                        View::Vpn(_) => {
+                            actions.push(AppAction::Network(NetworkAction::InitWireguard))
                         }
-                    }
-                    _ => {}
-                };
-                self.prompt_stack.push(prompt);
-                None
-            }
-            StateCommand::Back => {
-                self.current_view = View::main_menu(&self.caps);
-                None
-            }
-            StateCommand::NetworkAction(action) => Some(AppAction::Network(action)),
-            StateCommand::PopPrompt => {
-                if !self.prompt_stack.is_empty() {
-                    self.prompt_stack.pop();
+                        _ => {}
+                    };
                 }
-                None
-            }
-            StateCommand::ClearPrompts => {
-                self.prompt_stack = vec![];
-                None
-            }
+                StateCommand::Prompt(prompt) => {
+                    match &prompt {
+                        PromptState::Info(info) => {
+                            // removes clutter of general messages if we have error
+                            if info.kind == PopupType::Error {
+                                self.remove_general_prompts();
+                            }
+                        }
+                        _ => {}
+                    };
+                    self.prompt_stack.push(prompt);
+                }
+                StateCommand::Back => {
+                    self.current_view = View::main_menu(&self.caps);
+                }
+                StateCommand::NetworkAction(action) => actions.push(AppAction::Network(action)),
+                StateCommand::PopPrompt => {
+                    if !self.prompt_stack.is_empty() {
+                        self.prompt_stack.pop();
+                    }
+                }
+                StateCommand::ClearPrompts => {
+                    self.prompt_stack = vec![];
+                }
+            };
         }
+        actions
     }
 
     fn remove_general_prompts(&mut self) {
@@ -225,7 +235,7 @@ impl Component for View {
 
                 if key.code == KeyCode::Enter {
                     if let Some(selection) = list.selected() {
-                        return selection.execute();
+                        return selection.execute(&ctx.capabilities.wifi_daemon);
                     }
                     return StateResult::Consumed;
                 }
@@ -251,11 +261,12 @@ pub struct WifiState {
     pub network_cursor: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ConnectionAction {
     Scan,
     Connect,
     Disconnect,
+    Interfaces,
     // Info,
     Forget,
 }
@@ -267,10 +278,15 @@ pub enum ConnectionFocus {
 }
 
 impl WifiState {
-    pub fn new() -> Self {
+    pub fn new(daemon: &DaemonType) -> Self {
+        let mut actions = SelectableList::new(vec![ConnectionAction::Scan]);
+        if daemon == &DaemonType::Wpa {
+            actions.items.push(ConnectionAction::Interfaces);
+        }
+
         Self {
             focused_area: ConnectionFocus::Actions,
-            actions: SelectableList::new(vec![ConnectionAction::Scan]),
+            actions,
             network_cursor: 0,
         }
     }
@@ -360,6 +376,11 @@ impl Component for WifiState {
                                 StateResult::Consumed
                             }
                         }
+                        Some(ConnectionAction::Interfaces) => {
+                            return StateResult::Command(StateCommand::Prompt(
+                                PromptState::WpaInterface(WpaInterfacePrompt::new()),
+                            ));
+                        }
                         _ => StateResult::Consumed,
                     };
                 }
@@ -394,6 +415,7 @@ impl ConnectionAction {
             Self::Scan => "Scan",
             Self::Connect => "Connect",
             Self::Disconnect => "Disconnect",
+            Self::Interfaces => "Interfaces",
             // Self::Info => "Info",
             Self::Forget => "Forget",
         }
@@ -407,6 +429,7 @@ impl ConnectionAction {
 #[derive(Debug)]
 pub enum PromptState {
     PskConnect(PskConnectionPrompt),
+    WpaInterface(WpaInterfacePrompt),
     /// Displays general info or errors to the user
     Info(InfoPrompt),
 }
@@ -420,7 +443,9 @@ impl Component for PromptState {
             PromptState::Info(prompt) => {
                 return prompt.on_key(key, ctx);
             }
+            _ => {}
         };
+        StateResult::Ignored
     }
 }
 
@@ -633,10 +658,13 @@ pub enum MainMenuSelection {
 }
 
 impl MainMenuSelection {
-    fn execute(&self) -> StateResult {
+    fn execute(&self, daemon: &Option<DaemonType>) -> StateResult {
         match self {
             Self::Wifi => {
-                StateResult::Command(StateCommand::ChangeView(View::Wifi(WifiState::new())))
+                // if we are here DaemonType should be defined
+                StateResult::Command(StateCommand::ChangeView(View::Wifi(WifiState::new(
+                    daemon.as_ref().unwrap(),
+                ))))
             }
             Self::Config => StateResult::Command(StateCommand::ChangeView(View::Config)),
             Self::Networkd => {
@@ -798,5 +826,40 @@ impl NetdState {
 
     fn get_actions() -> Vec<NetdSelection> {
         vec![NetdSelection::Configs, NetdSelection::Create]
+    }
+}
+
+#[derive(Debug)]
+pub struct WpaInterfacePrompt {
+    pub selection: SelectableList<WpaSelection>,
+    pub interface_cursor: usize,
+}
+
+#[derive(Debug, PartialEq, PartialOrd)]
+pub enum WpaSelection {
+    Exit,
+    Files,
+}
+
+impl WpaInterfacePrompt {
+    fn new() -> Self {
+        Self {
+            selection: SelectableList::new(vec![WpaSelection::Exit, WpaSelection::Files]),
+            interface_cursor: 0,
+        }
+    }
+}
+
+impl Component for WpaInterfacePrompt {
+    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
+        match key.code {
+            KeyCode::Enter => match self.selection.selected() {
+                Some(WpaSelection::Files) => {}
+                Some(WpaSelection::Exit) => {}
+                _ => {}
+            },
+            _ => {}
+        };
+        StateResult::Consumed
     }
 }
