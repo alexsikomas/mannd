@@ -1,4 +1,4 @@
-use com::wireless::common::AccessPoint;
+use com::wireless::{common::AccessPoint, wpa_supplicant::WpaInterface};
 use ratatui::{
     layout::{Constraint, Flex, Layout, Margin, Rect, Spacing},
     style::{Style, Stylize},
@@ -13,12 +13,12 @@ use crate::{
 
 pub struct WpaInterfaceUi<'a> {
     info: &'a WpaInterfacePrompt,
-    ifaces: &'a Vec<String>,
+    ifaces: &'a Vec<WpaInterface>,
     theme: &'a Theme,
 }
 
 impl<'a> WpaInterfaceUi<'a> {
-    pub fn new(info: &'a WpaInterfacePrompt, ifaces: &'a Vec<String>) -> Option<Self> {
+    pub fn new(info: &'a WpaInterfacePrompt, ifaces: &'a Vec<WpaInterface>) -> Option<Self> {
         let theme: &Theme = match THEME.get() {
             Some(t) => t,
             None => {
@@ -85,7 +85,14 @@ impl<'a> Widget for WpaInterfaceUi<'a> {
         );
 
         for (i, iface) in self.ifaces.iter().enumerate() {
-            let mut iface_text = Line::from(iface.clone());
+            // for now skip later be able to manage it
+            if let WpaInterface::Managed(_) = iface {
+                continue;
+            }
+
+            let iface_string: String = iface.into();
+            let mut iface_text = Line::from(iface_string);
+
             if i == self.info.interface_cursor {
                 iface_text.style = Style::new()
                     .bg(theme.secondary.color())

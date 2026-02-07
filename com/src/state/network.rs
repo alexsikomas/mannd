@@ -7,13 +7,16 @@ use tokio::sync::mpsc::Sender;
 use tracing::info;
 
 use crate::{
-    controller::{Controller, DaemonType},
+    controller::{Controller, DaemonType, WirelessAdapter},
     error::ManndError,
     state::signals::{SignalManager, SignalUpdate},
     systemd::networkd::get_netd_files,
     utils::list_interfaces,
     wireguard::store::WgMeta,
-    wireless::common::{AccessPoint, Security},
+    wireless::{
+        common::{AccessPoint, Security},
+        wpa_supplicant::WpaInterface,
+    },
 };
 
 pub struct NetworkActor<'a> {
@@ -157,10 +160,24 @@ impl<'a> NetworkActor<'a> {
                 state_send.push(NetworkState::Success(NetSuccess::Scan));
             }
         }
-        if flags.intersects(NetCtxFlags::Interfaces) {
+        let interface_flags =
+            flags.clone() & (NetCtxFlags::Interfaces | NetCtxFlags::InterfacesWpa);
+
+        if interface_flags == NetCtxFlags::Interfaces {
             let interfaces = list_interfaces();
             state_send.push(NetworkState::SetInterfaces(interfaces));
+        } else if interface_flags == NetCtxFlags::InterfacesWpa {
+            // typically we call through the controller but
+            // here I've decided to just go directly for the
+            // wireless adapter since only wpa supports it
+            if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
+                let interfaces = wpa.get_interfaces().await?;
+                state_send.push(NetworkState::SetWpaInterfaces(interfaces));
+            }
+        } else if flags.intersects(NetCtxFlags::InterfacesWpa | NetCtxFlags::Interfaces) {
+            tracing::error!("Tried to send a NetCtxFlag with InterfacesWpa and Interfaces, this is not allowed.");
         }
+
         if flags.intersects(NetCtxFlags::Wireguard) {
             if let Ok((names, meta)) = self.controller.update_wg() {
                 state_send.push(NetworkState::SetWireguardInfo((names, meta)));
@@ -170,22 +187,51 @@ impl<'a> NetworkActor<'a> {
             let files = get_netd_files().await?;
             state_send.push(NetworkState::SetNetdFiles(files));
         }
+
         Ok(())
     }
 }
 
 pub struct NetworkContext {
     pub networks: Vec<AccessPoint>,
-    pub interfaces: Vec<String>,
+    pub interfaces: Option<InterfaceTypes>,
     pub wg_info: (Vec<String>, Vec<WgMeta>),
     pub netd_files: Vec<String>,
+}
+
+pub enum InterfaceTypes {
+    Wpa(Vec<WpaInterface>),
+    Normal(Vec<String>),
+}
+
+impl InterfaceTypes {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Wpa(ifaces) => ifaces.len(),
+            Self::Normal(ifaces) => ifaces.len(),
+        }
+    }
+
+    pub fn wpa_get(&self, index: usize) -> Option<&WpaInterface> {
+        match self {
+            Self::Wpa(ifaces) => ifaces.get(index),
+            _ => None,
+        }
+    }
+
+    pub fn norm_get(&self, index: usize) -> Option<&String> {
+        match self {
+            Self::Normal(ifaces) => ifaces.get(index),
+            _ => None,
+        }
+    }
 }
 
 impl Default for NetworkContext {
     fn default() -> Self {
         Self {
             networks: vec![],
-            interfaces: vec![],
+            interfaces: None,
             wg_info: (vec![], vec![]),
             netd_files: vec![],
         }
@@ -193,12 +239,15 @@ impl Default for NetworkContext {
 }
 
 bitflags! {
-    #[derive(Debug, Serialize, Deserialize, Clone)]
+    #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
     pub struct NetCtxFlags: u8 {
         const Network = 0b00000001;
         const Interfaces = 0b00000010;
         const Wireguard = 0b00000100;
         const Netd = 0b00001000;
+        /// Similar to Interfaces flag but checks
+        /// if interface already used by wpa
+        const InterfacesWpa = 0b00010000;
     }
 }
 
@@ -250,6 +299,7 @@ pub enum NetworkState {
 
     SetNetworks(Vec<AccessPoint>),
     SetInterfaces(Vec<String>),
+    SetWpaInterfaces(Vec<WpaInterface>),
     SetWireguardInfo((Vec<String>, Vec<WgMeta>)),
     SetNetdFiles(Vec<String>),
 
