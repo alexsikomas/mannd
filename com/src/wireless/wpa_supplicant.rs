@@ -34,8 +34,7 @@ use zbus::{
 
 use crate::{
     error::ManndError,
-    state::{network::EapInfo, signals::SignalUpdate},
-    utils::list_interfaces,
+    state::signals::SignalUpdate,
     wireless::common::{
         get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security,
     },
@@ -52,6 +51,7 @@ pub struct WpaSupplicant {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct WpaBss {
     ssid: String,
     bssid: Option<Vec<u8>>,
@@ -77,6 +77,19 @@ impl WpaSupplicant {
             path,
             active_interfaces,
         })
+    }
+
+    pub async fn create_interface(&self, ifname: String) -> Result<(), ManndError> {
+        let mut body: HashMap<String, OwnedValue> = HashMap::new();
+        body.insert("ifname".to_string(), Value::new(ifname).try_to_owned()?);
+
+        let interface_path = self
+            .call_interface_method::<_, OwnedObjectPath>("CreateInterface", body)
+            .await?;
+
+        info!("Interface path: {:?}", interface_path);
+
+        Ok(())
     }
 
     pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ManndError> {
@@ -120,9 +133,9 @@ impl WpaSupplicant {
         }
     }
 
-    pub async fn connect_network_eap(&self, ssid: String, eap: EapInfo) -> Result<(), ManndError> {
-        Ok(())
-    }
+    // pub async fn connect_network_eap(&self, ssid: String, eap: EapInfo) -> Result<(), ManndError> {
+    //     Ok(())
+    // }
 
     pub async fn disconnect(&self) -> Result<(), ManndError> {
         self.call_interface_method_noreply("Disconnect", &())

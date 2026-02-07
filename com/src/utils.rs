@@ -1,7 +1,7 @@
 use std::{
     env,
     ffi::CStr,
-    fs::{self, canonicalize, read_dir, File, OpenOptions},
+    fs::{read_dir, File, OpenOptions},
     io,
     os::raw::{c_char, c_uint},
     path::PathBuf,

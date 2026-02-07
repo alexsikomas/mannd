@@ -10,7 +10,7 @@ use zbus::{
 
 use crate::{
     error::ManndError,
-    state::{network::EapInfo, signals::SignalUpdate},
+    state::signals::SignalUpdate,
     wireless::{
         agent::AgentState,
         common::{get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security},
@@ -100,9 +100,9 @@ impl Iwd {
         }
     }
 
-    pub async fn connect_network_eap(&self, ssid: String, eap: EapInfo) -> Result<(), ManndError> {
-        Ok(())
-    }
+    // pub async fn connect_network_eap(&self, ssid: String, eap: EapInfo) -> Result<(), ManndError> {
+    //     Ok(())
+    // }
 
     pub async fn connect_known(&self, ssid: String, security: Security) -> Result<(), ManndError> {
         let proxy = Proxy::new(

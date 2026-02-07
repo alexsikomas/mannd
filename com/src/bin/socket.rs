@@ -9,17 +9,16 @@ use com::{
     controller::DaemonType,
     error::ManndError,
     state::{
-        network::{handle_action, Capability, NetworkAction, NetworkActor, NetworkState},
+        network::{NetworkAction, NetworkActor, NetworkState},
         signals::SignalUpdate,
     },
-    utils::{list_interfaces, setup_logging},
+    utils::setup_logging,
     UNIX_SOCK_PATH,
 };
 use futures::{SinkExt, StreamExt};
 use postcard::to_stdvec_cobs;
 use tokio::{net::UnixListener, sync::mpsc};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tracing::info;
 
 struct UnixSocketGuard {
     path: PathBuf,
@@ -32,6 +31,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if uid != 0 {
         return Err(ManndError::NotRoot)?;
     }
+
     setup_logging("./.logs/com.log");
 
     let guard = UnixSocketGuard::new(UNIX_SOCK_PATH).await?;
@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (sock_tx, mut sock_rx) = mpsc::channel::<NetworkState>(32);
     let (signal_tx, mut signal_rx) = mpsc::channel::<SignalUpdate>(32);
 
-    let mut actor = NetworkActor::new().await?;
+    let mut actor = NetworkActor::new(signal_tx, sock_tx).await?;
     let mut writer = FramedWrite::new(sock_writer, LengthDelimitedCodec::new());
     let mut reader = FramedRead::new(sock_reader, LengthDelimitedCodec::new());
 
@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Some(frame_res) = reader.next() => {
                 let mut frame = frame_res?;
                 let action = postcard::from_bytes_cobs::<NetworkAction>(&mut frame)?;
-                let res = handle_action(&mut actor.controller, action, sock_tx.clone(), signal_tx.clone()).await?;
+                let res = actor.handle_action(action).await?;
                 if res == true {
                     return Ok(());
                 }
@@ -67,6 +67,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 actor.signal_manager.handle_update(update);
             }
             Some(msg) = actor.signal_manager.recv() => {
+                // this is used, not sure why compiler disagrees
+                #[allow(unused_assignments)]
                 let mut action: Option<NetworkAction> = None;
                 match daemon {
                     // iwd
@@ -83,7 +85,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 };
 
                 if let Some(act) = action {
-                    handle_action(&mut actor.controller, act, sock_tx.clone(), signal_tx.clone()).await?;
+                    actor.handle_action(act).await?;
                 }
             }
             _ = tokio::signal::ctrl_c() => {

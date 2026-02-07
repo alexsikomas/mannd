@@ -1,4 +1,7 @@
-use com::wireless::common::{AccessPoint, NetworkFlags, Security};
+use com::{
+    controller::DaemonType,
+    wireless::common::{AccessPoint, NetworkFlags, Security},
+};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Flex, Layout, Rect},
@@ -10,7 +13,7 @@ use ratatui::{
 };
 
 use crate::{
-    state::{ConnectionFocus, WifiState},
+    state::{ConnectionAction, ConnectionFocus, WifiState},
     ui::{Theme, THEME},
 };
 

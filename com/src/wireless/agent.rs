@@ -1,8 +1,9 @@
+#[allow(non_snake_case)]
 use std::sync::Arc;
 
 use tokio::sync::RwLock;
 use tracing::info;
-use zbus::{DBusError, interface, zvariant::OwnedObjectPath};
+use zbus::{interface, zvariant::OwnedObjectPath, DBusError};
 
 // Do compiler optimisations make it so that
 // the password may be repeated in memory even if later
@@ -43,6 +44,7 @@ impl IwdAgent {
 
 // docs: https://kernel.googlesource.com/pub/scm/network/wireless/iwd/+/master/doc/agent-api.txt
 #[interface(name = "net.connman.iwd.Agent")]
+#[allow(non_snake_case)]
 impl IwdAgent {
     async fn release(&mut self) {
         info!("Relase");

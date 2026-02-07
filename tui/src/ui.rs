@@ -12,6 +12,7 @@ use crate::{
     components::{
         main_menu::MainMenu, networkd_ui::NetdMenu, password_prompt::PasswordPrompt,
         popup_prompt::PopupPrompt, wifi_menu::Connection, wireguard_ui::WireguardMenu,
+        wpa_interface_ui::WpaInterfaceUi,
     },
     state::{AppContext, PromptState, UiState, View},
 };
@@ -152,7 +153,6 @@ impl UiContext {
                 if let Some(con) = Connection::new(&net_ctx.networks, &connection_state) {
                     frame.render_widget(con, inner_area);
                 }
-
                 for prompt in &state.prompt_stack {
                     match prompt {
                         PromptState::PskConnect(psk_prompt) => {
@@ -167,14 +167,8 @@ impl UiContext {
                                 frame.render_widget(prompt_instance, inner_area);
                             }
                         }
-                        PromptState::Info(info_prompt) => {
-                            if let Some(prompt_instance) =
-                                PopupPrompt::new(&info_prompt.reason, &info_prompt.kind)
-                            {
-                                frame.render_widget(prompt_instance, inner_area);
-                            }
-                        }
-                    }
+                        _ => {}
+                    };
                 }
             }
             View::Vpn(vpn_state) => {
@@ -199,6 +193,26 @@ impl UiContext {
             _ => {
                 return;
             }
+        }
+
+        for prompt in &state.prompt_stack {
+            match prompt {
+                PromptState::Info(info_prompt) => {
+                    if let Some(prompt_instance) =
+                        PopupPrompt::new(&info_prompt.reason, &info_prompt.kind)
+                    {
+                        frame.render_widget(prompt_instance, inner_area);
+                    }
+                }
+                PromptState::WpaInterface(wpa_iface) => {
+                    if let Some(prompt_instance) =
+                        WpaInterfaceUi::new(wpa_iface, &ctx.net_ctx.interfaces)
+                    {
+                        frame.render_widget(prompt_instance, inner_area);
+                    }
+                }
+                _ => {}
+            };
         }
     }
 }

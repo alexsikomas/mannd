@@ -1,19 +1,17 @@
 use ahash::RandomState;
-use nyquest::{Body, r#async::Request};
 use redb::{
     Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition, TypeName,
     Value,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, env, fs, os::unix::fs::PermissionsExt, path::PathBuf};
-use tokio::fs::metadata;
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::{error::ManndError, utils::get_user_home_by_uid};
 
 const WG_TABLE: TableDefinition<String, WgMeta> = TableDefinition::new("wg_table");
 const WG_DIR: &'static str = "/etc/wireguard/";
-const IP_API: &'static str = "http://ip-api.com/batch?fields=status,countryCode";
+// const IP_API: &'static str = "http://ip-api.com/batch?fields=status,countryCode";
 
 pub struct WgStore {
     database: Database,
