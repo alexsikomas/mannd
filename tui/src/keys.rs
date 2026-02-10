@@ -1,0 +1,132 @@
+use std::{collections::HashMap, fs::read_to_string};
+
+use com::ini_parse::{self, IniConfig};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, ModifierKeyCode};
+use tracing::info;
+
+use crate::CONFIG_HOME;
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum KeyAction {
+    Up,
+    Down,
+    Left,
+    Right,
+    Enter,
+    Escape,
+    Backspace,
+    Char(char),
+    None,
+}
+
+impl Into<KeyAction> for &str {
+    fn into(self) -> KeyAction {
+        match self {
+            "up" => KeyAction::Up,
+            "down" => KeyAction::Down,
+            "left" => KeyAction::Left,
+            "right" => KeyAction::Right,
+            "enter" => KeyAction::Enter,
+            "bs" => KeyAction::Backspace,
+            "esc" | "escape" => KeyAction::Escape,
+            _ => KeyAction::None,
+        }
+    }
+}
+
+pub struct Keymap {
+    pub bindings: HashMap<KeyEvent, KeyAction>,
+}
+
+impl Keymap {
+    pub fn load_keys() -> Self {
+        let mut path = CONFIG_HOME.clone();
+        let mut conf = IniConfig::new();
+        let mut bindings: HashMap<KeyEvent, KeyAction> = HashMap::default();
+
+        path.push("mannd/settings.conf");
+        let file = read_to_string(path).unwrap();
+        conf.parse_file(file.lines());
+        match conf.sections.get("keybinds") {
+            Some(keybinds) => {
+                let keys = keybinds.keys();
+                for key in keys {
+                    info!("KEY: {}", key);
+                    let event = key_str_to_event(key);
+                    let action: KeyAction = keybinds.get(key).unwrap().clone().into();
+                    bindings.insert(event, action.into());
+                }
+            }
+            None => {}
+        };
+        tracing::info!("{:?}", bindings);
+        Self { bindings }
+    }
+}
+
+// follows https://vimhelp.org/intro.txt.html#key-notation if
+// there is a direct match to a keycode, keypad unimplemented
+fn key_str_to_event(key: &str) -> KeyEvent {
+    // remove "<>"
+    let key = &key[2..key.len() - 2];
+    let mut modifier: KeyModifiers = KeyModifiers::NONE;
+
+    // removes all the modifiers from keys
+    let mut key_to_read: String = "".to_string();
+
+    // modifiers
+    for split in key.split("-") {
+        match split {
+            "S" => modifier.insert(KeyModifiers::SHIFT),
+            "C" => modifier.insert(KeyModifiers::CONTROL),
+            "M" => modifier.insert(KeyModifiers::META),
+            "A" => modifier.insert(KeyModifiers::ALT),
+            "D" => modifier.insert(KeyModifiers::SUPER),
+            _ => {
+                key_to_read = key_to_read + &String::from(split);
+            }
+        };
+    }
+
+    let key_code: KeyCode;
+
+    // then this is a char
+    if key_to_read.len() == 1 {
+        key_code = KeyCode::Char(key_to_read.chars().next().expect("Unexpected..."));
+    } else {
+        match key_to_read.as_str() {
+            "Up" => key_code = KeyCode::Up,
+            "Down" => key_code = KeyCode::Down,
+            "Left" => key_code = KeyCode::Left,
+            "Right" => key_code = KeyCode::Right,
+            "Home" => key_code = KeyCode::Home,
+            "Insert" => key_code = KeyCode::Insert,
+            "End" => key_code = KeyCode::End,
+            "PageUp" => key_code = KeyCode::PageUp,
+            "PageDown" => key_code = KeyCode::PageDown,
+            "Del" => key_code = KeyCode::Delete,
+            "Tab" => key_code = KeyCode::Tab,
+            "Return" | "CR" | "Enter" => key_code = KeyCode::Enter,
+            "BS" => key_code = KeyCode::Backspace,
+            "Esc" => key_code = KeyCode::Esc,
+            "F1" => key_code = KeyCode::F(1),
+            "F2" => key_code = KeyCode::F(2),
+            "F3" => key_code = KeyCode::F(3),
+            "F4" => key_code = KeyCode::F(4),
+            "F5" => key_code = KeyCode::F(5),
+            "F6" => key_code = KeyCode::F(6),
+            "F7" => key_code = KeyCode::F(7),
+            "F8" => key_code = KeyCode::F(8),
+            "F9" => key_code = KeyCode::F(9),
+            "F10" => key_code = KeyCode::F(10),
+            "F11" => key_code = KeyCode::F(11),
+            "F12" => key_code = KeyCode::F(12),
+            _ => {
+                tracing::error!("Key: {key_to_read} does not correspond to a valid keycode");
+                panic!("Input key does not correspond to keycode.");
+            }
+        };
+    }
+
+    KeyEvent::new(key_code, modifier)
+}
