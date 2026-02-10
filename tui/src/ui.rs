@@ -16,6 +16,7 @@ use crate::{
         wpa_interface_ui::WpaInterfaceUi,
     },
     state::{AppContext, PromptState, UiState, View},
+    CONFIG_HOME,
 };
 
 /// Theme global state, used to bypass needing to
@@ -27,23 +28,7 @@ impl Theme {
     /// Reads config toml from a predefined location and sets the
     /// global value of `THEME`
     pub fn new() -> Result<(), ManndError> {
-        let mut path = match env::var("XDG_CONFIG_HOME") {
-            Ok(val) => PathBuf::from(val),
-            Err(_) => {
-                let home = env::var_os("HOME");
-                match home {
-                    Some(val) => {
-                        let mut path = PathBuf::from(val);
-                        path.push(".config");
-                        path
-                    }
-                    None => {
-                        panic!("Cannot find $HOME directory!");
-                    }
-                }
-            }
-        };
-
+        let mut path = CONFIG_HOME.clone();
         path.push("mannd/settings.conf");
 
         let file_str = std::fs::read_to_string(path)?;

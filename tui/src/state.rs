@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::{fmt::Debug, usize};
 
 use com::controller::DaemonType;
@@ -12,6 +13,9 @@ use crossterm::event::{Event, KeyCode, KeyEvent};
 use tracing::info;
 
 use crate::app::AppAction;
+use crate::keys::{KeyAction, Keymap};
+
+pub static KEYMAP: OnceLock<Keymap> = OnceLock::new();
 
 #[derive(Debug)]
 pub enum StateResult {
@@ -65,11 +69,20 @@ impl<'a> AppContext<'a> {
 }
 
 trait Component {
-    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult;
+    fn on_key(&mut self, key: &KeyAction, ctx: &AppContext) -> StateResult;
 }
 
 impl UiState {
     pub fn new(caps: Capability) -> Self {
+        let keymap = Keymap::load_keys();
+
+        match KEYMAP.set(keymap) {
+            Ok(_) => {}
+            Err(_) => {
+                tracing::info!("Keymap has already been initialised");
+            }
+        };
+
         UiState {
             should_block: false,
             current_view: View::main_menu(&caps),
@@ -92,35 +105,54 @@ impl UiState {
         if self.should_block {
             return vec![];
         }
+        let keymap = KEYMAP.get().unwrap();
+        match event {
+            Event::Key(key) => {
+                info!("KEY: {:?}", key);
+            }
+            _ => {}
+        };
 
-        if let Event::Key(key) = event {
-            if key.code == KeyCode::Esc {
-                if !self.prompt_stack.is_empty() {
-                    self.prompt_stack.pop();
-                    return vec![];
+        let key_action = match event {
+            Event::Key(key) => match keymap.bindings.get(&key) {
+                Some(key) => key,
+                None => {
+                    if let Some(c) = key.code.as_char() {
+                        &KeyAction::Char(c)
+                    } else {
+                        &KeyAction::None
+                    }
                 }
-            }
+            },
+            _ => &KeyAction::None,
+        };
 
-            if let Some(prompt) = self.prompt_stack.last_mut() {
-                let res = prompt.on_key(&key, ctx);
-                match res {
-                    StateResult::Command(cmd) => {
-                        return self.process_commands([cmd]);
-                    }
-                    StateResult::Commands(cmds) => {
-                        return self.process_commands(cmds);
-                    }
-                    StateResult::Consumed => return vec![],
-                    StateResult::Ignored => {}
-                };
+        if key_action == &KeyAction::Escape {
+            if !self.prompt_stack.is_empty() {
+                self.prompt_stack.pop();
+                return vec![];
             }
+        }
 
-            let res = self.current_view.on_key(&key, ctx);
-            if let StateResult::Command(cmd) = res {
-                return self.process_commands([cmd]);
-            } else if let StateResult::Commands(cmds) = res {
-                return self.process_commands(cmds);
-            }
+        if let Some(prompt) = self.prompt_stack.last_mut() {
+            let res = prompt.on_key(key_action, ctx);
+            match res {
+                StateResult::Command(cmd) => {
+                    return self.process_commands([cmd]);
+                }
+                StateResult::Commands(cmds) => {
+                    return self.process_commands(cmds);
+                }
+                StateResult::Consumed => return vec![],
+                StateResult::Ignored => {}
+            };
+        }
+
+        let res = self.current_view.on_key(key_action, ctx);
+        if let StateResult::Command(cmd) = res {
+            return self.process_commands([cmd]);
+        } else if let StateResult::Commands(cmds) = res {
+            return self.process_commands(cmds);
         }
         vec![]
     }
@@ -226,8 +258,8 @@ impl View {
 }
 
 impl Component for View {
-    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
-        if key.code == KeyCode::Esc {
+    fn on_key(&mut self, key: &KeyAction, ctx: &AppContext) -> StateResult {
+        if key == &KeyAction::Escape {
             return match self {
                 View::MainMenu(_) => StateResult::Command(StateCommand::Exit),
                 _ => StateResult::Command(StateCommand::Back),
@@ -240,7 +272,7 @@ impl Component for View {
                     return StateResult::Consumed;
                 }
 
-                if key.code == KeyCode::Enter {
+                if key == &KeyAction::Enter {
                     if let Some(selection) = list.selected() {
                         return selection.execute(&ctx.capabilities.wifi_daemon);
                     }
@@ -366,11 +398,11 @@ impl WifiState {
 }
 
 impl Component for WifiState {
-    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
+    fn on_key(&mut self, key: &KeyAction, ctx: &AppContext) -> StateResult {
         let net_ctx = ctx.net_ctx;
         // check if up or down
-        match key.code {
-            KeyCode::Right | KeyCode::Left => {
+        match key {
+            KeyAction::Right | KeyAction::Left => {
                 self.focused_area = match self.focused_area {
                     ConnectionFocus::Actions => ConnectionFocus::Networks,
                     ConnectionFocus::Networks => ConnectionFocus::Actions,
@@ -383,7 +415,7 @@ impl Component for WifiState {
         match self.focused_area {
             ConnectionFocus::Actions => {
                 self.actions.on_key(key, ctx);
-                if key.code == KeyCode::Enter {
+                if key == &KeyAction::Enter {
                     return match self.actions.selected() {
                         Some(ConnectionAction::Scan) => {
                             StateResult::Command(StateCommand::NetworkAction(NetworkAction::Scan))
@@ -444,14 +476,14 @@ impl Component for WifiState {
                     };
                 }
             }
-            ConnectionFocus::Networks => match key.code {
-                KeyCode::Down => {
+            ConnectionFocus::Networks => match key {
+                KeyAction::Down => {
                     if !ctx.net_ctx.networks.is_empty() {
                         self.network_cursor = (self.network_cursor + 1) % net_ctx.networks.len();
                         self.refresh_available_actions(&net_ctx.networks);
                     }
                 }
-                KeyCode::Up => {
+                KeyAction::Up => {
                     if !net_ctx.networks.is_empty() {
                         if self.network_cursor == 0 {
                             self.network_cursor = net_ctx.networks.len() - 1;
@@ -494,7 +526,7 @@ pub enum PromptState {
 }
 
 impl Component for PromptState {
-    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
+    fn on_key(&mut self, key: &KeyAction, ctx: &AppContext) -> StateResult {
         match self {
             PromptState::PskConnect(prompt) => {
                 return prompt.on_key(key, ctx);
@@ -545,13 +577,13 @@ impl PskConnectionPrompt {
 }
 
 impl Component for PskConnectionPrompt {
-    fn on_key(&mut self, key: &KeyEvent, _ctx: &AppContext) -> StateResult {
+    fn on_key(&mut self, key: &KeyAction, _ctx: &AppContext) -> StateResult {
         let Some(selected) = self.select.selected() else {
             return StateResult::Ignored;
         };
 
-        match key.code {
-            KeyCode::Up | KeyCode::Down => match selected {
+        match key {
+            KeyAction::Up | KeyAction::Down => match selected {
                 PskPromptSelect::Password | PskPromptSelect::Show => {
                     self.select.set(PskPromptSelect::Connect);
                 }
@@ -559,7 +591,7 @@ impl Component for PskConnectionPrompt {
                     self.select.set(PskPromptSelect::Password);
                 }
             },
-            KeyCode::Left | KeyCode::Right => match selected {
+            KeyAction::Left | KeyAction::Right => match selected {
                 PskPromptSelect::Password => {
                     self.select.set(PskPromptSelect::Show);
                 }
@@ -573,13 +605,13 @@ impl Component for PskConnectionPrompt {
                     self.select.set(PskPromptSelect::Connect);
                 }
             },
-            KeyCode::Backspace => match selected {
+            KeyAction::Backspace => match selected {
                 PskPromptSelect::Password => {
                     self.password.pop();
                 }
                 _ => {}
             },
-            KeyCode::Enter => match selected {
+            KeyAction::Enter => match selected {
                 PskPromptSelect::Connect => {
                     let ap_info = ApConnectInfoBuilder::default()
                         .ssid(self.ssid.clone())
@@ -602,9 +634,9 @@ impl Component for PskConnectionPrompt {
                 }
                 _ => {}
             },
-            KeyCode::Char(c) => match selected {
+            KeyAction::Char(c) => match selected {
                 PskPromptSelect::Password => {
-                    self.password.push(c);
+                    self.password.push(*c);
                 }
                 _ => {}
             },
@@ -633,9 +665,11 @@ impl InfoPrompt {
 }
 
 impl Component for InfoPrompt {
-    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
-        match key.code {
-            KeyCode::Enter | KeyCode::Backspace => StateResult::Command(StateCommand::PopPrompt),
+    fn on_key(&mut self, key: &KeyAction, ctx: &AppContext) -> StateResult {
+        match key {
+            KeyAction::Enter | KeyAction::Backspace => {
+                StateResult::Command(StateCommand::PopPrompt)
+            }
             _ => StateResult::Ignored,
         }
     }
@@ -687,13 +721,13 @@ impl<T> SelectableList<T> {
 }
 
 impl<T> Component for SelectableList<T> {
-    fn on_key(&mut self, key: &KeyEvent, _ctx: &AppContext) -> StateResult {
-        match key.code {
-            KeyCode::Up => {
+    fn on_key(&mut self, key: &KeyAction, _ctx: &AppContext) -> StateResult {
+        match key {
+            KeyAction::Up => {
                 self.prev();
                 StateResult::Consumed
             }
-            KeyCode::Down => {
+            KeyAction::Down => {
                 self.next();
                 StateResult::Consumed
             }
@@ -762,10 +796,10 @@ impl VpnState {
 }
 
 impl Component for VpnState {
-    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
+    fn on_key(&mut self, key: &KeyAction, ctx: &AppContext) -> StateResult {
         if let Some(selected) = self.selection.selected() {
-            match key.code {
-                KeyCode::Enter => match selected {
+            match key {
+                KeyAction::Enter => match selected {
                     VpnSelection::Toggle => {
                         self.wg_on = !self.wg_on;
                     }
@@ -778,7 +812,7 @@ impl Component for VpnState {
                     }
                     _ => {}
                 },
-                KeyCode::Left => match selected {
+                KeyAction::Left => match selected {
                     VpnSelection::Files => {
                         self.file_cursor = self.file_cursor.saturating_sub(1);
                     }
@@ -789,7 +823,7 @@ impl Component for VpnState {
                         self.selection.prev();
                     }
                 },
-                KeyCode::Right => {
+                KeyAction::Right => {
                     match selected {
                         VpnSelection::Files => {
                             self.file_cursor = self.file_cursor.saturating_add(1);
@@ -802,14 +836,14 @@ impl Component for VpnState {
                         }
                     };
                 }
-                KeyCode::Down => {
+                KeyAction::Down => {
                     if selected == &VpnSelection::Files {
                         self.file_cursor = self.file_cursor.saturating_add(ctx.vpn_cols);
                     } else {
                         self.selection.set(VpnSelection::Files);
                     }
                 }
-                KeyCode::Up => {
+                KeyAction::Up => {
                     if self.file_cursor < ctx.vpn_cols {
                         self.selection.selected_index = 0;
                     } else {
@@ -867,24 +901,24 @@ impl WpaInterfacePrompt {
 }
 
 impl Component for WpaInterfacePrompt {
-    fn on_key(&mut self, key: &KeyEvent, ctx: &AppContext) -> StateResult {
+    fn on_key(&mut self, key: &KeyAction, ctx: &AppContext) -> StateResult {
         if let Some(ifaces) = &ctx.net_ctx.interfaces {
-            match key.code {
-                KeyCode::Enter => {
+            match key {
+                KeyAction::Enter => {
                     if let Some(iface) = ifaces.wpa_get(self.interface_cursor) {
                         return StateResult::Command(StateCommand::NetworkAction(
                             NetworkAction::CreateWpaInterface(iface.into()),
                         ));
                     }
                 }
-                KeyCode::Up => {
+                KeyAction::Up => {
                     if self.interface_cursor == 0 {
                         self.interface_cursor = ifaces.len() - 1;
                     } else {
                         self.interface_cursor -= 1;
                     }
                 }
-                KeyCode::Down => {
+                KeyAction::Down => {
                     self.interface_cursor = { self.interface_cursor + 1 } % ifaces.len();
                 }
                 _ => {}
