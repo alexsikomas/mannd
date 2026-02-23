@@ -1,14 +1,11 @@
 use com::{error::ManndError, utils::setup_logging, UNIX_SOCK_PATH};
-use std::{env, fs::OpenOptions, path::PathBuf, process::Stdio};
+use std::{path::PathBuf, process::Stdio};
 use tokio::{
     io::AsyncWriteExt,
     net::{UnixSocket, UnixStream},
     process::{Child, Command},
     time,
 };
-use tracing::Level;
-use tracing_error::ErrorLayer;
-use tracing_subscriber::{layer::SubscriberExt, FmtSubscriber};
 use tui::{app::App, ui::Theme};
 
 const DEBUG_SOCK_BIN: &str = "target/debug/socket";
@@ -20,7 +17,6 @@ async fn main() -> Result<(), ManndError> {
 
     let _ = Theme::new();
     let _ = App::new(stream, child).run().await?;
-    ratatui::restore();
     Ok(())
 }
 

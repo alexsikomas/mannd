@@ -106,12 +106,6 @@ impl UiState {
             return vec![];
         }
         let keymap = KEYMAP.get().unwrap();
-        match event {
-            Event::Key(key) => {
-                info!("KEY: {:?}", key);
-            }
-            _ => {}
-        };
 
         let key_action = match event {
             Event::Key(key) => match keymap.bindings.get(&key) {
@@ -805,7 +799,8 @@ impl Component for VpnState {
                     }
                     VpnSelection::Files => {
                         let mut wg_path = PathBuf::from("/etc/wireguard");
-                        wg_path.push(format!("{}.conf", &ctx.net_ctx.wg_info.0[self.file_cursor]));
+                        wg_path.push(format!("{}", &ctx.net_ctx.wg_info.0[self.file_cursor]));
+                        info!("PATH: {:?}", wg_path);
                         return StateResult::Command(StateCommand::NetworkAction(
                             NetworkAction::ConnectWireguard(wg_path),
                         ));

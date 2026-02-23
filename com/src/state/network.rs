@@ -65,9 +65,14 @@ impl<'a> NetworkActor<'a> {
                 state_send.push(NetworkState::SetCapabilities(caps));
             }
             // WIREGUARD
-            NetworkAction::ConnectWireguard(file) => {
-                // controller.connect_wg(file).await?;
-            }
+            NetworkAction::ConnectWireguard(file) => match self.controller.connect_wg(file).await {
+                Ok(res) => {
+                    info!("Success");
+                }
+                Err(e) => {
+                    tracing::error!("{:?}", e)
+                }
+            },
             NetworkAction::InitWireguard => {
                 if let Ok(()) = self.controller.start_wg().await {
                     self.handle_net_ctx(NetCtxFlags::Wireguard, &mut state_send)
@@ -98,12 +103,6 @@ impl<'a> NetworkActor<'a> {
         state_send: &mut Vec<NetworkState>,
     ) {
         match action {
-            // WIFI
-            // NetworkAction::GetNetworks => {
-            //     if let Ok(aps) = self.controller.get_all_networks().await {
-            //         state_send.push(NetworkState::SetNetworks(aps));
-            //     }
-            // }
             NetworkAction::Scan => {
                 state_send.push(NetworkState::Start(NetStart::Scan));
                 let _ = self.controller.scan(self.signal_tx.clone()).await;
@@ -132,6 +131,11 @@ impl<'a> NetworkActor<'a> {
                     Err(e) => {}
                 }
             }
+            NetworkAction::CreateWpaInterface(ifname) => {
+                if let Some(WirelessAdapter::Wpa(wpa)) = self.controller.wifi.as_mut() {
+                    wpa.create_interface(ifname).await;
+                }
+            }
             NetworkAction::Disconnect => {
                 if let Ok(()) = self.controller.disconenct().await {
                     info!("Disconnected from a network");
@@ -146,7 +150,7 @@ impl<'a> NetworkActor<'a> {
                 }
             }
             _ => {}
-        }
+        };
     }
 
     async fn handle_net_ctx(

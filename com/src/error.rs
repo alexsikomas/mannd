@@ -53,6 +53,7 @@ pub enum ManndError {
     ConfigSectionNotFound(String),
     #[error("Property {0} not found in configuration file!")]
     ConfigPropertyNotFound(String),
+
     // io errors
     #[error("IO Error: {0}")]
     IoError(std::io::Error),
@@ -85,6 +86,10 @@ pub enum ManndError {
 
     #[error("Wireguard accessed while not initialised")]
     WgAccess,
+    #[error("No ips found in wireguard file")]
+    WgIps,
+    #[error("Ip address found is not valid")]
+    StrToIp,
 
     #[error("Postcard error occured")]
     Postcard(postcard::Error),

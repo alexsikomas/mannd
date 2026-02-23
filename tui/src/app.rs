@@ -122,6 +122,8 @@ impl App {
             .send(exit_msg.into())
             .await
             .map_err(|_| ManndError::SocketWrite)?;
+
+        ratatui::restore();
         Ok(())
     }
 }

@@ -30,11 +30,7 @@ impl Theme {
     pub fn new() -> Result<(), ManndError> {
         let mut path = CONFIG_HOME.clone();
         path.push("mannd/settings.conf");
-
-        let file_str = std::fs::read_to_string(path)?;
-        let lines = file_str.lines();
-        let mut config = IniConfig::new();
-        config.parse_file(lines);
+        let config = IniConfig::new(path)?;
 
         let theme = config
             .sections
