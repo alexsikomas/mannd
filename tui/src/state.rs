@@ -376,6 +376,11 @@ impl WifiState {
 
         if let Some(ap) = networks.get(self.network_cursor) {
             let flags = ap.flags;
+            info!(
+                "AP: {:?}, nearby: {:?}",
+                ap,
+                ap.flags.contains(NetworkFlags::NEARBY)
+            );
             if flags.contains(NetworkFlags::NEARBY) && !flags.contains(NetworkFlags::CONNECTED) {
                 self.actions.items.push(ConnectionAction::Connect);
             }

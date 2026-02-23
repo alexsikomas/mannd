@@ -140,17 +140,6 @@ impl Iwd {
         }
     }
 
-    /// Returns the current status of the connected WiFi network
-    pub async fn status(&self) -> Result<String, ManndError> {
-        todo!()
-    }
-
-    /// Lists all networks which are available to be connected to including networks that are out
-    /// of range
-    pub async fn list_configured_networks(&self) -> Result<Vec<String>, ManndError> {
-        todo!()
-    }
-
     /// Removes a network from the configured networks
     pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ManndError> {
         info!(
@@ -184,8 +173,6 @@ impl Iwd {
         }
     }
 
-    // TODO: Research impl Drop for async/converting this func to
-    // use blocking zbus instead of making this public
     pub async fn unregister_agent(&self) -> Result<(), ManndError> {
         let proxy = Proxy::new(
             &self.conn,

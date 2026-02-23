@@ -85,11 +85,11 @@ pub struct WpaBss {
     rates: Option<Vec<u32>>,
 }
 
-#[derive(Debug, Clone)]
-pub struct WpaKnownNetwork {
-    ssid: String,
-    connected: bool,
-}
+// currently not needed
+// #[derive(Debug, Clone)]
+// pub struct WpaKnownNetwork {
+//     ssid: String,
+// }
 
 // To be used externally
 impl WpaSupplicant {
@@ -172,7 +172,6 @@ impl WpaSupplicant {
 
         // add args to wpa supplicant service
 
-        // networkd match on name
         self.active_interface = interface_path.clone();
 
         Ok(())
@@ -219,9 +218,19 @@ impl WpaSupplicant {
         }
     }
 
-    // pub async fn connect_network_eap(&self, ssid: String, eap: EapInfo) -> Result<(), ManndError> {
-    //     Ok(())
-    // }
+    pub async fn connect_known(&self, ssid: String) -> Result<(), ManndError> {
+        let networks = self
+            .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
+            .await?;
+        for network in networks {
+            if self.get_known_info(&network).await? == ssid {
+                self.call_interface_method_noreply("SelectNetwork", network)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
 
     pub async fn disconnect(&self) -> Result<(), ManndError> {
         self.call_interface_method_noreply("Disconnect", &())
@@ -233,21 +242,19 @@ impl WpaSupplicant {
         todo!()
     }
 
-    pub async fn list_configured_networks(&self) -> Result<Vec<AccessPoint>, ManndError> {
-        let networks = self
+    pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ManndError> {
+        let known = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
             .await?;
 
-        let aps: Vec<AccessPoint> = vec![];
-        for network in networks {
-            let ap = self.get_network_info(network).await?;
+        for network in known {
+            let cur_ssid = self.get_known_info(&network).await?;
+            if cur_ssid == ssid {
+                self.call_interface_method_noreply("RemoveNetwork", network)
+                    .await?;
+            }
         }
-
-        Ok(aps)
-    }
-
-    pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ManndError> {
-        todo!()
+        Ok(())
     }
 
     pub async fn scan<'a>(&self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ManndError> {
@@ -289,7 +296,8 @@ impl WpaSupplicant {
             };
 
             if seen.insert(ssid.clone()) && !hidden {
-                let ap = AccessPointBuilder::default()
+                info!("SSID: {ssid}");
+                let mut ap = AccessPointBuilder::default()
                     .ssid(ssid)
                     .security(bss.security.clone().unwrap())
                     .flags(NetworkFlags::NEARBY)
@@ -298,57 +306,32 @@ impl WpaSupplicant {
                 aps.push(ap);
             }
         }
+
+        // due to freq issue mentioned above we go for network not bss
+        let conn_net = self
+            .get_interface_prop::<OwnedObjectPath>("CurrentNetwork")
+            .await?;
 
         let known_networks = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
             .await?;
 
         for network in known_networks {
-            let known = self.get_known_info(network).await?;
-            if seen.insert(known.ssid.clone()) {
+            let known_ssid = self.get_known_info(&network).await?;
+            if seen.insert(known_ssid.clone()) {
                 let ap = AccessPointBuilder::default()
-                    .ssid(known.ssid)
+                    .ssid(known_ssid)
                     .security(Security::Unknown)
                     .flags(NetworkFlags::KNOWN)
                     .build()?;
                 aps.push(ap);
             } else {
-                if let Some(ap) = aps.iter_mut().find(|ap| ap.ssid == known.ssid) {
+                if let Some(ap) = aps.iter_mut().find(|ap| ap.ssid == known_ssid) {
                     ap.flags.insert(NetworkFlags::KNOWN);
-                    if known.connected == true {
+                    if network == conn_net {
                         ap.flags.insert(NetworkFlags::CONNECTED);
                     }
                 }
-            }
-        }
-
-        Ok(aps)
-    }
-
-    pub async fn nearby_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
-        let networks = self
-            .get_interface_prop::<Vec<OwnedObjectPath>>("BSSs")
-            .await?;
-
-        // to be returned
-        let mut aps: Vec<AccessPoint> = vec![];
-        let mut seen: HashSet<String> = HashSet::new();
-
-        for network in networks {
-            // ssid may appear multiple times if router broadcasts
-            // ap at different freqs
-            let bss = self.get_bss_info(network.clone()).await?;
-            let ssid = bss.ssid.clone();
-
-            // BUG: not all hidden networks are removed
-            if seen.insert(ssid.clone()) && !ssid.is_empty() {
-                let ap = AccessPointBuilder::default()
-                    .ssid(ssid)
-                    .security(bss.security.clone().unwrap())
-                    .flags(NetworkFlags::NEARBY)
-                    .build()?;
-
-                aps.push(ap);
             }
         }
 
@@ -414,10 +397,7 @@ impl WpaSupplicant {
     }
 
     // Known network, only returns SSID
-    async fn get_known_info(
-        &self,
-        net_path: OwnedObjectPath,
-    ) -> Result<WpaKnownNetwork, ManndError> {
+    async fn get_known_info(&self, net_path: &OwnedObjectPath) -> Result<String, ManndError> {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -428,26 +408,17 @@ impl WpaSupplicant {
         let properties =
             get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "Properties").await?;
 
-        let mut res = WpaKnownNetwork {
-            ssid: String::new(),
-            connected: false,
-        };
-
         if let Some(ssid) = properties.get("ssid") {
             match ssid {
                 Value::Str(s) => {
                     let clean = s.as_str().trim_matches('"').to_string();
-                    res.ssid = clean;
+                    return Ok(clean);
                 }
                 _ => return Err(ManndError::NetworkNotFound),
             }
         } else {
             return Err(ManndError::NetworkNotFound);
         };
-
-        let connected = get_prop_from_proxy::<bool>(&proxy, "Enabled").await?;
-        res.connected = connected;
-        Ok(res)
     }
 }
 
