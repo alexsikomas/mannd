@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs::read_to_string};
+use std::{collections::HashMap, fs::read_to_string, path::PathBuf};
 
 use com::ini_parse::{self, IniConfig};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, ModifierKeyCode};
@@ -19,9 +19,10 @@ pub enum KeyAction {
     None,
 }
 
-impl Into<KeyAction> for &str {
+impl Into<KeyAction> for String {
     fn into(self) -> KeyAction {
-        match self {
+        let res = self.as_str();
+        match res {
             "up" => KeyAction::Up,
             "down" => KeyAction::Down,
             "left" => KeyAction::Left,
@@ -41,12 +42,10 @@ pub struct Keymap {
 impl Keymap {
     pub fn load_keys() -> Self {
         let mut path = CONFIG_HOME.clone();
-        let mut conf = IniConfig::new();
+        path.push("mannd/settings.conf");
+        let conf = IniConfig::new(path).unwrap();
         let mut bindings: HashMap<KeyEvent, KeyAction> = HashMap::default();
 
-        path.push("mannd/settings.conf");
-        let file = read_to_string(path).unwrap();
-        conf.parse_file(file.lines());
         match conf.sections.get("keybinds") {
             Some(keybinds) => {
                 let keys = keybinds.keys();

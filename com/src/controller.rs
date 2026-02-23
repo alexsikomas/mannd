@@ -8,7 +8,7 @@ use crate::{
         network::{ApConnectInfo, Credentials},
         signals::SignalUpdate,
     },
-    systemd::systemctl::{self, is_service_active},
+    systemd::systemctl::is_service_active,
     wireguard::{network::Wireguard, store::WgMeta},
     wireless::{
         agent::{AgentState, IwdAgent},
@@ -54,7 +54,7 @@ impl Controller {
 
     /// Sets wifi to be either iwd, wpa or netlink
     pub async fn determine_adapter(&mut self) {
-        match is_service_active(&self.connection, "iwd".to_string()).await {
+        match is_service_active(&self.connection, "iwd").await {
             Some(v) => {
                 if v {
                     let _ = self.connect_iwd().await;
@@ -65,10 +65,8 @@ impl Controller {
             _ => {}
         }
 
-        // if each interface is managed induvidually this can be complex to
-        // find in systemd through dbus, so we use a different method
-        match WpaSupplicant::is_active(&self.connection).await {
-            Ok(v) => {
+        match is_service_active(&self.connection, "wpa_supplicant").await {
+            Some(v) => {
                 if v {
                     let _ = self.connect_wpa().await;
                     info!("wpa connected");
@@ -77,6 +75,7 @@ impl Controller {
             }
             _ => {}
         }
+
         tracing::error!("Neither iwd or wpa found!");
     }
 
@@ -130,18 +129,20 @@ impl Controller {
     }
 
     pub async fn networkd_status(&self) -> bool {
-        match is_service_active(&self.connection, "systemd_2dnetworkd".to_string()).await {
+        match is_service_active(&self.connection, "systemd-networkd".to_string()).await {
             Some(res) => res,
             None => false,
         }
     }
-    // pub async fn connect_wg(&self, file: PathBuf) -> Result<(), ManndError> {
-    //     match &self.wg {
-    //         Some(wg) => wg,
-    //         _ => {}
-    //     }
-    //     todo!()
-    // }
+    pub async fn connect_wg(&self, file: PathBuf) -> Result<(), ManndError> {
+        match &self.wg {
+            Some(wg) => {
+                wg.connect(file)?;
+                Ok(())
+            }
+            _ => Err(ManndError::WgAccess),
+        }
+    }
 }
 
 // run actions
@@ -273,7 +274,7 @@ impl Controller {
                     "Error while getting scanned networks!".to_string(),
                 )),
             },
-            Some(WirelessAdapter::Wpa(wpa)) => match wpa.nearby_networks().await {
+            Some(WirelessAdapter::Wpa(wpa)) => match wpa.get_all_networks().await {
                 Ok(v) => Ok(v),
                 Err(_) => Err(ManndError::OperationFailed(
                     "Error while getting scanned networks!".to_string(),

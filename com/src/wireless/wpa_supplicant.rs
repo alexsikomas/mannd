@@ -19,6 +19,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -35,11 +36,14 @@ use zbus::{
 
 use crate::{
     error::ManndError,
+    ini_parse::IniConfig,
     state::signals::SignalUpdate,
+    systemd::systemctl::get_service_path,
     utils::list_interfaces,
     wireless::common::{
         get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security,
     },
+    STATE_HOME,
 };
 
 #[derive(Debug, Clone)]
@@ -50,6 +54,8 @@ pub struct WpaSupplicant {
     // only one interface dealing with Wi-Fi
     // at a time
     active_interface: OwnedObjectPath,
+    // if false will not edit .service files
+    overwrite_service: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -79,6 +85,12 @@ pub struct WpaBss {
     rates: Option<Vec<u32>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct WpaKnownNetwork {
+    ssid: String,
+    connected: bool,
+}
+
 // To be used externally
 impl WpaSupplicant {
     pub async fn new(conn: Connection) -> Result<Self, ManndError> {
@@ -95,12 +107,14 @@ impl WpaSupplicant {
         } else {
             active_interface = active_interfaces.swap_remove(0);
         }
+        // let mut inplace_changes = ;
 
         Ok(Self {
             conn,
             service,
             path,
             active_interface,
+            overwrite_service: false,
         })
     }
 
@@ -140,15 +154,26 @@ impl WpaSupplicant {
         Ok(res)
     }
 
-    pub async fn create_interface(&self, ifname: String) -> Result<(), ManndError> {
+    pub async fn create_interface(&mut self, ifname: String) -> Result<(), ManndError> {
         let mut body: HashMap<String, OwnedValue> = HashMap::new();
-        body.insert("ifname".to_string(), Value::new(ifname).try_to_owned()?);
+        body.insert("Ifname".to_string(), Value::new(ifname).try_to_owned()?);
 
-        let interface_path = self
-            .call_interface_method::<_, OwnedObjectPath>("CreateInterface", body)
-            .await?;
+        // call create interface
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            self.service.clone(),
+        )
+        .await?;
 
+        let interface_path: OwnedObjectPath = proxy.call("CreateInterface", &body).await?;
         info!("Interface path: {:?}", interface_path);
+
+        // add args to wpa supplicant service
+
+        // networkd match on name
+        self.active_interface = interface_path.clone();
 
         Ok(())
     }
@@ -242,6 +267,64 @@ impl WpaSupplicant {
         }
     }
 
+    pub async fn get_all_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
+        // paths with 'Networks' are known but possibly not nearby known networks
+        // will also appear in 'BSS' paths
+        let nearby_networks = self
+            .get_interface_prop::<Vec<OwnedObjectPath>>("BSSs")
+            .await?;
+
+        let mut aps: Vec<AccessPoint> = vec![];
+        let mut seen: HashSet<String> = HashSet::new();
+
+        for network in nearby_networks {
+            // ssid may appear multiple times if router broadcasts
+            // ap at different freqs
+            let bss = self.get_bss_info(network.clone()).await?;
+            let ssid = bss.ssid.clone();
+            let hidden = if ssid.is_empty() || ssid.clone().into_bytes().iter().all(|&v| v == 0) {
+                true
+            } else {
+                false
+            };
+
+            if seen.insert(ssid.clone()) && !hidden {
+                let ap = AccessPointBuilder::default()
+                    .ssid(ssid)
+                    .security(bss.security.clone().unwrap())
+                    .flags(NetworkFlags::NEARBY)
+                    .build()?;
+
+                aps.push(ap);
+            }
+        }
+
+        let known_networks = self
+            .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
+            .await?;
+
+        for network in known_networks {
+            let known = self.get_known_info(network).await?;
+            if seen.insert(known.ssid.clone()) {
+                let ap = AccessPointBuilder::default()
+                    .ssid(known.ssid)
+                    .security(Security::Unknown)
+                    .flags(NetworkFlags::KNOWN)
+                    .build()?;
+                aps.push(ap);
+            } else {
+                if let Some(ap) = aps.iter_mut().find(|ap| ap.ssid == known.ssid) {
+                    ap.flags.insert(NetworkFlags::KNOWN);
+                    if known.connected == true {
+                        ap.flags.insert(NetworkFlags::CONNECTED);
+                    }
+                }
+            }
+        }
+
+        Ok(aps)
+    }
+
     pub async fn nearby_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
         let networks = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("BSSs")
@@ -302,7 +385,7 @@ impl WpaSupplicant {
 
     /// Used for networks which are nearby by may
     /// not have been connected to yet
-    pub async fn get_bss_info(&self, bss_path: OwnedObjectPath) -> Result<WpaBss, ManndError> {
+    async fn get_bss_info(&self, bss_path: OwnedObjectPath) -> Result<WpaBss, ManndError> {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -330,23 +413,41 @@ impl WpaSupplicant {
         })
     }
 
-    pub async fn is_active(conn: &Connection) -> Result<bool, ManndError> {
+    // Known network, only returns SSID
+    async fn get_known_info(
+        &self,
+        net_path: OwnedObjectPath,
+    ) -> Result<WpaKnownNetwork, ManndError> {
         let proxy = Proxy::new(
-            conn,
-            "fi.w1.wpa_supplicant1",
-            "/fi/w1/wpa_supplicant1/Interfaces/0",
-            "fi.w1.wpa_supplicant1.Interface",
+            &self.conn,
+            self.service.clone(),
+            net_path,
+            "fi.w1.wpa_supplicant1.Network",
         )
         .await?;
+        let properties =
+            get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "Properties").await?;
 
-        // let status = get_prop_from_proxy::<String>(&proxy, "State").await?;
+        let mut res = WpaKnownNetwork {
+            ssid: String::new(),
+            connected: false,
+        };
 
-        // match status.as_str() {
-        //     "completed" | "scanning" | "authenticating" | "associating" | "associated"
-        //     | "4way_handshake" | "group_handshake" => Ok(true),
-        //     _ => Ok(false),
-        // }
-        Ok(true)
+        if let Some(ssid) = properties.get("ssid") {
+            match ssid {
+                Value::Str(s) => {
+                    let clean = s.as_str().trim_matches('"').to_string();
+                    res.ssid = clean;
+                }
+                _ => return Err(ManndError::NetworkNotFound),
+            }
+        } else {
+            return Err(ManndError::NetworkNotFound);
+        };
+
+        let connected = get_prop_from_proxy::<bool>(&proxy, "Enabled").await?;
+        res.connected = connected;
+        Ok(res)
     }
 }
 
@@ -513,6 +614,34 @@ impl WpaSupplicant {
 
         let stream = proxy.receive_signal(signal_name).await?;
         Ok(stream)
+    }
+
+    fn get_env_file() -> PathBuf {
+        STATE_HOME.0.join("ManndEnvFile")
+    }
+
+    async fn should_edit_service(&self) -> bool {
+        let service_path = PathBuf::from(get_service_path(&self.conn, "wpa_supplicant").await);
+        let Ok(mut conf) = IniConfig::new(service_path) else { return false };
+        let Some(service_sect) = conf.sections.get_mut(&"Service".to_string()) else { return false };
+        let env_file = Self::get_env_file();
+        match service_sect.get("EnvironmentFile") {
+            // file already has env file
+            Some(val) => {
+                if val == &env_file {
+                    return true;
+                }
+            }
+            None => {}
+        };
+
+        // write env file
+        service_sect.insert(
+            "EnvironmentFile".to_string(),
+            env_file.into_os_string().into_string().unwrap(),
+        );
+        conf.write_file();
+        true
     }
 }
 

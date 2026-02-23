@@ -3,8 +3,10 @@ use std::{
     ffi::CStr,
     fs::{read_dir, File, OpenOptions},
     io,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
     os::raw::{c_char, c_uint},
     path::PathBuf,
+    str::FromStr,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -171,6 +173,23 @@ pub fn list_interfaces() -> Vec<String> {
     res
 }
 
+pub fn str_to_ip(inp: &str) -> Result<IpAddr, ManndError> {
+    // we expect ipv4
+    if inp.contains(".") {
+        match Ipv4Addr::from_str(inp) {
+            Ok(ip) => Ok(IpAddr::V4(ip)),
+            Err(_) => Err(ManndError::StrToIp),
+        }
+    } else if inp.contains(":") {
+        match Ipv6Addr::from_str(inp) {
+            Ok(ip) => Ok(IpAddr::V6(ip)),
+            Err(_) => Err(ManndError::StrToIp),
+        }
+    } else {
+        Err(ManndError::StrToIp)
+    }
+}
+
 pub fn format_mac_address(mac: &[u8]) -> String {
     if mac.is_empty() {
         return "N/A".to_string();
@@ -221,47 +240,15 @@ impl NamedTempFile {
     }
 }
 
-impl Drop for NamedTempFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
+// impl Drop for NamedTempFile {
+//     fn drop(&mut self) {
+//         let _ = std::fs::remove_file(&self.path);
+//     }
+// }
 
 fn generate_random_suffix() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos()
-}
-
-#[repr(C)]
-pub struct passwd {
-    pub pw_name: *mut c_char,
-    pub pw_passwd: *mut c_char,
-    pub pw_uid: c_uint,
-    pub pw_gid: c_uint,
-    pub pw_gecos: *mut c_char,
-    pub pw_dir: *mut c_char,
-    pub pw_shell: *mut c_char,
-}
-
-#[link(name = "c")]
-unsafe extern "C" {
-    fn getpwuid(uid: c_uint) -> *mut passwd;
-}
-
-pub fn get_user_home_by_uid(uid: u32) -> Option<PathBuf> {
-    let pwd_ptr = unsafe { getpwuid(uid) };
-
-    if pwd_ptr.is_null() {
-        return None;
-    }
-
-    let pw_dir_ptr = unsafe { (*pwd_ptr).pw_dir };
-    if pw_dir_ptr.is_null() {
-        return None;
-    }
-
-    let c_str = unsafe { CStr::from_ptr(pw_dir_ptr) };
-    Some(PathBuf::from(c_str.to_string_lossy().into_owned()))
 }

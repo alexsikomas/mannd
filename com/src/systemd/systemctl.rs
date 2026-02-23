@@ -8,7 +8,7 @@ const SYSTEMD_PATH: &'static str = "/org/freedesktop/systemd1";
 
 pub async fn get_system_unit(
     conn: &Connection,
-    service: String,
+    service: impl Into<String>,
 ) -> Result<OwnedObjectPath, ManndError> {
     let proxy = Proxy::new(
         conn,
@@ -17,15 +17,16 @@ pub async fn get_system_unit(
         format!("{}.Manager", SYSTEMD_BUS),
     )
     .await?;
-    let res: Result<OwnedObjectPath, _> =
-        proxy.call("GetUnit", &format!("{service}.service")).await;
+    let res: Result<OwnedObjectPath, _> = proxy
+        .call("GetUnit", &format!("{}.service", service.into()))
+        .await;
     match res {
         Ok(path) => Ok(path),
         Err(e) => Err(ManndError::Zbus(e)),
     }
 }
 
-pub async fn is_service_active(conn: &Connection, service: String) -> Option<bool> {
+pub async fn is_service_active(conn: &Connection, service: impl Into<String>) -> Option<bool> {
     let path = get_system_unit(conn, service).await;
     if path.is_err() {
         return None;
@@ -40,6 +41,21 @@ pub async fn is_service_active(conn: &Connection, service: String) -> Option<boo
         }
     }
     return None;
+}
+
+pub async fn get_service_path(conn: &Connection, service: impl Into<String>) -> String {
+    let path = get_system_unit(conn, service.into()).await;
+    if path.is_err() {
+        return String::new();
+    }
+
+    let path = path.unwrap();
+    if let Ok(unit) = UnitProxy::new(conn, path).await {
+        if let Ok(frag_path) = unit.fragment_path().await {
+            return frag_path;
+        }
+    }
+    String::new()
 }
 
 pub async fn restart_networkd(conn: &Connection) -> Result<(), ManndError> {

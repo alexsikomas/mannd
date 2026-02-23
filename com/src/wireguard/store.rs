@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, env, fs, os::unix::fs::PermissionsExt, path::PathBuf};
 use tracing::warn;
 
-use crate::{error::ManndError, utils::get_user_home_by_uid};
+use crate::{error::ManndError, STATE_HOME};
 
 const WG_TABLE: TableDefinition<String, WgMeta> = TableDefinition::new("wg_table");
 const WG_DIR: &'static str = "/etc/wireguard/";
@@ -19,39 +19,14 @@ pub struct WgStore {
 
 impl WgStore {
     pub fn init() -> Result<Self, ManndError> {
-        // get uid of user who called sudo and make db
-        // in their XDG_STATE, note because we are running
-        // as sudo we can't respect the XDG_STATE if it has
-        // actually been set
-        let (mut home, in_root) = match env::var_os("SUDO_UID") {
-            Some(uid_str) => {
-                let uid_str = uid_str.to_str().unwrap();
-                let uid = u32::from_str_radix(uid_str, 10).unwrap();
-                match get_user_home_by_uid(uid) {
-                    Some(path) => (path, false),
-                    None => {
-                        tracing::warn!(
-                            "Got UID of the user who called sudo but cannot find home..."
-                        );
-                        (PathBuf::from("root"), false)
-                    }
-                }
-            }
-            None => {
-                tracing::warn!(
-                    "Cannot get the UID of the user who called sudo... DB will be in /root/"
-                );
-                (PathBuf::from("root"), false)
-            }
-        };
-
-        home.push(".local/state/mannd");
-        let _ = fs::create_dir_all(&home);
+        let home = &STATE_HOME.0;
+        let in_root = STATE_HOME.1;
+        let _ = fs::create_dir_all(home);
         if !in_root {
-            fs::set_permissions(&home, fs::Permissions::from_mode(0o777))?;
+            fs::set_permissions(home, fs::Permissions::from_mode(0o777))?;
         }
 
-        home.push("wg.redb");
+        let home = STATE_HOME.0.join("wg.redb");
         let database = Database::create(&home)?;
         if !in_root {
             fs::set_permissions(&home, fs::Permissions::from_mode(0o777))?;

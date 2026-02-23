@@ -12,11 +12,19 @@ use neli::{
 use redb::Database;
 use std::{
     fmt::Debug,
+    fs::read_to_string,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    path::PathBuf,
 };
 use tokio::process::Command;
+use tracing::info;
 
-use crate::{error::ManndError, utils::get_index, wireguard::store::WgStore};
+use crate::{
+    error::ManndError,
+    ini_parse::IniConfig,
+    utils::{get_index, str_to_ip},
+    wireguard::store::WgStore,
+};
 
 const INTERFACE: &str = "wg-mannd";
 
@@ -87,6 +95,27 @@ impl Wireguard {
         Self::set_state(&s, false).await?;
 
         return Ok(s);
+    }
+
+    pub fn connect(&self, path: PathBuf) -> Result<(), ManndError> {
+        let conf = IniConfig::new(path)?;
+
+        // get ips, possibly multiple split on ,
+        let mut ips: Vec<IpAddr> = vec![];
+        match conf.sections.get("Interface") {
+            Some(iface) => match iface.get("Address") {
+                Some(addrs) => {
+                    for addr in addrs.split(",") {
+                        let ip = str_to_ip(addr)?;
+                        ips.push(ip);
+                    }
+                }
+                None => return Err(ManndError::WgIps),
+            },
+            None => return Err(ManndError::ConfigSectionNotFound("Interface".to_string())),
+        };
+        info!("IPS: {:?}", ips);
+        Ok(())
     }
 }
 
