@@ -210,7 +210,9 @@ impl Controller {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 iwd.connect_known(ssid, security).await?;
             }
-            Some(WirelessAdapter::Wpa(_wpa)) => {}
+            Some(WirelessAdapter::Wpa(wpa)) => {
+                wpa.connect_known(ssid).await?;
+            }
             None => {}
         }
         Ok(())
@@ -237,15 +239,8 @@ impl Controller {
     pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ManndError> {
         info!("Removing network");
         match &self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => match iwd.remove_network(ssid, security).await {
-                Ok(()) => {
-                    return Ok(());
-                }
-                Err(e) => {
-                    return Err(e);
-                }
-            },
-            Some(WirelessAdapter::Wpa(_wpa)) => {}
+            Some(WirelessAdapter::Iwd(iwd)) => return iwd.remove_network(ssid, security).await,
+            Some(WirelessAdapter::Wpa(wpa)) => return wpa.remove_network(ssid, security).await,
             None => {}
         }
         Ok(())

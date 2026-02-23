@@ -102,6 +102,10 @@ impl<'a> NetworkActor<'a> {
         action: NetworkAction,
         state_send: &mut Vec<NetworkState>,
     ) {
+        // a lot of times we want to update network list
+        // after an action
+        let mut should_refresh = false;
+
         match action {
             NetworkAction::Scan => {
                 state_send.push(NetworkState::Start(NetStart::Scan));
@@ -127,30 +131,36 @@ impl<'a> NetworkActor<'a> {
                         state_send.push(NetworkState::CallAction(
                             NetworkAction::GetNetworkContext(NetCtxFlags::Network),
                         ));
+                        should_refresh = true;
                     }
                     Err(e) => {}
                 }
             }
             NetworkAction::CreateWpaInterface(ifname) => {
                 if let Some(WirelessAdapter::Wpa(wpa)) = self.controller.wifi.as_mut() {
-                    wpa.create_interface(ifname).await;
+                    let _ = wpa.create_interface(ifname).await;
                 }
             }
             NetworkAction::Disconnect => {
                 if let Ok(()) = self.controller.disconenct().await {
                     info!("Disconnected from a network");
+                    should_refresh = true;
                 } else {
                 }
             }
             NetworkAction::Forget(ssid, sec) => {
                 if let Ok(()) = self.controller.remove_network(ssid, sec).await {
-                    //     if let Ok(aps) = controller.get_networks().await {
-                    //         let _ = state_update.send(NetUpdate::UpdateAps(aps)).await;
-                    //     }
+                    should_refresh = true
                 }
             }
             _ => {}
         };
+
+        if should_refresh {
+            if let Ok(networks) = self.controller.get_all_networks().await {
+                state_send.push(NetworkState::SetNetworks(networks));
+            }
+        }
     }
 
     async fn handle_net_ctx(
