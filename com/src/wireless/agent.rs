@@ -3,11 +3,8 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 use tracing::info;
-use zbus::{interface, zvariant::OwnedObjectPath, DBusError};
+use zbus::{DBusError, interface, zvariant::OwnedObjectPath};
 
-// Do compiler optimisations make it so that
-// the password may be repeated in memory even if later
-// cleared?
 #[derive(Debug)]
 pub struct AgentState {
     pub username: Option<String>,
@@ -18,6 +15,7 @@ pub struct IwdAgent {
     state: Arc<RwLock<AgentState>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, DBusError)]
 enum IwdAgentError {
     Canceled,
@@ -42,7 +40,7 @@ impl IwdAgent {
     }
 }
 
-// docs: https://kernel.googlesource.com/pub/scm/network/wireless/iwd/+/master/doc/agent-api.txt
+// [docs](https://kernel.googlesource.com/pub/scm/network/wireless/iwd/+/master/doc/agent-api.txt)
 #[interface(name = "net.connman.iwd.Agent")]
 #[allow(non_snake_case)]
 impl IwdAgent {
@@ -53,7 +51,7 @@ impl IwdAgent {
         writer.password = None;
     }
 
-    async fn requestPassphrase(&self, network: OwnedObjectPath) -> String {
+    async fn requestPassphrase(&self, _network: OwnedObjectPath) -> String {
         info!("Passphrase has been requested");
         match self.state.try_read() {
             Ok(reader) => match &reader.password {
@@ -70,17 +68,20 @@ impl IwdAgent {
         }
     }
 
-    async fn requestPrivateKeyPassphrase(&self, network: OwnedObjectPath) -> String {
+    async fn requestPrivateKeyPassphrase(&self, _network: OwnedObjectPath) -> String {
         info!("Private Key Passphrase");
         todo!()
     }
 
-    async fn requestUserNameAndPassword(&self, network: OwnedObjectPath) -> (String, String) {
+    async fn requestUserNameAndPassword(&self, _network: OwnedObjectPath) -> (String, String) {
         info!("Username and Password");
         todo!()
     }
 
-    async fn requestUserPassword(&self, network: OwnedObjectPath) -> Result<String, IwdAgentError> {
+    async fn requestUserPassword(
+        &self,
+        _network: OwnedObjectPath,
+    ) -> Result<String, IwdAgentError> {
         info!("User Password");
         todo!()
     }

@@ -16,8 +16,8 @@ use crossterm::event::EventStream;
 use futures::{SinkExt, StreamExt};
 use tokio::{
     net::{
-        unix::{ReadHalf, WriteHalf},
         UnixStream,
+        unix::{ReadHalf, WriteHalf},
     },
     process::Child,
     sync::mpsc::{self, Sender},
@@ -29,7 +29,6 @@ pub struct App {
 }
 
 pub struct AppState {
-    // only used in main loop
     should_quit: bool,
     redraw: bool,
 
@@ -128,8 +127,8 @@ impl App {
     }
 }
 
-/// Requests the capabilities of the system to know what
-/// to display on screen i.e. wifi, wireguard, networkd
+/// Requests the capabilities of the system to know what to
+/// display on screen for example: Wi-Fi, wireguard, networkd
 async fn init_request(
     writer: &mut FramedWrite<WriteHalf<'_>, LengthDelimitedCodec>,
     reader: &mut FramedRead<ReadHalf<'_>, LengthDelimitedCodec>,

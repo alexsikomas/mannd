@@ -1,17 +1,20 @@
-//! Wireguard will create an interface called [`INTERFACE`] this
-//! interface will be dropped when the program finishes running.
+//! Wireguard creates an interface called [`INTERFACE`] this
+//! is dropped at reboot
 //!
-//! This means that there will be no persistance of VPN state and
-//! it must be re-initialised each time.
+//! No persistance of VPN state after boot and it must be
+//! re-initialised each time.
 
+use futures::StreamExt;
 use neli::{
     consts::{
-        nl::NlmF,
-        rtnl::{Ifa, Iff, Ifla, IflaInfo, RtAddrFamily, Rta, Rtm},
+        nl::{NlTypeWrapper, NlmF, Nlmsg},
+        rtnl::{Arphrd, Ifa, Iff, Ifla, IflaInfo, RtAddrFamily, Rta, Rtm},
     },
-    nl::NlPayload,
+    err::Nlmsgerr,
+    nl::{NlPayload, NlmsghdrBuilder},
     router::asynchronous::NlRouter,
     rtnl::{Ifaddrmsg, IfaddrmsgBuilder, Ifinfomsg, IfinfomsgBuilder, RtattrBuilder, RtmsgBuilder},
+    socket::asynchronous::NlSocketHandle,
     types::RtBuffer,
     utils::Groups,
 };
@@ -25,7 +28,7 @@ use tokio::{process::Command, runtime::Handle};
 use tracing::info;
 
 use crate::{
-    error::ManndError,
+    error::{ManndError, NeliError},
     ini_parse::IniConfig,
     utils::{get_index, str_to_ip},
     wireguard::store::WgStore,
@@ -41,7 +44,7 @@ pub struct Wireguard {
 
 // methods used by Network
 impl Wireguard {
-    /// Connects socket and sets up `INTERFACE` if not already done so
+    /// Connects socket and sets up [`INTERFACE`] if not already done so
     pub async fn start_interface(db: Option<Database>) -> Result<Self, ManndError> {
         let (router, _) =
             NlRouter::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty()).await?;
@@ -85,6 +88,7 @@ impl Wireguard {
             .await?;
 
         let index = get_index(INTERFACE).await?;
+        info!("THE INDEX IS: {index}");
 
         let store = match db {
             Some(tmp) => WgStore::init_from_db(tmp),
@@ -126,9 +130,11 @@ impl Wireguard {
 
 #[allow(dead_code)]
 impl Wireguard {
-    async fn check_state(&self) -> Result<(), ManndError> {
-        let mut buf = RtBuffer::new();
+    pub async fn check_state() -> Result<bool, ManndError> {
+        let socket =
+            NlSocketHandle::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty())?;
 
+        let mut buf = RtBuffer::new();
         buf.push(
             RtattrBuilder::default()
                 .rta_type(Ifla::Ifname)
@@ -138,17 +144,30 @@ impl Wireguard {
 
         let ifimsg = IfinfomsgBuilder::default()
             .ifi_family(RtAddrFamily::Unspecified)
-            .ifi_type(neli::consts::rtnl::Arphrd::Netrom)
+            .ifi_type(Arphrd::None)
             .ifi_index(0)
             .ifi_flags(0.into())
             .ifi_change(0.into())
             .rtattrs(buf)
             .build()?;
 
-        self.router
-            .send::<Rtm, Ifinfomsg, (), ()>(Rtm::Getlink, NlmF::REQUEST, NlPayload::Payload(ifimsg))
-            .await?;
-        todo!()
+        let msg = NlmsghdrBuilder::default()
+            .nl_type(Rtm::Getlink)
+            .nl_flags(NlmF::REQUEST)
+            .nl_payload(NlPayload::Payload(ifimsg))
+            .build()?;
+
+        socket.send(&msg).await?;
+
+        if let Ok(msg) = socket.recv::<NlTypeWrapper, Ifinfomsg>().await {
+            for msg in msg.0.into_iter() {
+                if let Some(_) = msg.unwrap().get_payload() {
+                    return Ok(true);
+                };
+                return Ok(false);
+            }
+        }
+        Ok(false)
     }
 
     async fn delete_interface(&self) -> Result<(), ManndError> {
@@ -255,8 +274,8 @@ impl Wireguard {
 
     /// Sets MTU to prevent ip fragmentation
     ///
-    /// MTU should typically be set to 1420 since
-    /// standard ethernet = 1500, worst case overhead = 80
+    /// MTU typically 1420 since standard ethernet = 1500,
+    /// worst case overhead = 80
     async fn set_mtu(&self, mtu: u32) -> Result<(), ManndError> {
         let mut attrs = RtBuffer::new();
 
@@ -354,49 +373,6 @@ impl Wireguard {
             .await?;
 
         Ok(())
-        // This is not used because neli doesn't implement
-        // FIB_RULE_INVERT (0x02)
-        //
-        // let FRA_FWMARK = 10;
-        // let FIB_RULE_INVERT = 0x02;
-        // // ipv6
-        // let mut attrs = RtBuffer::new();
-        // attrs.push(
-        //     RtattrBuilder::default()
-        //         .rta_type(Rta::Mark)
-        //         .rta_payload(0xca6cu32)
-        //         .build()?,
-        // );
-        //
-        // // hex is just 51820
-        // attrs.push(
-        //     RtattrBuilder::default()
-        //         .rta_type(Rta::Table)
-        //         .rta_payload(0xca6c)
-        //         .build()?,
-        // );
-        //
-        // let rm: RtmF = 0x02.into();
-        // println!("{:?}", RtmF::EQUALIZE.bits());
-        // let rtmsg = RtmsgBuilder::default()
-        //     .rtm_family(RtAddrFamily::Inet)
-        //     .rtm_dst_len(0)
-        //     .rtm_src_len(0)
-        //     .rtm_tos(0)
-        //     .rtm_table(neli::consts::rtnl::RtTable::Unspec)
-        //     .rtm_protocol(neli::consts::rtnl::Rtprot::Unspec)
-        //     .rtm_scope(neli::consts::rtnl::RtScope::Universe)
-        //     .rtm_type(neli::consts::rtnl::Rtn::Unspec)
-        //     .rtattrs(attrs)
-        //     .build()?;
-        //
-        // self.router
-        //     .send::<_, _, (), ()>(
-        //         Rtm::Newrule,
-        //         NlmF::REQUEST | NlmF::ACK | NlmF::EXCL | NlmF::CREATE,
-        //         NlPayload::Payload(rtmsg),
-        //     )
-        //     .await?;
     }
 
     async fn prevent_default_route(&self) -> Result<(), ManndError> {
@@ -536,16 +512,6 @@ impl Wireguard {
 impl Debug for Wireguard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Result::Ok(())
-    }
-}
-
-impl Drop for Wireguard {
-    fn drop(&mut self) {
-        tokio::task::block_in_place(|| {
-            Handle::current().block_on(async {
-                let _ = self.delete_interface().await;
-            })
-        })
     }
 }
 

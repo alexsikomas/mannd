@@ -4,10 +4,10 @@ use redb::{
     Value,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, env, fs, os::unix::fs::PermissionsExt, path::PathBuf};
+use std::{collections::HashMap, fs, os::unix::fs::PermissionsExt};
 use tracing::warn;
 
-use crate::{error::ManndError, STATE_HOME};
+use crate::{STATE_HOME, error::ManndError};
 
 const WG_TABLE: TableDefinition<String, WgMeta> = TableDefinition::new("wg_table");
 const WG_DIR: &'static str = "/etc/wireguard/";
@@ -69,8 +69,8 @@ impl WgStore {
             Ok(data) => Some(data),
             Err(e) => match e {
                 ManndError::RedbTable(ref table) => {
-                    // if wg_table does not exist then we haven't written any data
-                    // which is not an error
+                    // if wg_table doesn't exist then
+                    // no data written which isn't an error
                     if table.to_string().eq("Table 'wg_table' does not exist") {
                         None
                     } else {

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::Arc};
-use tokio::sync::{mpsc::Sender, RwLock};
+use tokio::sync::{RwLock, mpsc::Sender};
 
 use crate::{
     error::ManndError,
@@ -52,7 +52,7 @@ impl Controller {
         })
     }
 
-    /// Sets wifi to be either iwd, wpa or netlink
+    /// Sets Wi-Fi to be either iwd, wpa, or netlink
     pub async fn determine_adapter(&mut self) {
         match is_service_active(&self.connection, "iwd").await {
             Some(v) => {
@@ -184,27 +184,13 @@ impl Controller {
                         );
                     }
                 };
-            } // Credentials::Eap(eap) => {
-              //     match &self.wifi {
-              //         Some(WirelessAdapter::Iwd(iwd)) => {
-              //             iwd.connect_network_eap(info.ssid, eap).await?;
-              //         }
-              //         Some(WirelessAdapter::Wpa(wpa)) => {
-              //             wpa.connect_network_eap(info.ssid, eap).await?;
-              //         }
-              //         None => {
-              //             tracing::error!(
-              //                 "Tried to connect to network without an initalised adapter?"
-              //             );
-              //         }
-              //     };
-              // }
+            }
         }
 
         Ok(())
     }
 
-    /// security is required for iwd due to the way it stores network names
+    /// security required for iwd due to the way it stores network names
     pub async fn connect_known(&self, ssid: String, security: Security) -> Result<(), ManndError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
@@ -246,7 +232,7 @@ impl Controller {
         Ok(())
     }
 
-    /// Performs cleanup before the application exits
+    /// Performs cleanup before the app exits
     pub async fn exit(&self) -> Result<(), ManndError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
@@ -319,21 +305,21 @@ mod tests {
         }
     }
 
-    // #[cfg(iwd_installed)]
-    // #[tokio::test]
-    // async fn test_connect_iwd() -> Result<(), ComError> {
-    //     let controller = Controller::new().await;
-    //     match controller {
-    //         Ok(mut cont) => match cont.connect_iwd().await {
-    //             Ok(_) => Ok(()),
-    //             Err(_) => {
-    //                 println!("iwd is not found");
-    //                 Ok(())
-    //             }
-    //         },
-    //         Err(_) => Err(ComError::OperationFailed(
-    //             "Controller could not be initalised".to_string(),
-    //         )),
-    //     }
-    // }
+    #[cfg(iwd_installed)]
+    #[tokio::test]
+    async fn test_connect_iwd() -> Result<(), ComError> {
+        let controller = Controller::new().await;
+        match controller {
+            Ok(mut cont) => match cont.connect_iwd().await {
+                Ok(_) => Ok(()),
+                Err(_) => {
+                    println!("iwd is not found");
+                    Ok(())
+                }
+            },
+            Err(_) => Err(ComError::OperationFailed(
+                "Controller could not be initalised".to_string(),
+            )),
+        }
+    }
 }

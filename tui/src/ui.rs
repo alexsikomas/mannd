@@ -1,25 +1,22 @@
-use com::{
-    error::ManndError, ini_parse::IniConfig, state::network::InterfaceTypes,
-    wireguard::store::WgMeta,
-};
+use com::{error::ManndError, ini_parse::IniConfig, state::network::InterfaceTypes};
 use ratatui::{
+    Frame,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, BorderType, Borders},
-    Frame,
 };
-use serde::{de::IntoDeserializer, Deserialize};
-use std::{borrow::Cow, env, path::PathBuf, sync::OnceLock};
+use serde::{Deserialize, de::IntoDeserializer};
+use std::{borrow::Cow, path::PathBuf, sync::OnceLock};
 use tracing::info;
 
 use crate::{
+    CONFIG_HOME,
     components::{
         main_menu::MainMenu, networkd_ui::NetdMenu, password_prompt::PasswordPrompt,
         popup_prompt::PopupPrompt, wifi_menu::Connection, wireguard_ui::WireguardMenu,
         wpa_interface_ui::WpaInterfaceUi,
     },
     state::{AppContext, PromptState, UiState, View},
-    CONFIG_HOME,
 };
 
 /// Theme global state, used to bypass needing to
@@ -75,7 +72,7 @@ impl UiContext {
         Self { message: None }
     }
 
-    /// Renders title, border and conditionally
+    /// Renders title, border, and conditionally
     /// renders main content depending on state
     pub fn render<'a>(&mut self, frame: &mut Frame<'a>, state: &UiState, ctx: &AppContext) {
         let outer_area = frame.area();
@@ -120,12 +117,10 @@ impl UiContext {
             inner_area,
         );
 
-        // will do this instead when rust stablises it
+        // Prefer this when stabilised:
         // let widget: impl Widget;
         // frame.render_widget(widget, inner_area);
 
-        // we give the widget only the necessary selections to
-        // render
         match &state.current_view {
             View::MainMenu(list) => {
                 if let Some(menu) = MainMenu::new(&list) {
@@ -141,7 +136,8 @@ impl UiContext {
                 for prompt in &state.prompt_stack {
                     match prompt {
                         PromptState::PskConnect(psk_prompt) => {
-                            let Some(selected) = net_ctx.networks.get(connection_state.network_cursor)
+                            let Some(selected) =
+                                net_ctx.networks.get(connection_state.network_cursor)
                             else {
                                 return;
                             };
@@ -159,15 +155,19 @@ impl UiContext {
             View::Vpn(vpn_state) => {
                 let mut cols: usize = 0;
                 let vpn_areas = WireguardMenu::build_layout_no_render(inner_area, &mut cols);
-                let wg_meta = if vpn_state.wg_on {
+                let wg_meta = if ctx.net_ctx.wg_info.2 {
                     Some(&net_ctx.wg_info.1)
                 } else {
                     None
                 };
 
-                if let Some(vpn) =
-                    WireguardMenu::new(&vpn_state, &net_ctx.wg_info.0, wg_meta, vpn_areas)
-                {
+                if let Some(vpn) = WireguardMenu::new(
+                    &vpn_state,
+                    &net_ctx.wg_info.0,
+                    wg_meta,
+                    ctx.net_ctx.wg_info.2,
+                    vpn_areas,
+                ) {
                     if cols != state.vpn_cols {
                         self.message = Some(UiMessage::SetVpnCols(cols));
                     }

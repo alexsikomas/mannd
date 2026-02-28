@@ -21,6 +21,7 @@ pub struct WireguardMenu<'a> {
     state: &'a VpnState,
     names: &'a Vec<String>,
     meta: Option<&'a Vec<WgMeta>>,
+    wg_on: bool,
     theme: &'a Theme,
     areas: VpnAreas,
 }
@@ -30,6 +31,7 @@ impl<'a> WireguardMenu<'a> {
         state: &'a VpnState,
         names: &'a Vec<String>,
         meta: Option<&'a Vec<WgMeta>>,
+        wg_on: bool,
         areas: VpnAreas,
     ) -> Option<Self> {
         let theme: &Theme = match THEME.get() {
@@ -43,6 +45,7 @@ impl<'a> WireguardMenu<'a> {
             state,
             names,
             meta,
+            wg_on,
             theme,
             areas,
         })
@@ -158,7 +161,7 @@ impl<'a> WireguardMenu<'a> {
         opt_block.render(options_layout[0], buf);
 
         // TODO: find better way to do this
-        let layouts = if !self.state.wg_on {
+        let layouts = if !self.wg_on {
             vec![
                 Constraint::Min(0),
                 Constraint::Length(5),
@@ -190,7 +193,7 @@ impl<'a> WireguardMenu<'a> {
             btn_styles[self.state.selection.selected_index] = self.theme.info.color();
         }
 
-        if self.state.wg_on {
+        if self.wg_on {
             Line::from("Disconnect")
                 .style(btn_styles[0])
                 .render(btn_areas[1], buf);

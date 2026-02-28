@@ -9,10 +9,8 @@ pub mod wireless;
 
 pub const UNIX_SOCK_PATH: &str = "/tmp/mannd.sock";
 
-// get uid of user who called sudo and make db
-// in their XDG_STATE, note because we are running
-// as sudo we can't respect the XDG_STATE if it has
-// actually been set
+/// Get uid of user who called sudo and make db
+/// in their XDG_STATE
 pub static STATE_HOME: std::sync::LazyLock<(std::path::PathBuf, bool)> =
     std::sync::LazyLock::new(|| {
         let (mut home, in_root) = match std::env::var_os("SUDO_UID") {

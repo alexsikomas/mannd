@@ -1,10 +1,9 @@
 use std::{
     env,
     ffi::CStr,
-    fs::{read_dir, File, OpenOptions},
+    fs::{File, OpenOptions, read_dir},
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    os::raw::{c_char, c_uint},
     path::PathBuf,
     str::FromStr,
     time::{SystemTime, UNIX_EPOCH},
@@ -16,13 +15,14 @@ use neli::{
         rtnl::{Ifla, Rtm},
     },
     nl::{NlPayload, NlmsghdrBuilder},
-    rtnl::{Ifinfomsg, IfinfomsgBuilder},
+    rtnl::{Ifinfomsg, IfinfomsgBuilder, RtattrBuilder},
     socket::asynchronous::NlSocketHandle,
+    types::RtBuffer,
     utils::Groups,
 };
 use tracing::Level;
 use tracing_error::ErrorLayer;
-use tracing_subscriber::{layer::SubscriberExt, FmtSubscriber};
+use tracing_subscriber::{FmtSubscriber, layer::SubscriberExt};
 
 use crate::error::ManndError;
 
@@ -98,8 +98,16 @@ pub async fn get_index(interface: &'static str) -> Result<u32, ManndError> {
         NlSocketHandle::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty())?;
 
     let mut index: u32 = 0;
+    let mut buf = RtBuffer::new();
+    buf.push(
+        RtattrBuilder::default()
+            .rta_type(Ifla::Ifname)
+            .rta_payload(interface)
+            .build()?,
+    );
     let ifinfomsg = IfinfomsgBuilder::default()
         .ifi_family(neli::consts::rtnl::RtAddrFamily::Unspecified)
+        .rtattrs(buf)
         .build()?;
 
     let nlmsg = NlmsghdrBuilder::default()
@@ -240,11 +248,11 @@ impl NamedTempFile {
     }
 }
 
-// impl Drop for NamedTempFile {
-//     fn drop(&mut self) {
-//         let _ = std::fs::remove_file(&self.path);
-//     }
-// }
+impl Drop for NamedTempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
 
 fn generate_random_suffix() -> u128 {
     SystemTime::now()

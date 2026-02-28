@@ -5,7 +5,7 @@ use std::{
 };
 
 use tokio::{
-    fs::{read_dir, File},
+    fs::{File, read_dir},
     io::AsyncWriteExt,
 };
 
@@ -71,6 +71,7 @@ pub async fn get_netd_files() -> Result<Vec<String>, ManndError> {
     Ok(files)
 }
 
+// TODO: doesn't this cause an issue if we want to clear vpn state at reboot?
 pub async fn init_virtual_interface(mut ips: Vec<IpAddr>, dns: IpAddr) -> Result<(), ManndError> {
     // Since virt interface made by netlink we use .network file
     let path = PathBuf::from(format!("{}/30-mannd.network", NETWORK_FOLDER));

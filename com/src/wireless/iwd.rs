@@ -1,11 +1,11 @@
 use std::sync::Arc;
-use tokio::sync::{mpsc::Sender, RwLock};
+use tokio::sync::{RwLock, mpsc::Sender};
 
 use tracing::info;
 use zbus::{
+    Connection, Proxy,
     fdo::ObjectManagerProxy,
     zvariant::{ObjectPath, OwnedObjectPath},
-    Connection, Proxy,
 };
 
 use crate::{
@@ -13,7 +13,7 @@ use crate::{
     state::signals::SignalUpdate,
     wireless::{
         agent::AgentState,
-        common::{get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security},
+        common::{AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy},
     },
 };
 
@@ -26,11 +26,7 @@ pub struct Iwd {
     agent_state: Arc<RwLock<AgentState>>,
 }
 
-// To be used externally
 impl Iwd {
-    /// Creates a new instance of the `Iwd` struct. Takes in a `zbus::Connection` to minimise the
-    /// number of connections that need to be created, allowing one to be shared by the
-    /// `Controller` between processes.
     pub async fn new(
         conn: Connection,
         agent_state: Arc<RwLock<AgentState>>,
@@ -55,8 +51,8 @@ impl Iwd {
 
     /// Connects to a network provided an SSID and passphrase.
     ///
-    /// Since iwd does not allow connecting via BSSID the connection band is determined by signal
-    /// strength internally by iwd, this can be tweaked in the iwd configuration file
+    /// Since iwd doesn't allow connecting via BSSID the connection band is determined by signal
+    /// strength internally by iwd, tweakable in iwd config
     pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ManndError> {
         match self.agent_state.try_write() {
             Ok(mut writer) => {
@@ -123,7 +119,7 @@ impl Iwd {
         Ok(())
     }
 
-    /// Disconnects from the current WiFi network, does not remove the network
+    /// Disconnects from the current Wi-Fi network, doesn't remove the network
     pub async fn disconnect(&self) -> Result<(), ManndError> {
         let proxy = self.get_interface_proxy("Station").await?;
         let resp: Result<(), zbus::Error> = proxy.call("Disconnect", &()).await;
@@ -281,7 +277,7 @@ impl Iwd {
     ) -> Result<Option<String>, ManndError> {
         let proxy = ObjectManagerProxy::new(conn, service.clone(), "/").await?;
         for (path, interface) in proxy.get_managed_objects().await? {
-            // BUG: if multiple adapters will just return first one
+            // BUG: if multiple adapters, return first one
             if interface.contains_key("net.connman.iwd.Station") {
                 return Ok(Some(path.to_string()));
             }
