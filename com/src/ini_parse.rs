@@ -1,19 +1,15 @@
 use std::{
     collections::BTreeMap,
-    fmt::format,
-    fs::{read_to_string, write},
-    io::{BufWriter, Seek, Write},
+    fs::read_to_string,
+    io::{BufWriter, Write},
     path::PathBuf,
 };
-
-use tracing::info;
 
 use crate::{error::ManndError, utils::NamedTempFile};
 
 pub struct IniConfig {
     pub file_path: PathBuf,
-    // use btreemap to keep ordering otherwise file
-    // may be rearranged for no reason
+    // use btreemap to keep ordering
     pub sections: BTreeMap<String, BTreeMap<String, String>>,
 }
 
@@ -89,7 +85,3 @@ impl IniConfig {
         Ok(())
     }
 }
-
-// impl Drop for IniConfig {
-//     fn drop(&mut self) {}
-// }

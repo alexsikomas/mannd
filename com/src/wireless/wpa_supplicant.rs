@@ -1,21 +1,16 @@
-//! Reference: <https://w1.fi/wpa_supplicant/devel/dbus.html#dbus_network>
+//! [Reference](https://w1.fi/wpa_supplicant/devel/dbus.html#dbus_network)
 //!
 //! The WpaBss struct has a lot of optional types mainly because it
-//! differs significantly to what is provided from a scan vs a connected
-//! network. Check the differences between properties in a .Network vs
-//! .BSS
+//! differs significantly to what's provided from a scan vs a connected
+//! network.
 //!
-//! When getting networks after a scan there will be duplicate SSIDs
+//! When getting networks after a scan there can be duplicate SSIDs
 //! because wpa_supplicant shows the different possible freqs.
 //!
 //! Regarding call_interface methods:
 //! Not a huge fan of needing these two methods
 //! but if you try to use .call() expecting ()
-//! you will get an error...
-//!
-//! The alternative was making this more general
-//! with flags, but that requires another
-//! dependency, so for now I've settled on this.
+//! you'll get an error
 
 use std::{
     collections::{HashMap, HashSet},
@@ -28,22 +23,22 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc::Sender, time::timeout};
 use tracing::info;
 use zbus::{
+    Connection, Proxy,
     names::MemberName,
     proxy::SignalStream,
     zvariant::{self, NoneValue, OwnedObjectPath, OwnedValue, Value},
-    Connection, Proxy,
 };
 
 use crate::{
+    STATE_HOME,
     error::ManndError,
     ini_parse::IniConfig,
     state::signals::SignalUpdate,
     systemd::systemctl::get_service_path,
     utils::list_interfaces,
     wireless::common::{
-        get_prop_from_proxy, AccessPoint, AccessPointBuilder, NetworkFlags, Security,
+        AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy,
     },
-    STATE_HOME,
 };
 
 #[derive(Debug, Clone)]
@@ -54,7 +49,7 @@ pub struct WpaSupplicant {
     // only one interface dealing with Wi-Fi
     // at a time
     active_interface: OwnedObjectPath,
-    // if false will not edit .service files
+    // if false won't edit .service files
     overwrite_service: bool,
 }
 
@@ -85,13 +80,6 @@ pub struct WpaBss {
     rates: Option<Vec<u32>>,
 }
 
-// currently not needed
-// #[derive(Debug, Clone)]
-// pub struct WpaKnownNetwork {
-//     ssid: String,
-// }
-
-// To be used externally
 impl WpaSupplicant {
     pub async fn new(conn: Connection) -> Result<Self, ManndError> {
         let service = String::from("fi.w1.wpa_supplicant1");
@@ -107,7 +95,6 @@ impl WpaSupplicant {
         } else {
             active_interface = active_interfaces.swap_remove(0);
         }
-        // let mut inplace_changes = ;
 
         Ok(Self {
             conn,
@@ -297,7 +284,7 @@ impl WpaSupplicant {
 
             if seen.insert(ssid.clone()) && !hidden {
                 info!("SSID: {ssid}");
-                let mut ap = AccessPointBuilder::default()
+                let ap = AccessPointBuilder::default()
                     .ssid(ssid)
                     .security(bss.security.clone().unwrap())
                     .flags(NetworkFlags::NEARBY)
@@ -338,7 +325,7 @@ impl WpaSupplicant {
         Ok(aps)
     }
 
-    /// Used for networks which have already been connected to by wpa supplicant
+    /// Used for known networks
     pub async fn get_network_info(&self, net_path: OwnedObjectPath) -> Result<WpaBss, ManndError> {
         let proxy = Proxy::new(
             &self.conn,
@@ -466,8 +453,8 @@ impl WpaSupplicant {
     fn get_security<'a>(rsn: HashMap<String, Value<'a>>) -> Security {
         let mut security = Security::Open;
 
-        // eap and psk can't be mixed (afaik)
-        // so we only need to check one if it contains
+        // eap and psk are exclusive
+        // so only need to check one if it contains
         // 'psk' or 'eap'
         'sec: {
             // WEP/WPA1 network
@@ -507,7 +494,7 @@ impl WpaSupplicant {
         // If first connected to a network then expect a disconnected first
         // SUCCESS: authenticating -> associating -> 4-way-handshake -> completed
         // FAILURE: associating -> 4-way-handshake -> disconnected (incorrect password)
-        // FAILURE: scanning -> scanning -> scanning -> ... (cannot find network)
+        // FAILURE: scanning -> scanning -> scanning -> [ad inf.] (can't find network)
         loop {
             match timeout(Duration::from_secs(1), stream.next()).await {
                 Ok(Some(msg)) => {
@@ -521,8 +508,9 @@ impl WpaSupplicant {
                                 return Ok(());
                             }
                             "disconnected" => {
-                                // since success also uses disconnected we check
-                                // how long we have been going first
+                                // since success also uses disconnected check
+                                // how long we've been going first
+                                // TODO: look into lowering this
                                 if start.elapsed().as_secs() > 2 {
                                     return Err(ManndError::ConnectionFailed(
                                         "WPA rejected network request, check password".into(),
@@ -593,8 +581,12 @@ impl WpaSupplicant {
 
     async fn should_edit_service(&self) -> bool {
         let service_path = PathBuf::from(get_service_path(&self.conn, "wpa_supplicant").await);
-        let Ok(mut conf) = IniConfig::new(service_path) else { return false };
-        let Some(service_sect) = conf.sections.get_mut(&"Service".to_string()) else { return false };
+        let Ok(mut conf) = IniConfig::new(service_path) else {
+            return false;
+        };
+        let Some(service_sect) = conf.sections.get_mut(&"Service".to_string()) else {
+            return false;
+        };
         let env_file = Self::get_env_file();
         match service_sect.get("EnvironmentFile") {
             // file already has env file
@@ -611,7 +603,7 @@ impl WpaSupplicant {
             "EnvironmentFile".to_string(),
             env_file.into_os_string().into_string().unwrap(),
         );
-        conf.write_file();
+        let _ = conf.write_file();
         true
     }
 }
@@ -623,11 +615,9 @@ mod tests {
     #[tokio::test]
     async fn test_wpa_scan() -> Result<(), ManndError> {
         let conn = Connection::system().await.unwrap();
-        let mut wpa = WpaSupplicant::new(conn)?;
+        let mut wpa = WpaSupplicant::new(conn).await?;
         let _ = wpa.get_interface_prop::<Vec<u8>>("MACAddress").await?;
-        wpa.list_configured_networks().await?;
-
-        let _ = wpa.nearby_networks().await?;
+        wpa.get_all_networks().await?;
 
         Ok(())
     }

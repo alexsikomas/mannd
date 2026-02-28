@@ -28,7 +28,7 @@ impl Into<KeyAction> for String {
             "left" => KeyAction::Left,
             "right" => KeyAction::Right,
             "enter" => KeyAction::Enter,
-            "bs" => KeyAction::Backspace,
+            "bs" | "backspace" => KeyAction::Backspace,
             "esc" | "escape" => KeyAction::Escape,
             _ => KeyAction::None,
         }
@@ -50,7 +50,6 @@ impl Keymap {
             Some(keybinds) => {
                 let keys = keybinds.keys();
                 for key in keys {
-                    info!("KEY: {}", key);
                     let event = key_str_to_event(key);
                     let action: KeyAction = keybinds.get(key).unwrap().clone().into();
                     bindings.insert(event, action.into());
@@ -63,8 +62,8 @@ impl Keymap {
     }
 }
 
-// follows https://vimhelp.org/intro.txt.html#key-notation if
-// there is a direct match to a keycode, keypad unimplemented
+/// Follows https://vimhelp.org/intro.txt.html#key-notation if
+/// there is a direct match to a keycode, keypad unimplemented
 fn key_str_to_event(key: &str) -> KeyEvent {
     // remove "<>"
     let key = &key[2..key.len() - 2];

@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
-use zbus::{zvariant::Value, Connection};
+use zbus::{Connection, zvariant::Value};
 
 use crate::error::ManndError;
 
@@ -61,7 +61,6 @@ where
 }
 
 /// Returns the value of a property found under the `self.path` interfaces
-/// Proxy must be passed in, use this to reduce overhead
 /// Trait bounds follow from `zbus` downcast
 pub async fn get_prop_from_proxy<'a, T>(
     proxy: &zbus::Proxy<'a>,

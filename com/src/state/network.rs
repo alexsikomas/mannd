@@ -12,7 +12,7 @@ use crate::{
     state::signals::{SignalManager, SignalUpdate},
     systemd::networkd::get_netd_files,
     utils::list_interfaces,
-    wireguard::store::WgMeta,
+    wireguard::{network::Wireguard, store::WgMeta},
     wireless::{
         common::{AccessPoint, Security},
         wpa_supplicant::WpaInterface,
@@ -56,12 +56,14 @@ impl<'a> NetworkActor<'a> {
             NetworkAction::GetCapabilities => {
                 let wifi_daemon = self.controller.daemon_type();
                 let networkd_active = self.controller.networkd_status().await;
-                let wg = Command::new("wg")
+                let wg_installed = Command::new("wg")
                     .arg("--version")
                     .output()
                     .map_or(false, |_| true);
 
-                let caps = Capability::new(wifi_daemon, networkd_active, wg);
+                let wg_iface = Wireguard::check_state().await?;
+
+                let caps = Capability::new(wifi_daemon, networkd_active, (wg_installed, wg_iface));
                 state_send.push(NetworkState::SetCapabilities(caps));
             }
             // WIREGUARD
@@ -209,7 +211,8 @@ impl<'a> NetworkActor<'a> {
 pub struct NetworkContext {
     pub networks: Vec<AccessPoint>,
     pub interfaces: Option<InterfaceTypes>,
-    pub wg_info: (Vec<String>, Vec<WgMeta>),
+    // name, metadata, is on?
+    pub wg_info: (Vec<String>, Vec<WgMeta>, bool),
     pub netd_files: Vec<String>,
 }
 
@@ -246,7 +249,7 @@ impl Default for NetworkContext {
         Self {
             networks: vec![],
             interfaces: None,
-            wg_info: (vec![], vec![]),
+            wg_info: (vec![], vec![], false),
             netd_files: vec![],
         }
     }
@@ -275,6 +278,7 @@ pub enum NetworkAction {
     GetWireguard,
     CreateWpaInterface(String),
     ConnectWireguard(PathBuf),
+    DisableWireguard,
 
     Connect(ApConnectInfo),
     ConnectKnown(String, Security),
@@ -328,11 +332,16 @@ pub enum NetworkState {
 pub struct Capability {
     pub wifi_daemon: Option<DaemonType>,
     pub networkd_active: bool,
-    pub wireguard: bool,
+    // installed, wg-mannd interface active
+    pub wireguard: (bool, bool),
 }
 
 impl Capability {
-    pub fn new(wifi_daemon: Option<DaemonType>, networkd_active: bool, wireguard: bool) -> Self {
+    pub fn new(
+        wifi_daemon: Option<DaemonType>,
+        networkd_active: bool,
+        wireguard: (bool, bool),
+    ) -> Self {
         Capability {
             wifi_daemon,
             networkd_active,
@@ -346,7 +355,7 @@ impl Default for Capability {
         Capability {
             wifi_daemon: None,
             networkd_active: false,
-            wireguard: false,
+            wireguard: (false, false),
         }
     }
 }

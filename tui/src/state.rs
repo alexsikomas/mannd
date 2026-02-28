@@ -4,12 +4,11 @@ use std::{fmt::Debug, usize};
 
 use com::controller::DaemonType;
 use com::state::network::{Capability, NetCtxFlags, NetworkAction, NetworkContext};
-use com::wireless::wpa_supplicant::WpaInterface;
 use com::{
     state::network::ApConnectInfoBuilder,
     wireless::common::{AccessPoint, NetworkFlags, Security},
 };
-use crossterm::event::{Event, KeyCode, KeyEvent};
+use crossterm::event::Event;
 use tracing::info;
 
 use crate::app::AppAction;
@@ -42,8 +41,6 @@ pub struct AppContext<'a> {
     pub vpn_cols: usize,
 }
 
-/// Data used for UI, may be sent to threads through
-/// channels
 pub struct UiState {
     // kbd input block
     pub should_block: bool,
@@ -151,9 +148,6 @@ impl UiState {
         vec![]
     }
 
-    /// May be used by external files to make something happen in the UI
-    /// like adding a prompt based on something the UiState doesn't know
-    /// directly
     pub fn process_commands(
         &mut self,
         cmds: impl IntoIterator<Item = StateCommand>,
@@ -179,7 +173,8 @@ impl UiState {
                 StateCommand::Prompt(prompt) => {
                     match &prompt {
                         PromptState::Info(info) => {
-                            // removes clutter of general messages if we have error
+                            // removes clutter of general messages
+                            // if there is an error
                             if info.kind == PopupType::Error {
                                 self.remove_general_prompts();
                             }
@@ -236,7 +231,7 @@ impl View {
             options.items.push(MainMenuSelection::Wifi);
         }
 
-        if caps.wireguard {
+        if caps.wireguard.0 {
             options.items.push(MainMenuSelection::Vpn);
         }
 
@@ -295,7 +290,7 @@ impl MainMenuSelection {
     fn execute(&self, daemon: &Option<DaemonType>) -> StateResult {
         match self {
             Self::Wifi => {
-                // if we are here DaemonType should be defined
+                // DaemonType safe here
                 StateResult::Command(StateCommand::ChangeView(View::Wifi(WifiState::new(
                     daemon.as_ref().unwrap(),
                 ))))
@@ -322,8 +317,7 @@ impl MainMenuSelection {
 
 // Connection
 //
-// Possible actions the user can take in the connection
-// menu and how the data should be stored
+// Possible actions the user can take in the connection menu
 #[derive(Debug)]
 pub struct WifiState {
     pub focused_area: ConnectionFocus,
@@ -376,11 +370,6 @@ impl WifiState {
 
         if let Some(ap) = networks.get(self.network_cursor) {
             let flags = ap.flags;
-            info!(
-                "AP: {:?}, nearby: {:?}",
-                ap,
-                ap.flags.contains(NetworkFlags::NEARBY)
-            );
             if flags.contains(NetworkFlags::NEARBY) && !flags.contains(NetworkFlags::CONNECTED) {
                 self.actions.items.push(ConnectionAction::Connect);
             }
@@ -506,7 +495,6 @@ impl ConnectionAction {
             Self::Connect => "Connect",
             Self::Disconnect => "Disconnect",
             Self::Interfaces => "Interfaces",
-            // Self::Info => "Info",
             Self::Forget => "Forget",
         }
     }
@@ -757,7 +745,6 @@ pub enum VpnSelection {
 impl VpnSelection {
     pub fn as_str(&self) -> &'static str {
         match self {
-            // Self::Connect => "Connect",
             Self::Toggle => "Toggle",
             Self::Scan => "Scan Files",
             Self::Country => "Get Countries",
@@ -771,7 +758,6 @@ impl VpnSelection {
 pub struct VpnState {
     pub selection: SelectableList<VpnSelection>,
     pub file_cursor: usize,
-    pub wg_on: bool,
 }
 
 impl VpnState {
@@ -779,7 +765,6 @@ impl VpnState {
         Self {
             selection: Self::get_actions(),
             file_cursor: 0,
-            wg_on: false,
         }
     }
 
@@ -800,7 +785,9 @@ impl Component for VpnState {
             match key {
                 KeyAction::Enter => match selected {
                     VpnSelection::Toggle => {
-                        self.wg_on = !self.wg_on;
+                        return StateResult::Command(StateCommand::NetworkAction(
+                            NetworkAction::DisableWireguard,
+                        ));
                     }
                     VpnSelection::Files => {
                         let mut wg_path = PathBuf::from("/etc/wireguard");
@@ -855,11 +842,6 @@ impl Component for VpnState {
                     } else {
                         self.file_cursor = self.file_cursor.saturating_sub(ctx.vpn_cols);
                     }
-                    // BUG: you must be at first file to go back instead
-                    // it should work for the entire top row
-                    // if selected == &VpnSelection::Files && self.file_cursor == 0 {
-                    //     self.selection.selected_index = 0;
-                    // }
                 }
                 _ => {}
             }

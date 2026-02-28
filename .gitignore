@@ -1,4 +1,5 @@
 .DS_Store
+/.styles
 /target
 **/*.rs.bk
 /gui/node_modules

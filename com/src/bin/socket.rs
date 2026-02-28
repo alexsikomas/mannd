@@ -6,6 +6,7 @@ use std::{
 };
 
 use com::{
+    UNIX_SOCK_PATH,
     controller::DaemonType,
     error::ManndError,
     state::{
@@ -13,7 +14,6 @@ use com::{
         signals::SignalUpdate,
     },
     utils::setup_logging,
-    UNIX_SOCK_PATH,
 };
 use futures::{SinkExt, StreamExt};
 use postcard::to_stdvec_cobs;
