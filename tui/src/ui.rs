@@ -1,4 +1,7 @@
-use com::{error::ManndError, ini_parse::IniConfig, state::network::InterfaceTypes};
+use com::{
+    error::ManndError, ini_parse::IniConfig, state::network::InterfaceTypes,
+    wireguard::store::WgMeta,
+};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::Line,
@@ -156,12 +159,15 @@ impl UiContext {
             View::Vpn(vpn_state) => {
                 let mut cols: usize = 0;
                 let vpn_areas = WireguardMenu::build_layout_no_render(inner_area, &mut cols);
-                if let Some(vpn) = WireguardMenu::new(
-                    &vpn_state,
-                    &net_ctx.wg_info.0,
-                    &net_ctx.wg_info.1,
-                    vpn_areas,
-                ) {
+                let wg_meta = if vpn_state.wg_on {
+                    Some(&net_ctx.wg_info.1)
+                } else {
+                    None
+                };
+
+                if let Some(vpn) =
+                    WireguardMenu::new(&vpn_state, &net_ctx.wg_info.0, wg_meta, vpn_areas)
+                {
                     if cols != state.vpn_cols {
                         self.message = Some(UiMessage::SetVpnCols(cols));
                     }

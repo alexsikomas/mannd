@@ -1,3 +1,9 @@
+//! Wireguard will create an interface called [`INTERFACE`] this
+//! interface will be dropped when the program finishes running.
+//!
+//! This means that there will be no persistance of VPN state and
+//! it must be re-initialised each time.
+
 use neli::{
     consts::{
         nl::NlmF,
@@ -12,11 +18,10 @@ use neli::{
 use redb::Database;
 use std::{
     fmt::Debug,
-    fs::read_to_string,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     path::PathBuf,
 };
-use tokio::process::Command;
+use tokio::{process::Command, runtime::Handle};
 use tracing::info;
 
 use crate::{
@@ -531,6 +536,16 @@ impl Wireguard {
 impl Debug for Wireguard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Result::Ok(())
+    }
+}
+
+impl Drop for Wireguard {
+    fn drop(&mut self) {
+        tokio::task::block_in_place(|| {
+            Handle::current().block_on(async {
+                let _ = self.delete_interface().await;
+            })
+        })
     }
 }
 

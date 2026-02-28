@@ -826,7 +826,10 @@ impl Component for VpnState {
                 KeyAction::Right => {
                     match selected {
                         VpnSelection::Files => {
-                            self.file_cursor = self.file_cursor.saturating_add(1);
+                            self.file_cursor = self
+                                .file_cursor
+                                .saturating_add(1)
+                                .min(ctx.net_ctx.wg_info.1.len() - 1);
                         }
                         VpnSelection::Filter => {
                             self.selection.selected_index = 0;
@@ -838,7 +841,10 @@ impl Component for VpnState {
                 }
                 KeyAction::Down => {
                     if selected == &VpnSelection::Files {
-                        self.file_cursor = self.file_cursor.saturating_add(ctx.vpn_cols);
+                        self.file_cursor = self
+                            .file_cursor
+                            .saturating_add(ctx.vpn_cols)
+                            .min(ctx.net_ctx.wg_info.1.len() - 1);
                     } else {
                         self.selection.set(VpnSelection::Files);
                     }

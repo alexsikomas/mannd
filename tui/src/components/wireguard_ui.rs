@@ -4,12 +4,12 @@ use ratatui::{
     layout::{Constraint, Flex, Layout, Margin, Rect},
     style::{Style, Stylize},
     text::Line,
-    widgets::{Block, Borders, Widget},
+    widgets::{self, Block, Borders, Widget},
 };
 
 use crate::{
     state::{VpnSelection, VpnState},
-    ui::{THEME, Theme},
+    ui::{Theme, THEME},
 };
 
 // min num of cols, max num of cols, target line amount
@@ -20,7 +20,7 @@ const ROW_H: u16 = 6;
 pub struct WireguardMenu<'a> {
     state: &'a VpnState,
     names: &'a Vec<String>,
-    meta: &'a [WgMeta],
+    meta: Option<&'a Vec<WgMeta>>,
     theme: &'a Theme,
     areas: VpnAreas,
 }
@@ -29,7 +29,7 @@ impl<'a> WireguardMenu<'a> {
     pub fn new(
         state: &'a VpnState,
         names: &'a Vec<String>,
-        meta: &'a [WgMeta],
+        meta: Option<&'a Vec<WgMeta>>,
         areas: VpnAreas,
     ) -> Option<Self> {
         let theme: &Theme = match THEME.get() {
@@ -55,65 +55,70 @@ impl<'a> Widget for WireguardMenu<'a> {
         Self: Sized,
     {
         self.render_main_block(self.areas.outer, buf);
-
-        // FIX: UI logic shouldn't concern itself with this
-        let item_count = match self.names.len().cmp(&self.meta.len()) {
-            std::cmp::Ordering::Equal => self.names.len(),
-            std::cmp::Ordering::Less => {
-                tracing::warn!("Wireguard names & meta are not the same length");
-                self.names.len()
-            }
-            std::cmp::Ordering::Greater => {
-                tracing::warn!("Wireguard names & meta are not the same length");
-                self.meta.len()
-            }
-        };
-        if item_count <= 0 {
-            return;
-        }
-
         self.render_option_menu(self.areas.select, buf);
 
-        // rows displayable
-        let rows = (self.areas.vpn.height / ROW_H) as usize;
-        if rows <= 0 {
-            tracing::error!("Not enough room to display a single row...");
-            return;
-        }
+        match self.meta {
+            Some(meta) => {
+                let item_count = match self.names.len().cmp(&meta.len()) {
+                    std::cmp::Ordering::Equal => self.names.len(),
+                    std::cmp::Ordering::Less => {
+                        tracing::warn!("Wireguard names & meta are not the same length");
+                        self.names.len()
+                    }
+                    std::cmp::Ordering::Greater => {
+                        tracing::warn!("Wireguard names & meta are not the same length");
+                        meta.len()
+                    }
+                };
+                if item_count <= 0 {
+                    return;
+                }
 
-        let cols = match calc_max_cols(self.areas.vpn) {
-            Some(c) => c,
-            None => {
-                tracing::error!("Not enough room to display a single column...");
-                return;
+                // rows displayable
+                let rows = (self.areas.vpn.height / ROW_H) as usize;
+                if rows <= 0 {
+                    tracing::error!("Not enough room to display a single row...");
+                    return;
+                }
+
+                let cols = match calc_max_cols(self.areas.vpn) {
+                    Some(c) => c,
+                    None => {
+                        tracing::error!("Not enough room to display a single column...");
+                        return;
+                    }
+                };
+
+                let items_per_page = rows * cols;
+                let selected_item = self.state.file_cursor;
+                let current_page = selected_item / items_per_page;
+
+                let mut item_areas: Vec<Rect> = vec![];
+                let rows_layout =
+                    Layout::vertical(vec![Constraint::Percentage(97 / (rows as u16)); rows])
+                        .split(self.areas.vpn);
+
+                for row in rows_layout.into_iter() {
+                    let cols =
+                        Layout::horizontal(vec![Constraint::Percentage(100 / (cols as u16)); cols])
+                            .flex(Flex::Center)
+                            .split(*row);
+
+                    item_areas.append(&mut cols.to_vec());
+                }
+
+                for (mut i, area) in item_areas.iter().enumerate() {
+                    i += items_per_page * current_page;
+                    if i > item_count {
+                        break;
+                    }
+
+                    let is_selected = selected_item == i
+                        && self.state.selection.selected() == Some(&VpnSelection::Files);
+                    self.render_wg_item(&meta, *area, buf, is_selected, i);
+                }
             }
-        };
-
-        let items_per_page = rows * cols;
-        let selected_item = self.state.file_cursor;
-        let current_page = selected_item / items_per_page;
-
-        let mut item_areas: Vec<Rect> = vec![];
-        let rows_layout = Layout::vertical(vec![Constraint::Percentage(97 / (rows as u16)); rows])
-            .split(self.areas.vpn);
-
-        for row in rows_layout.into_iter() {
-            let cols = Layout::horizontal(vec![Constraint::Percentage(100 / (cols as u16)); cols])
-                .flex(Flex::Center)
-                .split(*row);
-
-            item_areas.append(&mut cols.to_vec());
-        }
-
-        for (mut i, area) in item_areas.iter().enumerate() {
-            i += items_per_page * current_page;
-            if i > item_count {
-                break;
-            }
-
-            let is_selected =
-                selected_item == i && self.state.selection.selected() == Some(&VpnSelection::Files);
-            self.render_wg_item(*area, buf, is_selected, i);
+            None => {}
         }
     }
 }
@@ -249,7 +254,14 @@ impl<'a> WireguardMenu<'a> {
         }
     }
 
-    fn render_wg_item(&self, area: Rect, buf: &mut Buffer, is_selected: bool, i: usize) {
+    fn render_wg_item(
+        &self,
+        meta: &Vec<WgMeta>,
+        area: Rect,
+        buf: &mut Buffer,
+        is_selected: bool,
+        i: usize,
+    ) {
         let (border_style, text_style) = self.get_style(is_selected);
         match self.names.get(i) {
             Some(name) => {
@@ -260,7 +272,7 @@ impl<'a> WireguardMenu<'a> {
                     .style(text_style)
                     .title_top(Line::from(format!(" {} ", name)).left_aligned());
 
-                let meta = &self.meta[i];
+                let meta = &meta[i];
                 let mod_area = block.inner(area);
 
                 if meta.country != [0, 0] {
@@ -316,7 +328,11 @@ pub fn calc_max_cols(area: Rect) -> Option<usize> {
             break;
         }
     }
-    if max_cols > 0 { Some(max_cols) } else { None }
+    if max_cols > 0 {
+        Some(max_cols)
+    } else {
+        None
+    }
 }
 
 pub struct VpnAreas {
