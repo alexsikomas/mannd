@@ -71,31 +71,31 @@ pub async fn get_netd_files() -> Result<Vec<String>, ManndError> {
     Ok(files)
 }
 
-// TODO: doesn't this cause an issue if we want to clear vpn state at reboot?
-pub async fn init_virtual_interface(mut ips: Vec<IpAddr>, dns: IpAddr) -> Result<(), ManndError> {
-    // Since virt interface made by netlink we use .network file
-    let path = PathBuf::from(format!("{}/30-mannd.network", NETWORK_FOLDER));
-    let mut file = File::create(&path).await?;
-
-    let match_section = Section::new("Match").set("Name", "wg-mannd");
-    match_section.write(&mut file).await?;
-
-    // route all traffic through wg-mannd
-    let ipv4_route = Section::new("Route").set("Destination", "0.0.0.0/0");
-    ipv4_route.write(&mut file).await?;
-    let ipv6_route = Section::new("Route").set("Destination", "::/0");
-    ipv6_route.write(&mut file).await?;
-
-    let mut network_section = Section::new("Network");
-
-    while let Some(ip) = ips.pop() {
-        network_section = network_section.set("Address", ip.to_string());
-    }
-
-    network_section = network_section.set("DNS", dns.to_string());
-    network_section.write(&mut file).await?;
-    Ok(())
-}
+// likely don't need this
+// pub async fn init_virtual_interface(mut ips: Vec<IpAddr>, dns: IpAddr) -> Result<(), ManndError> {
+//     // Since virt interface made by netlink we use .network file
+//     let path = PathBuf::from(format!("{}/30-mannd.network", NETWORK_FOLDER));
+//     let mut file = File::create(&path).await?;
+//
+//     let match_section = Section::new("Match").set("Name", "wg-mannd");
+//     match_section.write(&mut file).await?;
+//
+//     // route all traffic through wg-mannd
+//     let ipv4_route = Section::new("Route").set("Destination", "0.0.0.0/0");
+//     ipv4_route.write(&mut file).await?;
+//     let ipv6_route = Section::new("Route").set("Destination", "::/0");
+//     ipv6_route.write(&mut file).await?;
+//
+//     let mut network_section = Section::new("Network");
+//
+//     while let Some(ip) = ips.pop() {
+//         network_section = network_section.set("Address", ip.to_string());
+//     }
+//
+//     network_section = network_section.set("DNS", dns.to_string());
+//     network_section.write(&mut file).await?;
+//     Ok(())
+// }
 
 mod tests {
     use super::*;
@@ -107,13 +107,13 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_init_virt_interface() -> Result<(), ManndError> {
-        init_virtual_interface(
-            vec![IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))],
-            IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
-        )
-        .await?;
-        Ok(())
-    }
+    // #[tokio::test]
+    // async fn test_init_virt_interface() -> Result<(), ManndError> {
+    //     init_virtual_interface(
+    //         vec![IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))],
+    //         IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
+    //     )
+    //     .await?;
+    //     Ok(())
+    // }
 }

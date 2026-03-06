@@ -1,16 +1,19 @@
-//! Wireguard creates an interface called [`INTERFACE`] this
-//! is dropped at reboot
-//!
-//! No persistance of VPN state after boot and it must be
-//! re-initialised each time.
+//! Order in which wireguard is enabled:
+//! Create wg virt interface -> assign vpn ip ->
+//! link iface to conf file -> bring iface up ->
+//! route all traffic through ip
 
-use futures::StreamExt;
+use crate::{
+    error::ManndError,
+    ini_parse::IniConfig,
+    store::WgMeta,
+    utils::{get_index, str_to_ip},
+};
 use neli::{
     consts::{
-        nl::{NlTypeWrapper, NlmF, Nlmsg},
+        nl::{NlTypeWrapper, NlmF},
         rtnl::{Arphrd, Ifa, Iff, Ifla, IflaInfo, RtAddrFamily, Rta, Rtm},
     },
-    err::Nlmsgerr,
     nl::{NlPayload, NlmsghdrBuilder},
     router::asynchronous::NlRouter,
     rtnl::{Ifaddrmsg, IfaddrmsgBuilder, Ifinfomsg, IfinfomsgBuilder, RtattrBuilder, RtmsgBuilder},
@@ -20,24 +23,16 @@ use neli::{
 };
 use redb::Database;
 use std::{
+    collections::BTreeMap,
     fmt::Debug,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     path::PathBuf,
-};
-use tokio::{process::Command, runtime::Handle};
-use tracing::info;
-
-use crate::{
-    error::{ManndError, NeliError},
-    ini_parse::IniConfig,
-    utils::{get_index, str_to_ip},
-    wireguard::store::WgStore,
+    process::Command,
 };
 
 const INTERFACE: &str = "wg-mannd";
 
 pub struct Wireguard {
-    pub store: WgStore,
     router: NlRouter,
     index: u32,
 }
@@ -88,18 +83,8 @@ impl Wireguard {
             .await?;
 
         let index = get_index(INTERFACE).await?;
-        info!("THE INDEX IS: {index}");
 
-        let store = match db {
-            Some(tmp) => WgStore::init_from_db(tmp),
-            None => WgStore::init()?,
-        };
-
-        let s = Self {
-            router,
-            store,
-            index,
-        };
+        let s = Self { router, index };
 
         Self::set_state(&s, false).await?;
 
@@ -107,7 +92,7 @@ impl Wireguard {
     }
 
     pub fn connect(&self, path: PathBuf) -> Result<(), ManndError> {
-        let conf = IniConfig::new(path)?;
+        let conf = IniConfig::new(path.clone())?;
 
         // get ips, possibly multiple split on ,
         let mut ips: Vec<IpAddr> = vec![];
@@ -123,7 +108,13 @@ impl Wireguard {
             },
             None => return Err(ManndError::ConfigSectionNotFound("Interface".to_string())),
         };
-        info!("IPS: {:?}", ips);
+
+        Self::set_conf(path)?;
+        Ok(())
+    }
+
+    pub async fn disconnect(&self) -> Result<(), ManndError> {
+        self.delete_interface().await?;
         Ok(())
     }
 }
@@ -170,6 +161,26 @@ impl Wireguard {
         Ok(false)
     }
 
+    /// `wg` util can't understand full .conf file so needs pruning
+    fn prune_write_conf(path: &str) -> Result<String, ManndError> {
+        let mut filter: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        filter.insert(
+            "Interface".into(),
+            vec!["PrivateKey".into(), "ListenPort".into()],
+        );
+        filter.insert(
+            "Peer".into(),
+            vec!["PublicKey".into(), "Endpoint".into(), "AllowedIPs".into()],
+        );
+
+        let conf = IniConfig::new(path.into())?;
+        let conf = conf.get_partial(filter)?;
+
+        let write_path = format!("{}.mannd.tmp", path);
+        conf.write_file(Some(write_path.clone().into()))?;
+        Ok(write_path)
+    }
+
     async fn delete_interface(&self) -> Result<(), ManndError> {
         let mut attrs = RtBuffer::new();
         attrs.push(
@@ -197,11 +208,11 @@ impl Wireguard {
         Ok(())
     }
 
-    async fn set_conf(path: &'static str) -> Result<(), ManndError> {
-        let _ = Command::new("wg")
-            .args(vec!["setconf", INTERFACE, path])
-            .output()
-            .await;
+    fn set_conf(path: impl Into<PathBuf>) -> Result<(), ManndError> {
+        let conf_path = Self::prune_write_conf(path.into().to_str().unwrap())?;
+        Command::new("wg")
+            .args(vec!["setconf", INTERFACE, &conf_path])
+            .output()?;
 
         Ok(())
     }
@@ -336,48 +347,43 @@ impl Wireguard {
     /// Applies firewall mark for port 51820 to it's outgoing
     /// packets
     async fn add_wg_fwmark(&self) -> Result<(), ManndError> {
-        let command = Command::new("wg")
+        Command::new("wg")
             .args(vec!["set", INTERFACE, "fwmark", "51820"])
-            .output()
-            .await?;
+            .output()?;
         Ok(())
     }
 
     async fn add_ip_fwmark(&self) -> Result<(), ManndError> {
-        let _ = Command::new("sudo")
+        Command::new("sudo")
             .args(vec![
                 "ip", "-6", "rule", "del", "not", "fwmark", "51820", "table", "51820",
             ])
-            .output()
-            .await;
+            .output()?;
 
-        let _ = Command::new("sudo")
+        Command::new("sudo")
             .args(vec![
                 "ip", "-6", "rule", "add", "not", "fwmark", "51820", "table", "51820",
             ])
-            .output()
-            .await?;
+            .output()?;
 
-        let _ = Command::new("sudo")
+        Command::new("sudo")
             .args(vec![
                 "ip", "-4", "rule", "del", "not", "fwmark", "51820", "table", "51820",
             ])
-            .output()
-            .await;
+            .output()?;
 
-        let _ = Command::new("sudo")
+        Command::new("sudo")
             .args(vec![
                 "ip", "-4", "rule", "add", "not", "fwmark", "51820", "table", "51820",
             ])
-            .output()
-            .await?;
+            .output()?;
 
         Ok(())
     }
 
     async fn prevent_default_route(&self) -> Result<(), ManndError> {
         // neli also doesn't implement FRA_SUPPRESS_PREFIXLEN
-        let _ = Command::new("sudo")
+        Command::new("sudo")
             .args(vec![
                 "ip",
                 "-6",
@@ -388,10 +394,9 @@ impl Wireguard {
                 "suppress_prefixlength",
                 "0",
             ])
-            .output()
-            .await;
+            .output()?;
 
-        let _ = Command::new("sudo")
+        Command::new("sudo")
             .args(vec![
                 "ip",
                 "-6",
@@ -402,10 +407,9 @@ impl Wireguard {
                 "suppress_prefixlength",
                 "0",
             ])
-            .output()
-            .await?;
+            .output()?;
 
-        let _ = Command::new("sudo")
+        Command::new("sudo")
             .args(vec![
                 "ip",
                 "-4",
@@ -416,10 +420,9 @@ impl Wireguard {
                 "suppress_prefixlength",
                 "0",
             ])
-            .output()
-            .await;
+            .output()?;
 
-        let _ = Command::new("sudo")
+        Command::new("sudo")
             .args(vec![
                 "ip",
                 "-4",
@@ -430,8 +433,7 @@ impl Wireguard {
                 "suppress_prefixlength",
                 "0",
             ])
-            .output()
-            .await?;
+            .output()?;
 
         Ok(())
     }
@@ -517,14 +519,14 @@ impl Debug for Wireguard {
 
 // tests
 mod tests {
-    use crate::utils::NamedTempFile;
+    use tempfile::NamedTempFile;
 
     use super::*;
 
     #[tokio::test]
     async fn wg_intergration_test() -> Result<(), ManndError> {
         let tmp = NamedTempFile::new().unwrap();
-        let db = Database::create(tmp.path.clone()).unwrap();
+        let db = Database::create(tmp.path()).unwrap();
 
         let wg = Wireguard::start_interface(Some(db)).await?;
         wg.set_addr(vec![

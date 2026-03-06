@@ -1,11 +1,12 @@
 use std::{
-    collections::BTreeMap,
-    fs::read_to_string,
-    io::{BufWriter, Write},
-    path::PathBuf,
+    collections::{BTreeMap, HashSet},
+    fs::{File, read_to_string},
+    io::{self, BufWriter, Write},
+    path::{Path, PathBuf},
 };
 
-use crate::{error::ManndError, utils::NamedTempFile};
+use crate::error::ManndError;
+use tempfile::NamedTempFile;
 
 pub struct IniConfig {
     pub file_path: PathBuf,
@@ -67,12 +68,67 @@ impl IniConfig {
         Ok(())
     }
 
-    pub fn write_file(&self) -> Result<(), ManndError> {
-        let tmp_file = NamedTempFile::new()?;
-        let mut writer = BufWriter::new(&tmp_file.file);
+    /// Returns an IniConfig with only the provided sections and fields
+    /// TODO: Performance
+    pub fn get_partial(&self, filter: BTreeMap<String, Vec<String>>) -> Result<Self, ManndError> {
+        let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+        for section in filter.keys() {
+            let section_fields = self
+                .sections
+                .get(section)
+                .ok_or_else(|| ManndError::ConfigSectionNotFound(format!("{section}")))?;
 
+            let mut put_fields: BTreeMap<String, String> = BTreeMap::new();
+
+            for filter_field in filter.get(section).unwrap() {
+                let field_val = section_fields
+                    .get(filter_field)
+                    .ok_or_else(|| ManndError::ConfigSectionNotFound(format!("{section}")))?;
+                put_fields.insert(filter_field.clone(), field_val.clone());
+            }
+            sections.insert(section.clone(), put_fields);
+        }
+
+        Ok(IniConfig {
+            file_path: self.file_path.clone(),
+            sections,
+        })
+    }
+
+    /// Atomic overwrite
+    pub fn overwrite(&self) -> Result<(), ManndError> {
+        let dir = Path::new(&self.file_path)
+            .parent()
+            .unwrap_or_else(|| ".".as_ref());
+
+        let mut temp = NamedTempFile::new_in(dir)?;
+        self.write_to(&mut temp)?;
+        temp.as_file().sync_all()?;
+        let _ = temp.persist(self.file_path.clone());
+
+        File::open(dir)?.sync_all()?;
+
+        Ok(())
+    }
+
+    // writes a file to a provided location or a temporary location if none provided
+    pub fn write_file(&self, file_path: Option<PathBuf>) -> Result<(), ManndError> {
+        let file = match file_path {
+            Some(path) => &File::open(path)?,
+            None => &File::open(NamedTempFile::new()?.path())?,
+        };
+
+        let mut writer = BufWriter::new(file);
+        self.write_to(&mut writer)?;
+
+        Ok(())
+    }
+
+    fn write_to<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         for (section, keys) in &self.sections {
-            writeln!(writer, "[{}]", section)?;
+            if !section.is_empty() {
+                writeln!(writer, "[{}]", section)?;
+            }
 
             for (key, value) in keys {
                 writeln!(writer, "{}={}", key, value)?;
@@ -81,7 +137,6 @@ impl IniConfig {
         }
 
         writer.flush()?;
-
         Ok(())
     }
 }

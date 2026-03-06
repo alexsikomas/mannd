@@ -1,4 +1,4 @@
-use com::wireguard::store::WgMeta;
+use com::store::WgMeta;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Flex, Layout, Margin, Rect},
@@ -6,10 +6,11 @@ use ratatui::{
     text::Line,
     widgets::{self, Block, Borders, Widget},
 };
+use tracing::info;
 
 use crate::{
     state::{VpnSelection, VpnState},
-    ui::{Theme, THEME},
+    ui::{THEME, Theme},
 };
 
 // min num of cols, max num of cols, target line amount
@@ -331,11 +332,7 @@ pub fn calc_max_cols(area: Rect) -> Option<usize> {
             break;
         }
     }
-    if max_cols > 0 {
-        Some(max_cols)
-    } else {
-        None
-    }
+    if max_cols > 0 { Some(max_cols) } else { None }
 }
 
 pub struct VpnAreas {

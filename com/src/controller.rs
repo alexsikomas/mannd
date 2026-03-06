@@ -8,8 +8,9 @@ use crate::{
         network::{ApConnectInfo, Credentials},
         signals::SignalUpdate,
     },
+    store::{ManndStore, WgMeta},
     systemd::systemctl::is_service_active,
-    wireguard::{network::Wireguard, store::WgMeta},
+    wireguard::network::Wireguard,
     wireless::{
         agent::{AgentState, IwdAgent},
         common::{AccessPoint, Security},
@@ -39,6 +40,7 @@ pub struct Controller {
     pub wifi: Option<WirelessAdapter>,
     connection: Connection,
     wg: Option<Wireguard>,
+    store: ManndStore,
 }
 
 // Initialisations
@@ -49,6 +51,7 @@ impl Controller {
             wifi: None,
             connection,
             wg: None,
+            store: ManndStore::init()?,
         })
     }
 
@@ -120,8 +123,8 @@ impl Controller {
     pub fn update_wg(&self) -> Result<(Vec<String>, Vec<WgMeta>), ManndError> {
         match &self.wg {
             Some(wg) => {
-                wg.store.update_files()?;
-                Ok(wg.store.get_ordered_files()?)
+                self.store.update_wg_files()?;
+                Ok(self.store.get_ordered_wg_files()?)
             }
 
             _ => Err(ManndError::WgAccess),
@@ -204,7 +207,7 @@ impl Controller {
         Ok(())
     }
 
-    pub async fn disconenct(&self) -> Result<(), ManndError> {
+    pub async fn disconenct_network(&self) -> Result<(), ManndError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 iwd.disconnect().await?;
@@ -229,6 +232,17 @@ impl Controller {
             Some(WirelessAdapter::Wpa(wpa)) => return wpa.remove_network(ssid, security).await,
             None => {}
         }
+        Ok(())
+    }
+
+    pub async fn disconnect_wg(&mut self) -> Result<(), ManndError> {
+        match &mut self.wg {
+            Some(wg) => {
+                wg.disconnect().await?;
+                self.wg = None;
+            }
+            _ => {}
+        };
         Ok(())
     }
 
@@ -289,6 +303,28 @@ impl Controller {
             Some(WirelessAdapter::Wpa(_)) => Some(DaemonType::Wpa),
             _ => None,
         }
+    }
+
+    pub fn is_wg_connected(&self) -> bool {
+        match self.wg {
+            Some(_) => true,
+            None => false,
+        }
+    }
+}
+
+impl Controller {
+    // wpa only
+    pub async fn wpa_create_interface(&mut self, ifname: String) -> Result<(), ManndError> {
+        if let Some(WirelessAdapter::Wpa(wpa)) = &mut self.wifi {
+            wpa.create_interface(ifname).await?;
+
+            return Ok(());
+        }
+
+        Err(ManndError::OperationFailed(
+            "Tried to use wpa only method while iwd active.".into(),
+        ))
     }
 }
 

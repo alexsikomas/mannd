@@ -1,24 +1,29 @@
 use com::wireless::{common::AccessPoint, wpa_supplicant::WpaInterface};
 use ratatui::{
     layout::{Constraint, Flex, Layout, Margin, Rect, Spacing},
-    style::{Style, Stylize},
+    style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, Paragraph, Widget, Wrap},
 };
 
 use crate::{
     state::WpaInterfacePrompt,
-    ui::{Theme, THEME},
+    ui::{THEME, Theme},
 };
 
 pub struct WpaInterfaceUi<'a> {
     info: &'a WpaInterfacePrompt,
     ifaces: &'a Vec<WpaInterface>,
+    persist: bool,
     theme: &'a Theme,
 }
 
 impl<'a> WpaInterfaceUi<'a> {
-    pub fn new(info: &'a WpaInterfacePrompt, ifaces: &'a Vec<WpaInterface>) -> Option<Self> {
+    pub fn new(
+        info: &'a WpaInterfacePrompt,
+        persist: bool,
+        ifaces: &'a Vec<WpaInterface>,
+    ) -> Option<Self> {
         let theme: &Theme = match THEME.get() {
             Some(t) => t,
             None => {
@@ -29,6 +34,7 @@ impl<'a> WpaInterfaceUi<'a> {
         Some(Self {
             info,
             ifaces,
+            persist,
             theme,
         })
     }
@@ -66,11 +72,46 @@ impl<'a> Widget for WpaInterfaceUi<'a> {
 
         border_block.render(areas.outer, buf);
 
-        let info_text = "Selecting an interface here will add it to your wpa_supplicant service file and will work at startup.\nPress Enter to select and ESC to return";
+        // info
+        let info_text = "Selecting an interface either adds it to your wpa_supplicant configuration temporarily or permanently (will work after a reboot). For permanent changes enable persisting changes.";
         let info = Paragraph::new(info_text)
             .style(theme.accent.color())
             .alignment(ratatui::layout::Alignment::Center)
             .wrap(Wrap { trim: true });
+
+        info.render(areas.info, buf);
+
+        // choice
+        let choice_text = "Apply and persist changes?";
+        let cols = Layout::horizontal([
+            Constraint::Length(choice_text.len() as u16),
+            Constraint::Length(1),
+            Constraint::Length(3),
+        ])
+        .flex(Flex::Center)
+        .split(areas.choice);
+
+        let (choice_text_col, choice_text_bold) = if self.info.on_choice {
+            (theme.primary.color(), Modifier::BOLD)
+        } else {
+            (theme.muted.color(), Modifier::empty())
+        };
+
+        Paragraph::new(choice_text)
+            .style(
+                Style::new()
+                    .fg(choice_text_col)
+                    .add_modifier(choice_text_bold),
+            )
+            .render(cols[0], buf);
+
+        Paragraph::new(if self.persist { "Yes" } else { "No" })
+            .style(Style::new().fg(if self.info.on_choice {
+                theme.accent.color()
+            } else {
+                theme.muted.color()
+            }))
+            .render(cols[2], buf);
 
         let layouts = Layout::vertical(
             self.ifaces
@@ -84,6 +125,7 @@ impl<'a> Widget for WpaInterfaceUi<'a> {
                 .split(areas.list)[0],
         );
 
+        // interfaces
         for (i, iface) in self.ifaces.iter().enumerate() {
             // for now skip later be able to manage it
             if let WpaInterface::Managed(_) = iface {
@@ -93,7 +135,7 @@ impl<'a> Widget for WpaInterfaceUi<'a> {
             let iface_string: String = iface.into();
             let mut iface_text = Line::from(iface_string);
 
-            if i == self.info.interface_cursor {
+            if i == self.info.interface_cursor && !self.info.on_choice {
                 iface_text.style = Style::new()
                     .bg(theme.secondary.color())
                     .fg(theme.background.color())
@@ -106,8 +148,6 @@ impl<'a> Widget for WpaInterfaceUi<'a> {
 
             iface_text.render(layouts[i], buf);
         }
-
-        info.render(areas.info, buf);
     }
 }
 
@@ -124,14 +164,18 @@ fn build_areas(area: Rect) -> InterfaceAreas {
         .border_type(ratatui::widgets::BorderType::Rounded);
     let inner_area = border_block.inner(outer_area);
 
-    let [info_area, list_area] =
-        Layout::vertical([Constraint::Percentage(20), Constraint::Percentage(70)])
-            .flex(Flex::Center)
-            .areas(inner_area);
+    let [info_area, choice_area, list_area] = Layout::vertical([
+        Constraint::Percentage(20),
+        Constraint::Length(3),
+        Constraint::Percentage(60),
+    ])
+    .flex(Flex::Center)
+    .areas(inner_area);
 
     InterfaceAreas {
         outer: outer_area,
         inner: inner_area,
+        choice: choice_area,
         info: info_area,
         list: list_area,
     }
@@ -140,6 +184,7 @@ fn build_areas(area: Rect) -> InterfaceAreas {
 pub struct InterfaceAreas {
     outer: Rect,
     inner: Rect,
+    choice: Rect,
     info: Rect,
     list: Rect,
 }
