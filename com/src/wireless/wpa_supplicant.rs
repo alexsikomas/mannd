@@ -13,7 +13,8 @@
 //! you'll get an error
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, btree_map::Entry},
+    fs::{File, OpenOptions},
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -50,7 +51,12 @@ pub struct WpaSupplicant {
     // at a time
     active_interface: OwnedObjectPath,
     // if false won't edit .service files
-    overwrite_service: bool,
+    // BUG: persist is defined in two
+    // places (here and app_ctx), should be
+    // in sync but find better way to do this
+    persist: bool,
+    // has prepare_wpa_persist been called?
+    persist_files_prepared: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,6 +86,7 @@ pub struct WpaBss {
     rates: Option<Vec<u32>>,
 }
 
+// Public functions
 impl WpaSupplicant {
     pub async fn new(conn: Connection) -> Result<Self, ManndError> {
         let service = String::from("fi.w1.wpa_supplicant1");
@@ -101,7 +108,8 @@ impl WpaSupplicant {
             service,
             path,
             active_interface,
-            overwrite_service: false,
+            persist: false,
+            persist_files_prepared: false,
         })
     }
 
@@ -139,29 +147,6 @@ impl WpaSupplicant {
             .for_each(|v| res.push(WpaInterface::Unmanaged(v.clone())));
 
         Ok(res)
-    }
-
-    pub async fn create_interface(&mut self, ifname: String) -> Result<(), ManndError> {
-        let mut body: HashMap<String, OwnedValue> = HashMap::new();
-        body.insert("Ifname".to_string(), Value::new(ifname).try_to_owned()?);
-
-        // call create interface
-        let proxy = Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            self.path.clone(),
-            self.service.clone(),
-        )
-        .await?;
-
-        let interface_path: OwnedObjectPath = proxy.call("CreateInterface", &body).await?;
-        info!("Interface path: {:?}", interface_path);
-
-        // add args to wpa supplicant service
-
-        self.active_interface = interface_path.clone();
-
-        Ok(())
     }
 
     pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ManndError> {
@@ -325,87 +310,77 @@ impl WpaSupplicant {
         Ok(aps)
     }
 
-    /// Used for known networks
-    pub async fn get_network_info(&self, net_path: OwnedObjectPath) -> Result<WpaBss, ManndError> {
-        let proxy = Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            net_path,
-            "fi.w1.wpa_supplicant1.Network",
-        )
-        .await?;
-        // the bssid can only be found via .Interface path
-
-        let mut properties =
-            get_prop_from_proxy::<HashMap<String, OwnedValue>>(&proxy, "Properties").await?;
-
-        let ssid = properties
-            .remove("ssid")
-            .unwrap_or(Value::new("Unknown").try_into_owned()?);
-        let ssid = ssid.to_string();
-
-        Ok(WpaBss {
-            ssid,
-            bssid: None,
-            security: None,
-            freq: None,
-            rates: None,
-        })
+    pub fn toggle_persist(&mut self) {
+        self.persist = !self.persist;
     }
+}
 
-    /// Used for networks which are nearby by may
-    /// not have been connected to yet
-    async fn get_bss_info(&self, bss_path: OwnedObjectPath) -> Result<WpaBss, ManndError> {
-        let proxy = Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            bss_path,
-            "fi.w1.wpa_supplicant1.BSS",
-        )
-        .await?;
+// functions which need to read/write data
+impl WpaSupplicant {
+    /// Modifies the wpa_supplicant systemd service as needed
+    /// to allow for changes to persist through an env file
+    async fn prepare_wpa_persist(&mut self) -> Result<(), ManndError> {
+        let service_path = PathBuf::from(get_service_path(&self.conn, "wpa_supplicant").await);
+        let Ok(mut conf) = IniConfig::new(service_path) else {
+            return Err(ManndError::OperationFailed(
+                "Could not find wpa_supplicant file or parse as INI".into(),
+            ));
+        };
 
-        let bssid = Some(get_prop_from_proxy::<Vec<u8>>(&proxy, "BSSID").await?);
-        let ssid_vec = get_prop_from_proxy::<Vec<u8>>(&proxy, "SSID").await?;
-        let ssid = String::from_utf8_lossy(&ssid_vec).to_string();
+        let Some(service_sect) = conf.sections.get_mut(&"Service".to_string()) else {
+            return Err(ManndError::ConfigSectionNotFound(
+                "In wpa_supplicant service file, [Service] could not be located".into(),
+            ));
+        };
 
-        let freq = Some(get_prop_from_proxy::<u16>(&proxy, "Frequency").await?);
-        let rates = Some(get_prop_from_proxy::<Vec<u32>>(&proxy, "Rates").await?);
+        let env_file = Self::get_env_file();
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&env_file)?;
 
-        let rsn = get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "RSN").await?;
-        let security = Some(Self::get_security(rsn));
+        let env_as_str = env_file.into_os_string().into_string().unwrap();
 
-        Ok(WpaBss {
-            ssid,
-            bssid,
-            security,
-            freq,
-            rates,
-        })
-    }
-
-    // Known network, only returns SSID
-    async fn get_known_info(&self, net_path: &OwnedObjectPath) -> Result<String, ManndError> {
-        let proxy = Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            net_path,
-            "fi.w1.wpa_supplicant1.Network",
-        )
-        .await?;
-        let properties =
-            get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "Properties").await?;
-
-        if let Some(ssid) = properties.get("ssid") {
-            match ssid {
-                Value::Str(s) => {
-                    let clean = s.as_str().trim_matches('"').to_string();
-                    return Ok(clean);
+        match service_sect.entry("EnvironmentFile".into()) {
+            Entry::Occupied(mut entry) => {
+                if !entry.get().to_lowercase().contains(&env_as_str) {
+                    entry.insert(env_as_str);
+                    conf.overwrite()?;
                 }
-                _ => return Err(ManndError::NetworkNotFound),
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(env_as_str);
+                conf.overwrite()?;
+            }
+        };
+
+        self.persist_files_prepared = true;
+        Ok(())
+    }
+
+    pub async fn create_interface(&mut self, ifname: String) -> Result<(), ManndError> {
+        let mut body: HashMap<String, OwnedValue> = HashMap::new();
+        body.insert("Ifname".to_string(), Value::new(ifname).try_to_owned()?);
+
+        // call create interface
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            self.service.clone(),
+        )
+        .await?;
+
+        if self.persist {
+            if !self.persist_files_prepared {
+                self.prepare_wpa_persist().await?;
             }
         } else {
-            return Err(ManndError::NetworkNotFound);
-        };
+            let interface_path: OwnedObjectPath = proxy.call("CreateInterface", &body).await?;
+            self.active_interface = interface_path.clone();
+        }
+
+        Ok(())
     }
 }
 
@@ -576,7 +551,36 @@ impl WpaSupplicant {
     }
 
     fn get_env_file() -> PathBuf {
-        STATE_HOME.0.join("ManndEnvFile")
+        STATE_HOME.0.join("ManndWpaEnv")
+    }
+
+    // check if the wpa_supplicant service file
+    // has EnvironmentFile='...' set to the mannd
+    // environment file
+    async fn check_service_for_env(&self) -> bool {
+        let service_path = PathBuf::from(get_service_path(&self.conn, "wpa_supplicant").await);
+        let Ok(mut conf) = IniConfig::new(service_path) else {
+            return false;
+        };
+        let Some(service_sect) = conf.sections.get_mut(&"Service".to_string()) else {
+            return false;
+        };
+        let env_file = Self::get_env_file();
+        match service_sect.get("EnvironmentFile") {
+            // file already has env file
+            Some(val) => {
+                if val.to_lowercase().contains("mannd") {
+                    match File::open(&env_file) {
+                        Ok(_) => {
+                            return true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            None => {}
+        };
+        false
     }
 
     async fn should_edit_service(&self) -> bool {
@@ -603,8 +607,91 @@ impl WpaSupplicant {
             "EnvironmentFile".to_string(),
             env_file.into_os_string().into_string().unwrap(),
         );
-        let _ = conf.write_file();
+        let _ = conf.write_file(None);
         true
+    }
+
+    /// Used for networks which are nearby by may
+    /// not have been connected to yet
+    async fn get_bss_info(&self, bss_path: OwnedObjectPath) -> Result<WpaBss, ManndError> {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            bss_path,
+            "fi.w1.wpa_supplicant1.BSS",
+        )
+        .await?;
+
+        let bssid = Some(get_prop_from_proxy::<Vec<u8>>(&proxy, "BSSID").await?);
+        let ssid_vec = get_prop_from_proxy::<Vec<u8>>(&proxy, "SSID").await?;
+        let ssid = String::from_utf8_lossy(&ssid_vec).to_string();
+
+        let freq = Some(get_prop_from_proxy::<u16>(&proxy, "Frequency").await?);
+        let rates = Some(get_prop_from_proxy::<Vec<u32>>(&proxy, "Rates").await?);
+
+        let rsn = get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "RSN").await?;
+        let security = Some(Self::get_security(rsn));
+
+        Ok(WpaBss {
+            ssid,
+            bssid,
+            security,
+            freq,
+            rates,
+        })
+    }
+
+    // Known network, only returns SSID
+    async fn get_known_info(&self, net_path: &OwnedObjectPath) -> Result<String, ManndError> {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            net_path,
+            "fi.w1.wpa_supplicant1.Network",
+        )
+        .await?;
+        let properties =
+            get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "Properties").await?;
+
+        if let Some(ssid) = properties.get("ssid") {
+            match ssid {
+                Value::Str(s) => {
+                    let clean = s.as_str().trim_matches('"').to_string();
+                    return Ok(clean);
+                }
+                _ => return Err(ManndError::NetworkNotFound),
+            }
+        } else {
+            return Err(ManndError::NetworkNotFound);
+        };
+    }
+
+    /// Used for known networks
+    async fn get_network_info(&self, net_path: OwnedObjectPath) -> Result<WpaBss, ManndError> {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            net_path,
+            "fi.w1.wpa_supplicant1.Network",
+        )
+        .await?;
+        // the bssid can only be found via .Interface path
+
+        let mut properties =
+            get_prop_from_proxy::<HashMap<String, OwnedValue>>(&proxy, "Properties").await?;
+
+        let ssid = properties
+            .remove("ssid")
+            .unwrap_or(Value::new("Unknown").try_into_owned()?);
+        let ssid = ssid.to_string();
+
+        Ok(WpaBss {
+            ssid,
+            bssid: None,
+            security: None,
+            freq: None,
+            rates: None,
+        })
     }
 }
 

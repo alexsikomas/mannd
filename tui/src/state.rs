@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 use std::{fmt::Debug, usize};
 
 use com::controller::DaemonType;
-use com::state::network::{Capability, NetCtxFlags, NetworkAction, NetworkContext};
+use com::state::network::{Capability, NetCtx, NetCtxFlags, NetworkAction};
 use com::{
     state::network::ApConnectInfoBuilder,
     wireless::common::{AccessPoint, NetworkFlags, Security},
@@ -36,7 +36,7 @@ pub enum StateCommand {
 }
 
 pub struct AppContext<'a> {
-    pub net_ctx: &'a NetworkContext,
+    pub net_ctx: &'a NetCtx,
     pub capabilities: &'a Capability,
     pub vpn_cols: usize,
 }
@@ -52,7 +52,7 @@ pub struct UiState {
 
 impl<'a> AppContext<'a> {
     pub fn create(
-        net_ctx: &'a NetworkContext,
+        net_ctx: &'a NetCtx,
         capabilities: &'a Capability,
         // one-to-one map
         vpn_cols: usize,
@@ -164,9 +164,9 @@ impl UiState {
                         View::Wifi(_) => actions.push(AppAction::Network(
                             NetworkAction::GetNetworkContext(NetCtxFlags::Network),
                         )),
-                        View::Vpn(_) => {
-                            actions.push(AppAction::Network(NetworkAction::InitWireguard))
-                        }
+                        // View::Vpn(_) => {
+                        //     actions.push(AppAction::Network(NetworkAction::))
+                        // }
                         _ => {}
                     };
                 }
@@ -786,16 +786,17 @@ impl Component for VpnState {
                 KeyAction::Enter => match selected {
                     VpnSelection::Toggle => {
                         return StateResult::Command(StateCommand::NetworkAction(
-                            NetworkAction::DisableWireguard,
+                            NetworkAction::ToggleWireguard,
                         ));
                     }
                     VpnSelection::Files => {
                         let mut wg_path = PathBuf::from("/etc/wireguard");
-                        wg_path.push(format!("{}", &ctx.net_ctx.wg_info.0[self.file_cursor]));
-                        info!("PATH: {:?}", wg_path);
-                        return StateResult::Command(StateCommand::NetworkAction(
-                            NetworkAction::ConnectWireguard(wg_path),
-                        ));
+                        if let Some(data) = ctx.net_ctx.wg_ctx.get_index(self.file_cursor) {
+                            wg_path.push(format!("{}", data.0));
+                            return StateResult::Command(StateCommand::NetworkAction(
+                                NetworkAction::ConnectWireguard(wg_path),
+                            ));
+                        }
                     }
                     _ => {}
                 },
@@ -816,7 +817,7 @@ impl Component for VpnState {
                             self.file_cursor = self
                                 .file_cursor
                                 .saturating_add(1)
-                                .min(ctx.net_ctx.wg_info.1.len() - 1);
+                                .min(ctx.net_ctx.wg_ctx.len() - 1);
                         }
                         VpnSelection::Filter => {
                             self.selection.selected_index = 0;
@@ -831,7 +832,7 @@ impl Component for VpnState {
                         self.file_cursor = self
                             .file_cursor
                             .saturating_add(ctx.vpn_cols)
-                            .min(ctx.net_ctx.wg_info.1.len() - 1);
+                            .min(ctx.net_ctx.wg_ctx.len() - 1);
                     } else {
                         self.selection.set(VpnSelection::Files);
                     }
@@ -878,12 +879,14 @@ impl NetdState {
 #[derive(Debug)]
 pub struct WpaInterfacePrompt {
     pub interface_cursor: usize,
+    pub on_choice: bool,
 }
 
 impl WpaInterfacePrompt {
     fn new() -> Self {
         Self {
             interface_cursor: 0,
+            on_choice: true,
         }
     }
 }
@@ -893,21 +896,38 @@ impl Component for WpaInterfacePrompt {
         if let Some(ifaces) = &ctx.net_ctx.interfaces {
             match key {
                 KeyAction::Enter => {
-                    if let Some(iface) = ifaces.wpa_get(self.interface_cursor) {
+                    if self.on_choice {
                         return StateResult::Command(StateCommand::NetworkAction(
-                            NetworkAction::CreateWpaInterface(iface.into()),
+                            NetworkAction::ToggleWpaPersist,
                         ));
+                    } else {
+                        if let Some(iface) = ifaces.wpa_get(self.interface_cursor) {
+                            return StateResult::Command(StateCommand::NetworkAction(
+                                NetworkAction::CreateWpaInterface(iface.into()),
+                            ));
+                        }
                     }
                 }
                 KeyAction::Up => {
-                    if self.interface_cursor == 0 {
+                    if self.on_choice {
                         self.interface_cursor = ifaces.len() - 1;
+                        self.on_choice = false;
                     } else {
-                        self.interface_cursor -= 1;
+                        if self.interface_cursor == 0 {
+                            self.interface_cursor = 0;
+                            self.on_choice = true;
+                        } else {
+                            self.interface_cursor = self.interface_cursor.saturating_sub(1);
+                        }
                     }
                 }
                 KeyAction::Down => {
-                    self.interface_cursor = { self.interface_cursor + 1 } % ifaces.len();
+                    if self.on_choice {
+                        self.on_choice = false;
+                        self.interface_cursor = 0;
+                    } else {
+                        self.interface_cursor = { self.interface_cursor + 1 } % ifaces.len();
+                    }
                 }
                 _ => {}
             };

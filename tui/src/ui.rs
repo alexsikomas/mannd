@@ -155,17 +155,17 @@ impl UiContext {
             View::Vpn(vpn_state) => {
                 let mut cols: usize = 0;
                 let vpn_areas = WireguardMenu::build_layout_no_render(inner_area, &mut cols);
-                let wg_meta = if ctx.net_ctx.wg_info.2 {
-                    Some(&net_ctx.wg_info.1)
+                let wg_meta = if ctx.net_ctx.wg_ctx.is_on {
+                    Some(&net_ctx.wg_ctx.meta)
                 } else {
                     None
                 };
 
                 if let Some(vpn) = WireguardMenu::new(
                     &vpn_state,
-                    &net_ctx.wg_info.0,
+                    &net_ctx.wg_ctx.names,
                     wg_meta,
-                    ctx.net_ctx.wg_info.2,
+                    ctx.net_ctx.wg_ctx.is_on,
                     vpn_areas,
                 ) {
                     if cols != state.vpn_cols {
@@ -196,9 +196,11 @@ impl UiContext {
                     info!("HERE x1");
                     if let Some(InterfaceTypes::Wpa(wpa_ifaces)) = &net_ctx.interfaces {
                         info!("HERE x2");
-                        if let Some(prompt_instance) = WpaInterfaceUi::new(wpa_prompt, &wpa_ifaces)
-                        {
-                            info!("HERE x3");
+                        if let Some(prompt_instance) = WpaInterfaceUi::new(
+                            wpa_prompt,
+                            ctx.net_ctx.persist_wpa_changes,
+                            &wpa_ifaces,
+                        ) {
                             frame.render_widget(prompt_instance, inner_area);
                         }
                     }

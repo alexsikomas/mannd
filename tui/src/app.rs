@@ -1,5 +1,8 @@
+use std::time::Duration;
+
 use postcard::{from_bytes_cobs, to_stdvec_cobs};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tracing::info;
 
 use crate::{
     state::{AppContext, InfoPrompt, PopupType, PromptState, StateCommand, UiState, View},
@@ -8,11 +11,10 @@ use crate::{
 use com::{
     error::ManndError,
     state::network::{
-        Capability, InterfaceTypes, NetFailure, NetStart, NetSuccess, NetworkAction,
-        NetworkContext, NetworkState,
+        Capability, Failure, InterfaceTypes, NetCtx, NetworkAction, NetworkState, Start, Success,
     },
 };
-use crossterm::event::EventStream;
+use crossterm::event::{EventStream, read};
 use futures::{SinkExt, StreamExt};
 use tokio::{
     net::{
@@ -21,6 +23,7 @@ use tokio::{
     },
     process::Child,
     sync::mpsc::{self, Sender},
+    time::timeout,
 };
 
 pub struct App {
@@ -33,7 +36,7 @@ pub struct AppState {
     redraw: bool,
 
     caps: Capability,
-    net_ctx: NetworkContext,
+    net_ctx: NetCtx,
 }
 
 impl AppState {
@@ -42,7 +45,7 @@ impl AppState {
             should_quit: false,
             redraw: true,
             caps: Capability::default(),
-            net_ctx: NetworkContext::default(),
+            net_ctx: NetCtx::default(),
         }
     }
 }
@@ -139,24 +142,33 @@ async fn init_request(
         .await
         .map_err(|_| ManndError::SocketWrite)?;
 
-    let max_tries = 10;
-    let mut tries = 0;
-    while let Some(frame_res) = reader.next().await {
-        if tries > max_tries {
-            return Err(ManndError::Timeout);
-        }
+    let timeout_duration = Duration::from_secs(5);
 
-        let mut frame = frame_res?;
-        let msg = from_bytes_cobs::<NetworkState>(&mut frame)?;
-        match msg {
-            NetworkState::SetCapabilities(caps) => return Ok(caps),
-            _ => {
-                tries += 1;
+    let read_future = async {
+        let max_tries = 10;
+        let mut tries = 0;
+        while let Some(frame_res) = reader.next().await {
+            if tries > max_tries {
+                return Err(ManndError::Timeout);
+            }
+
+            let mut frame = frame_res?;
+            let msg = from_bytes_cobs::<NetworkState>(&mut frame)?;
+            match msg {
+                NetworkState::SetCapabilities(caps) => return Ok(caps),
+                _ => {
+                    tries += 1;
+                }
             }
         }
-    }
 
-    Err(ManndError::Timeout)
+        Err(ManndError::Timeout)
+    };
+
+    match timeout(timeout_duration, read_future).await {
+        Ok(res) => res,
+        Err(_) => Err(ManndError::Timeout),
+    }
 }
 
 async fn handle_state_update(
@@ -174,9 +186,12 @@ async fn handle_state_update(
                 _ => {}
             }
         }
+        NetworkState::ToggleWpaPersist => {
+            state.net_ctx.persist_wpa_changes = !state.net_ctx.persist_wpa_changes;
+        }
         NetworkState::SetWireguardInfo((names, meta)) => {
-            state.net_ctx.wg_info.0 = names;
-            state.net_ctx.wg_info.1 = meta;
+            state.net_ctx.wg_ctx.names = names;
+            state.net_ctx.wg_ctx.meta = meta;
         }
         NetworkState::SetInterfaces(ifaces) => {
             state.net_ctx.interfaces = Some(InterfaceTypes::Normal(ifaces));
@@ -184,47 +199,60 @@ async fn handle_state_update(
         NetworkState::SetWpaInterfaces(ifaces) => {
             state.net_ctx.interfaces = Some(InterfaceTypes::Wpa(ifaces));
         }
-        NetworkState::Start(started) => return handle_start(ui, started),
-        NetworkState::Success(succeeded) => return handle_success(ui, succeeded),
-        NetworkState::Failed(failure) => return handle_failure(ui, failure),
+        NetworkState::Start(started) => return handle_start(state, ui, started),
+        NetworkState::Success(succeeded) => return handle_success(state, ui, succeeded),
+        NetworkState::Failed(failure) => return handle_failure(state, ui, failure),
         _ => {}
     };
     None
 }
 
-fn handle_start(ui: &mut UiState, started: NetStart) -> Option<StateCommand> {
+fn handle_start(_state: &mut AppState, ui: &mut UiState, started: Start) -> Option<StateCommand> {
     match started {
-        NetStart::Wifi => {
+        Start::Wifi => {
             ui.should_block = true;
             Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
                 "Connecting...".to_string(),
                 PopupType::General,
             ))))
         }
-        NetStart::Scan => Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
+        Start::Scan => Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
             "Scanning...".to_string(),
             PopupType::General,
         )))),
     }
 }
 
-fn handle_success(ui: &mut UiState, succeeded: NetSuccess) -> Option<StateCommand> {
+fn handle_success(
+    state: &mut AppState,
+    ui: &mut UiState,
+    succeeded: Success,
+) -> Option<StateCommand> {
     match succeeded {
-        NetSuccess::Wifi => {
+        Success::Wifi => {
             ui.should_block = false;
             return Some(StateCommand::ClearPrompts);
         }
-        NetSuccess::Scan => {
+        Success::Scan => {
             return Some(StateCommand::ClearPrompts);
         }
-        _ => {}
+        Success::EnableWireguard => {
+            state.net_ctx.wg_ctx.is_on = true;
+        }
+        Success::DisableWireguard => {
+            state.net_ctx.wg_ctx.is_on = false;
+        }
     };
     None
 }
 
-fn handle_failure(ui: &mut UiState, failed: NetFailure) -> Option<StateCommand> {
+fn handle_failure(
+    _state: &mut AppState,
+    ui: &mut UiState,
+    failed: Failure,
+) -> Option<StateCommand> {
     match failed {
-        NetFailure::Wifi(err) => {
+        Failure::Wifi(err) => {
             ui.should_block = false;
             return Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
                 err,

@@ -14,6 +14,7 @@ display_help() {
                         'r' or 'release' creates the release build.
         -c  --com       Compiles and tests the com package in debug mode.
         -i  --install   Installs the TUI.
+        -s  --startup   Enable a startup service
 
     Examples:
         Run the TUI in default (debug) mode:

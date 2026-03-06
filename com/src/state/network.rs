@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::Command};
+use std::{cmp::min, path::PathBuf, process::Command};
 
 use bitflags::bitflags;
 use derive_builder::Builder;
@@ -10,9 +10,10 @@ use crate::{
     controller::{Controller, DaemonType, WirelessAdapter},
     error::ManndError,
     state::signals::{SignalManager, SignalUpdate},
+    store::WgMeta,
     systemd::networkd::get_netd_files,
     utils::list_interfaces,
-    wireguard::{network::Wireguard, store::WgMeta},
+    wireguard::network::Wireguard,
     wireless::{
         common::{AccessPoint, Security},
         wpa_supplicant::WpaInterface,
@@ -75,10 +76,17 @@ impl<'a> NetworkActor<'a> {
                     tracing::error!("{:?}", e)
                 }
             },
-            NetworkAction::InitWireguard => {
-                if let Ok(()) = self.controller.start_wg().await {
-                    self.handle_net_ctx(NetCtxFlags::Wireguard, &mut state_send)
-                        .await?;
+            NetworkAction::ToggleWireguard => {
+                if !self.controller.is_wg_connected() {
+                    if let Ok(()) = self.controller.start_wg().await {
+                        state_send.push(NetworkState::Success(Success::EnableWireguard));
+                        self.handle_net_ctx(NetCtxFlags::Wireguard, &mut state_send)
+                            .await?;
+                    }
+                } else {
+                    if let Ok(()) = self.controller.disconnect_wg().await {
+                        state_send.push(NetworkState::Success(Success::DisableWireguard));
+                    }
                 }
             }
             NetworkAction::GetNetworkContext(flags) => {
@@ -110,20 +118,20 @@ impl<'a> NetworkActor<'a> {
 
         match action {
             NetworkAction::Scan => {
-                state_send.push(NetworkState::Start(NetStart::Scan));
+                state_send.push(NetworkState::Start(Start::Scan));
                 let _ = self.controller.scan(self.signal_tx.clone()).await;
             }
             NetworkAction::Connect(info) => {
-                state_send.push(NetworkState::Start(NetStart::Wifi));
+                state_send.push(NetworkState::Start(Start::Wifi));
 
                 match self.controller.network_connect(info).await {
                     Ok(()) => {
                         info!("Connection to network was successful");
-                        state_send.push(NetworkState::Success(NetSuccess::Wifi));
+                        state_send.push(NetworkState::Success(Success::Wifi));
                     }
                     Err(e) => {
                         tracing::error!("Connection to network was not successful.");
-                        state_send.push(NetworkState::Failed(NetFailure::Wifi(e.to_string())));
+                        state_send.push(NetworkState::Failed(Failure::Wifi(e.to_string())));
                     }
                 }
             }
@@ -143,8 +151,14 @@ impl<'a> NetworkActor<'a> {
                     let _ = wpa.create_interface(ifname).await;
                 }
             }
+            NetworkAction::ToggleWpaPersist => {
+                if let Some(WirelessAdapter::Wpa(wpa)) = &mut self.controller.wifi {
+                    wpa.toggle_persist();
+                    state_send.push(NetworkState::ToggleWpaPersist);
+                }
+            }
             NetworkAction::Disconnect => {
-                if let Ok(()) = self.controller.disconenct().await {
+                if let Ok(()) = self.controller.disconenct_network().await {
                     info!("Disconnected from a network");
                     should_refresh = true;
                 } else {
@@ -173,7 +187,7 @@ impl<'a> NetworkActor<'a> {
         if flags.intersects(NetCtxFlags::Network) {
             if let Ok(aps) = self.controller.get_all_networks().await {
                 state_send.push(NetworkState::SetNetworks(aps));
-                state_send.push(NetworkState::Success(NetSuccess::Scan));
+                state_send.push(NetworkState::Success(Success::Scan));
             }
         }
         let interface_flags =
@@ -191,7 +205,9 @@ impl<'a> NetworkActor<'a> {
                 state_send.push(NetworkState::SetWpaInterfaces(interfaces));
             }
         } else if flags.intersects(NetCtxFlags::InterfacesWpa | NetCtxFlags::Interfaces) {
-            tracing::error!("Tried to send a NetCtxFlag with InterfacesWpa and Interfaces, this is not allowed.");
+            tracing::error!(
+                "Tried to send a NetCtxFlag with InterfacesWpa and Interfaces, this is not allowed."
+            );
         }
 
         if flags.intersects(NetCtxFlags::Wireguard) {
@@ -208,12 +224,41 @@ impl<'a> NetworkActor<'a> {
     }
 }
 
-pub struct NetworkContext {
+pub struct NetCtx {
     pub networks: Vec<AccessPoint>,
     pub interfaces: Option<InterfaceTypes>,
-    // name, metadata, is on?
-    pub wg_info: (Vec<String>, Vec<WgMeta>, bool),
+    pub wg_ctx: WgCtx,
+    pub persist_wpa_changes: bool,
     pub netd_files: Vec<String>,
+}
+
+pub struct WgCtx {
+    pub names: Vec<String>,
+    pub meta: Vec<WgMeta>,
+    pub is_on: bool,
+}
+
+impl WgCtx {
+    fn new() -> Self {
+        Self {
+            names: vec![],
+            meta: vec![],
+            is_on: false,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        min(self.names.len(), self.meta.len())
+    }
+
+    pub fn get_index(&self, index: usize) -> Option<(&String, &WgMeta)> {
+        if let Some(name) = self.names.get(index) {
+            if let Some(meta) = self.meta.get(index) {
+                return Some((name, meta));
+            }
+        }
+        None
+    }
 }
 
 pub enum InterfaceTypes {
@@ -244,12 +289,13 @@ impl InterfaceTypes {
     }
 }
 
-impl Default for NetworkContext {
+impl Default for NetCtx {
     fn default() -> Self {
         Self {
             networks: vec![],
             interfaces: None,
-            wg_info: (vec![], vec![], false),
+            wg_ctx: WgCtx::new(),
+            persist_wpa_changes: false,
             netd_files: vec![],
         }
     }
@@ -274,13 +320,15 @@ pub enum NetworkAction {
     // gets known & nearby networks
     GetCapabilities,
     GetNetworkContext(NetCtxFlags),
-    InitWireguard,
-    GetWireguard,
     CreateWpaInterface(String),
+    ToggleWpaPersist,
+
+    ToggleWireguard,
+    GetWireguard,
     ConnectWireguard(PathBuf),
-    DisableWireguard,
 
     Connect(ApConnectInfo),
+
     ConnectKnown(String, Security),
     Forget(String, Security),
 
@@ -291,19 +339,23 @@ pub enum NetworkAction {
 // to update the ui, mainly
 // with prompts
 #[derive(Debug, Serialize, Deserialize)]
-pub enum NetStart {
+pub enum Start {
     Wifi,
     Scan,
 }
 
+/// Some tasks may have success without
+/// a start like wireguard
 #[derive(Debug, Serialize, Deserialize)]
-pub enum NetSuccess {
+pub enum Success {
     Wifi,
     Scan,
+    EnableWireguard,
+    DisableWireguard,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum NetFailure {
+pub enum Failure {
     Wifi(String),
 }
 
@@ -320,11 +372,12 @@ pub enum NetworkState {
     SetWpaInterfaces(Vec<WpaInterface>),
     SetWireguardInfo((Vec<String>, Vec<WgMeta>)),
     SetNetdFiles(Vec<String>),
+    ToggleWpaPersist,
 
     SetNetworkdFiles(Vec<PathBuf>),
-    Start(NetStart),
-    Success(NetSuccess),
-    Failed(NetFailure),
+    Start(Start),
+    Success(Success),
+    Failed(Failure),
 }
 
 // determines what options will be visible/selectable
