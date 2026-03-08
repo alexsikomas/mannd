@@ -31,7 +31,7 @@ use zbus::{
 };
 
 use crate::{
-    STATE_HOME,
+    SETTINGS,
     error::ManndError,
     ini_parse::IniConfig,
     state::signals::SignalUpdate,
@@ -328,7 +328,7 @@ impl WpaSupplicant {
         };
 
         let Some(service_sect) = conf.sections.get_mut(&"Service".to_string()) else {
-            return Err(ManndError::ConfigSectionNotFound(
+            return Err(ManndError::SectionNotFound(
                 "In wpa_supplicant service file, [Service] could not be located".into(),
             ));
         };
@@ -551,7 +551,7 @@ impl WpaSupplicant {
     }
 
     fn get_env_file() -> PathBuf {
-        STATE_HOME.0.join("ManndWpaEnv")
+        PathBuf::from(SETTINGS.get("storage", "state").unwrap()).join("ManndWpaEnv")
     }
 
     // check if the wpa_supplicant service file

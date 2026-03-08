@@ -28,7 +28,6 @@ use tokio::{
 
 pub struct App {
     stream: UnixStream,
-    child: Option<Child>,
 }
 
 pub struct AppState {
@@ -51,8 +50,8 @@ impl AppState {
 }
 
 impl App {
-    pub fn new(stream: UnixStream, child: Option<Child>) -> Self {
-        Self { stream, child }
+    pub fn new(stream: UnixStream) -> Self {
+        Self { stream }
     }
 
     pub async fn run(&mut self) -> Result<(), ManndError> {

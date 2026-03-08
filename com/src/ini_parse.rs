@@ -5,8 +5,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::error::ManndError;
+use crate::{HOME, error::ManndError};
 use tempfile::NamedTempFile;
+use tracing::info;
 
 pub struct IniConfig {
     pub file_path: PathBuf,
@@ -47,9 +48,14 @@ impl IniConfig {
                 self.sections
                     .entry(current_section.to_string())
                     .or_default()
-                    .insert(k.trim().to_string(), v.trim().to_string());
+                    .insert(
+                        k.trim().to_string(),
+                        Self::parse_field(v)?.trim().to_string(),
+                    );
             }
         }
+
+        info!("FULL FILE: {:?}", self.sections);
         Ok(())
     }
 
@@ -59,13 +65,63 @@ impl IniConfig {
         value: (T, T),
     ) -> Result<(), ManndError> {
         let key_ref: &String = &key.into();
-        let section = self.sections.get_mut(key_ref).ok_or_else(|| {
-            ManndError::ConfigSectionNotFound(format!("{} not found...", key_ref))
-        })?;
+        let section = self
+            .sections
+            .get_mut(key_ref)
+            .ok_or_else(|| ManndError::SectionNotFound(format!("{} not found...", key_ref)))?;
 
         section.insert(value.0.into(), value.1.into());
 
         Ok(())
+    }
+
+    fn parse_field<'a>(input: &'a str) -> Result<String, ManndError> {
+        let mut res = String::new();
+
+        if let (Some(start), Some(end)) = (input.find('"'), input.rfind('"')) {
+            let mut current = &input[start + 1..end];
+            let mut var_found = false;
+            while let Some(start_idx) = current.find("${") {
+                var_found = true;
+                let var_start = &current[start_idx + 2..];
+                res.push_str(&current[..start_idx]);
+
+                if let Some(end_idx) = var_start.find("}") {
+                    let var_name = &var_start[..end_idx];
+                    if var_name != "HOME" {
+                        return Err(ManndError::InvalidPropertyFormat(
+                            "Non-HOME variable used".to_string(),
+                        ));
+                    }
+                    let tmp = HOME.get().unwrap().clone();
+                    let home_str = tmp.as_os_str().to_str().ok_or_else(|| {
+                        ManndError::OperationFailed("Converting HOME path to &str".to_string())
+                    })?;
+                    res.push_str(home_str);
+                    current = &var_start[end_idx + 1..];
+                } else {
+                    return Err(ManndError::InvalidPropertyFormat(format!("{:?}", input)));
+                }
+            }
+            if !var_found {
+                res.push_str(&input[start + 1..end]);
+            }
+        } else {
+            res.push_str(&input);
+        }
+        return Ok(res);
+    }
+
+    pub fn get(&self, section: impl ToString, field: impl ToString) -> Result<String, ManndError> {
+        if let Some(found_section) = self.sections.get(&section.to_string()) {
+            if let Some(found_field) = found_section.get(&field.to_string()) {
+                Ok(found_field.to_string())
+            } else {
+                Err(ManndError::PropertyNotFound(field.to_string()))
+            }
+        } else {
+            Err(ManndError::SectionNotFound(section.to_string()))
+        }
     }
 
     /// Returns an IniConfig with only the provided sections and fields
@@ -76,14 +132,14 @@ impl IniConfig {
             let section_fields = self
                 .sections
                 .get(section)
-                .ok_or_else(|| ManndError::ConfigSectionNotFound(format!("{section}")))?;
+                .ok_or_else(|| ManndError::SectionNotFound(format!("{section}")))?;
 
             let mut put_fields: BTreeMap<String, String> = BTreeMap::new();
 
             for filter_field in filter.get(section).unwrap() {
                 let field_val = section_fields
                     .get(filter_field)
-                    .ok_or_else(|| ManndError::ConfigSectionNotFound(format!("{section}")))?;
+                    .ok_or_else(|| ManndError::SectionNotFound(format!("{section}")))?;
                 put_fields.insert(filter_field.clone(), field_val.clone());
             }
             sections.insert(section.clone(), put_fields);

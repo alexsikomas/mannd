@@ -40,8 +40,8 @@ pub enum ManndError {
     ConnectionFailed(String),
     #[error("Operation failed: {0}")]
     OperationFailed(String),
-    #[error("Property not found: {0}")]
-    PropertyNotFound(String),
+    #[error("Following text is in an invalid format {0}")]
+    InvalidPropertyFormat(String),
     #[error("Adapter not found: {0}")]
     AdapterNotFound(String),
     #[error("Security type is invalid!")]
@@ -50,9 +50,9 @@ pub enum ManndError {
     #[error("File not found: {0}")]
     FileNotFound(String),
     #[error("Section: {0} not found in configuration file!")]
-    ConfigSectionNotFound(String),
+    SectionNotFound(String),
     #[error("Property {0} not found in configuration file!")]
-    ConfigPropertyNotFound(String),
+    PropertyNotFound(String),
 
     // io errors
     #[error("IO Error: {0}")]
