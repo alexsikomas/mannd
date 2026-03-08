@@ -1,4 +1,6 @@
-use com::{error::ManndError, ini_parse::IniConfig, state::network::InterfaceTypes};
+use com::{
+    CONFIG_HOME, SETTINGS, error::ManndError, ini_parse::IniConfig, state::network::InterfaceTypes,
+};
 use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
@@ -10,7 +12,6 @@ use std::{borrow::Cow, path::PathBuf, sync::OnceLock};
 use tracing::info;
 
 use crate::{
-    CONFIG_HOME,
     components::{
         main_menu::MainMenu, networkd_ui::NetdMenu, password_prompt::PasswordPrompt,
         popup_prompt::PopupPrompt, wifi_menu::Connection, wireguard_ui::WireguardMenu,
@@ -28,25 +29,23 @@ impl Theme {
     /// Reads config toml from a predefined location and sets the
     /// global value of `THEME`
     pub fn new() -> Result<(), ManndError> {
-        let mut path = CONFIG_HOME.clone();
-        path.push("mannd/settings.conf");
-        let config = IniConfig::new(path)?;
+        let conf = &SETTINGS;
 
-        let theme = config
+        let theme = conf
             .sections
             .get("theme")
-            .ok_or_else(|| ManndError::ConfigSectionNotFound("theme".to_string()))?;
+            .ok_or_else(|| ManndError::SectionNotFound("theme".to_string()))?;
 
         let selected_theme = theme
             .get("selected")
-            .ok_or_else(|| ManndError::ConfigPropertyNotFound("selected".to_string()))?;
+            .ok_or_else(|| ManndError::PropertyNotFound("selected".to_string()))?;
 
         let theme_name = format!("theme.{}", selected_theme);
 
-        let selected_theme_section = config
+        let selected_theme_section = conf
             .sections
             .get(theme_name.as_str())
-            .ok_or_else(|| ManndError::ConfigSectionNotFound(theme_name))?;
+            .ok_or_else(|| ManndError::SectionNotFound(theme_name))?;
 
         let hash = IntoDeserializer::<serde::de::value::Error>::into_deserializer(
             selected_theme_section.clone(),

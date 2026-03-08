@@ -1,10 +1,11 @@
 use std::{collections::HashMap, fs::read_to_string, path::PathBuf};
 
-use com::ini_parse::{self, IniConfig};
+use com::{
+    CONFIG_HOME, SETTINGS,
+    ini_parse::{self, IniConfig},
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, ModifierKeyCode};
 use tracing::info;
-
-use crate::CONFIG_HOME;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum KeyAction {
@@ -41,9 +42,7 @@ pub struct Keymap {
 
 impl Keymap {
     pub fn load_keys() -> Self {
-        let mut path = CONFIG_HOME.clone();
-        path.push("mannd/settings.conf");
-        let conf = IniConfig::new(path).unwrap();
+        let conf = &SETTINGS;
         let mut bindings: HashMap<KeyEvent, KeyAction> = HashMap::default();
 
         match conf.sections.get("keybinds") {

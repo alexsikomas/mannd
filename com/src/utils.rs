@@ -1,10 +1,11 @@
 use std::{
     env,
     ffi::CStr,
-    fs::{File, OpenOptions, read_dir},
+    fs::{self, File, OpenOptions, read_dir},
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    path::PathBuf,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
     str::FromStr,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -29,7 +30,15 @@ use crate::error::ManndError;
 const SYS_NET_PATH: &'static str = "/sys/class/net";
 const SYS_VIRT_PATH: &'static str = "/sys/devices/virtual";
 
-pub fn setup_logging(path: &'static str) {
+pub fn setup_logging(path: PathBuf, max_log_level: Level) {
+    let mut in_root = false;
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            // potential error
+            fs::create_dir_all(parent);
+        }
+        in_root = is_path_root(&parent.to_path_buf());
+    }
     let subscriber = FmtSubscriber::builder()
         .compact()
         .with_file(true)
@@ -37,13 +46,19 @@ pub fn setup_logging(path: &'static str) {
             OpenOptions::new()
                 .append(true)
                 .create(true)
-                .open(path)
+                .open(&path)
                 .unwrap(),
         )
+        .with_max_level(max_log_level)
         .with_ansi(true)
         .with_line_number(true)
         .with_max_level(Level::INFO)
         .finish();
+
+    if !in_root {
+        fs::set_permissions(path.parent().unwrap(), fs::Permissions::from_mode(0o777));
+        fs::set_permissions(path, fs::Permissions::from_mode(0o777));
+    }
 
     let subscriber = subscriber.with(ErrorLayer::default());
 
@@ -54,6 +69,14 @@ pub fn setup_logging(path: &'static str) {
             )
         }
         _ => {}
+    }
+}
+
+pub fn is_path_root(path: &PathBuf) -> bool {
+    if path.starts_with("/root") {
+        true
+    } else {
+        false
     }
 }
 

@@ -4,34 +4,61 @@ use redb::{
     Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition, TableError,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, os::unix::fs::PermissionsExt};
+use std::{collections::HashMap, fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
-use crate::{STATE_HOME, error::ManndError};
+use crate::{SETTINGS, error::ManndError, utils::is_path_root, wireguard::network::Wireguard};
 
 #[derive(Debug)]
 pub struct ManndStore {
     database: Database,
+    app_state: ApplicationState,
 }
 
 impl ManndStore {
     pub fn init() -> Result<Self, ManndError> {
-        let home = &STATE_HOME.0;
-        let in_root = STATE_HOME.1;
-        let _ = fs::create_dir_all(home);
+        let mut home = PathBuf::from(SETTINGS.get("storage", "state")?);
+        let in_root = is_path_root(&home);
+        let _ = fs::create_dir_all(&home);
         if !in_root {
-            fs::set_permissions(home, fs::Permissions::from_mode(0o777))?;
+            fs::set_permissions(&home, fs::Permissions::from_mode(0o777))?;
         }
 
-        let home = STATE_HOME.0.join("mannd.redb");
+        home.push("mannd.redb");
         let database = Database::create(&home)?;
         if !in_root {
             fs::set_permissions(&home, fs::Permissions::from_mode(0o777))?;
         }
-        Ok(ManndStore { database })
+
+        Ok(ManndStore {
+            database,
+            app_state: ApplicationState::new(),
+        })
     }
 
     pub fn init_from_db(database: Database) -> Self {
-        Self { database }
+        Self {
+            database,
+            app_state: ApplicationState::new(),
+        }
+    }
+}
+
+const APPLICATION_TABLE: TableDefinition<String, &[u8]> = TableDefinition::new("app_state_table");
+
+/// All state here is taken from the last
+/// time the app was run
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ApplicationState {
+    pub wg_running: bool,
+    pub managed_interfaces: Vec<String>,
+}
+
+impl ApplicationState {
+    fn new() -> Self {
+        Self {
+            wg_running: false,
+            managed_interfaces: vec![],
+        }
     }
 }
 
@@ -52,6 +79,33 @@ pub struct WgMeta {
 
 /// Wiregard store
 impl ManndStore {
+    // Returns Ok(None) if app state has not yet been initialised, i.e. table not found.
+    pub fn read_app_state(&self) -> Result<Option<ApplicationState>, ManndError> {
+        let read = self.database.begin_read()?;
+        match read.open_table(APPLICATION_TABLE) {
+            Ok(table) => {
+                if let Some(config) = table.get("config".to_string())? {
+                    let app_state: ApplicationState = from_bytes(config.value())?;
+                    Ok(Some(app_state))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(TableError::TableDoesNotExist(_)) => Ok(None),
+            Err(e) => Err(ManndError::RedbTable(e)),
+        }
+    }
+
+    pub fn update_app_state(&self) -> Result<(), ManndError> {
+        let write = self.database.begin_write()?;
+        {
+            let mut table = write.open_table(APPLICATION_TABLE)?;
+            let data = to_allocvec(&self.app_state)?;
+            table.insert("config".to_string(), data.as_slice());
+        }
+        Ok(())
+    }
+
     /// Searches WG_DIR for .conf file, returning a hashmap of the filename
     /// and metadata information in the form of WgMeta, country field is
     /// uninitialised

@@ -1,3 +1,12 @@
+use std::{
+    path::PathBuf,
+    sync::{LazyLock, OnceLock},
+};
+
+use tracing::info;
+
+use crate::ini_parse::IniConfig;
+
 pub mod controller;
 pub mod error;
 pub mod ini_parse;
@@ -9,36 +18,59 @@ pub mod wireguard;
 pub mod wireless;
 
 pub const UNIX_SOCK_PATH: &str = "/tmp/mannd.sock";
+pub static HOME: OnceLock<PathBuf> = OnceLock::new();
 
-/// Get uid of user who called sudo and make db
-/// in their XDG_STATE
-pub static STATE_HOME: std::sync::LazyLock<(std::path::PathBuf, bool)> =
-    std::sync::LazyLock::new(|| {
-        let (mut home, in_root) = match std::env::var_os("SUDO_UID") {
-            Some(uid_str) => {
-                let uid_str = uid_str.to_str().unwrap();
-                let uid = u32::from_str_radix(uid_str, 10).unwrap();
-                match get_user_home_by_uid(uid) {
-                    Some(path) => (path, false),
-                    None => {
-                        tracing::warn!(
-                            "Got UID of the user who called sudo but cannot find home..."
-                        );
-                        (std::path::PathBuf::from("root"), false)
+pub fn init_home_path(uid: Option<u32>) {
+    let home: PathBuf;
+    match uid {
+        Some(id) => match get_user_home_by_uid(id) {
+            Some(path) => home = path,
+            None => {
+                panic!("Got UID of the user who called sudo but cannot find HOME");
+            }
+        },
+        None => {
+            match std::env::var("SUDO_UID") {
+                Ok(uid_str) => {
+                    let uid = u32::from_str_radix(&uid_str, 10).unwrap();
+                    match get_user_home_by_uid(uid) {
+                        Some(path) => home = path,
+                        None => {
+                            panic!("Got UID of the user who called sudo but cannot find HOME");
+                        }
                     }
                 }
-            }
-            None => {
-                tracing::warn!(
-                    "Cannot get the UID of the user who called sudo... DB will be in /root/"
-                );
-                (std::path::PathBuf::from("root"), false)
-            }
-        };
+                Err(_) => {
+                    println!(
+                        "Cannot get the UID of the user who called sudo... using /root/ as home."
+                    );
+                    home = std::path::PathBuf::from("root")
+                }
+            };
+        }
+    };
 
-        home.push(".local/state/mannd");
-        (home, in_root)
-    });
+    if HOME.set(home).is_err() {
+        panic!("Home has already been initialised")
+    }
+}
+
+pub static CONFIG_HOME: LazyLock<PathBuf> = LazyLock::new(|| match HOME.get() {
+    Some(home) => {
+        let mut home_path = home.clone();
+        home_path.push(".config/mannd");
+        home_path
+    }
+    None => {
+        panic!("Home has not been initialised yet!")
+    }
+});
+
+pub static SETTINGS: LazyLock<IniConfig> = LazyLock::new(|| {
+    let mut config_path = CONFIG_HOME.clone();
+    config_path.push("settings.conf");
+    IniConfig::new(config_path).unwrap()
+});
 
 #[repr(C)]
 pub struct passwd {
@@ -54,6 +86,11 @@ pub struct passwd {
 #[link(name = "c")]
 unsafe extern "C" {
     fn getpwuid(uid: std::ffi::c_uint) -> *mut passwd;
+}
+
+#[link(name = "c")]
+unsafe extern "C" {
+    pub fn geteuid() -> u32;
 }
 
 pub fn get_user_home_by_uid(uid: u32) -> Option<std::path::PathBuf> {

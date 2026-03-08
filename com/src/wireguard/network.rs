@@ -106,7 +106,7 @@ impl Wireguard {
                 }
                 None => return Err(ManndError::WgIps),
             },
-            None => return Err(ManndError::ConfigSectionNotFound("Interface".to_string())),
+            None => return Err(ManndError::SectionNotFound("Interface".to_string())),
         };
 
         Self::set_conf(path)?;

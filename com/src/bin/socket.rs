@@ -3,12 +3,14 @@ use std::{
     fs::{self, Permissions},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use com::{
-    UNIX_SOCK_PATH,
+    SETTINGS, UNIX_SOCK_PATH,
     controller::DaemonType,
     error::ManndError,
+    geteuid, init_home_path,
     state::{
         network::{NetworkAction, NetworkActor, NetworkState},
         signals::SignalUpdate,
@@ -19,6 +21,7 @@ use futures::{SinkExt, StreamExt};
 use postcard::to_stdvec_cobs;
 use tokio::{net::UnixListener, sync::mpsc};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tracing::Level;
 
 struct UnixSocketGuard {
     path: PathBuf,
@@ -27,12 +30,17 @@ struct UnixSocketGuard {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let uid = parse_args();
+    init_home_path(uid);
     let uid = unsafe { geteuid() };
     if uid != 0 {
         return Err(ManndError::NotRoot)?;
     }
 
-    setup_logging("./.logs/com.log");
+    let max_log_level = Level::from_str(&SETTINGS.get("debug", "max_log_level")?)?;
+    let mut socket_log = PathBuf::from(SETTINGS.get("storage", "state")?.clone());
+    socket_log.push("mannd/logs/socket.log");
+    setup_logging(socket_log, max_log_level);
 
     let guard = UnixSocketGuard::new(UNIX_SOCK_PATH).await?;
     let (mut sock, _) = guard.listener.accept().await?;
@@ -115,7 +123,13 @@ impl Drop for UnixSocketGuard {
     }
 }
 
-#[link(name = "c")]
-unsafe extern "C" {
-    fn geteuid() -> u32;
+fn parse_args() -> Option<u32> {
+    let args: Vec<String> = std::env::args().collect();
+
+    let parent_uid = args
+        .iter()
+        .find(|arg| arg.starts_with("--parent-uid="))
+        .and_then(|arg| arg.split('=').nth(1))
+        .and_then(|val| val.parse::<u32>().ok());
+    return parent_uid;
 }
