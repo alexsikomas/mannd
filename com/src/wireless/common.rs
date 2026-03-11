@@ -1,6 +1,7 @@
 use bitflags::bitflags;
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 use zbus::{Connection, zvariant::Value};
 
 use crate::error::ManndError;
@@ -37,6 +38,7 @@ impl Security {
 
 /// Returns the value of a property found under the `self.path` interfaces
 /// Trait bounds follow from `zbus` downcast
+#[instrument(err, skip(conn))]
 pub async fn get_prop<'a, T>(
     conn: &Connection,
     service: String,
@@ -62,6 +64,7 @@ where
 
 /// Returns the value of a property found under the `self.path` interfaces
 /// Trait bounds follow from `zbus` downcast
+#[instrument(err, skip(proxy))]
 pub async fn get_prop_from_proxy<'a, T>(
     proxy: &zbus::Proxy<'a>,
     prop: &str,

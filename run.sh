@@ -1,4 +1,8 @@
 #!/bin/bash
+set -euo pipefail
+
+BIN_DIR="/usr/local/bin"
+SOCK_DIR="/usr/libexec/"
 
 display_help() {
     cat <<-EOF
@@ -13,8 +17,9 @@ display_help() {
                         'd' or 'debug' is the default build.
                         'r' or 'release' creates the release build.
         -c  --com       Compiles and tests the com package in debug mode.
-        -i  --install   Installs the TUI.
-        -s  --startup   Enable a startup service
+        -i  --install   Installs mannd.
+        -u  --uninstall Uninstalls mannd.
+        -s  --startup   Enable the mannd startup service
 
     Examples:
         Run the TUI in default (debug) mode:
@@ -26,50 +31,55 @@ display_help() {
         Compile and test the com package in debug mode:
         $(basename "$0") -c
 
-        Install the TUI:
+        Install mannd:
         $(basename "$0") -i
+
+        Uninstall mannd:
+        $(basename "$0") -u
 EOF
 }
 
-tui() {
+build() {
     echo "Building TUI..."
+    if [[ "${1:-}" == "r" ]] || [[ "${1:-}" == "release" ]]; then
+        cargo build --release || { echo "Error: Could not build in release mode." >&2; return 1; }
+    else
+        cargo build || { echo "Error: Could not build in debug mode." >&2; return 1; }
+    fi
+
+}
+
+tui() {
     make_config
     # Release
     if [[ "$1" == "r" ]] || [[ "$1" == "release" ]]; then
-        if cargo build --release;  then
-            ./target/release/tui
-        fi
-        exit 1
+        build "r"
+        ./target/release/tui
+    else
+        build
+       ./target/debug/tui
     fi
-
-   # Debug 
-   if cargo build; then 
-       if cargo build -p com --bin socket; then
-           ./target/debug/tui
-           exit 0
-       fi
-   fi
-   exit 1
 }
 
 make_config() {
-    local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/mannd"
+    local config_dir="${XDG_CONFIG_HOME:-${HOME:-}/.config}/mannd"
 
-    if [ "${config_dir}" = "/mannd" ] || [ -z "$HOME" ]; then
+    if [ "${config_dir}" = "/mannd" ] || [ -z "${HOME:-}" ]; then
         echo "Error: Unable to determine config directory." >&2
         return 2
     fi
 
-    mkdir -p "${config_dir}"
+    mkdir -p "${config_dir}" || { echo "Error: Failed to create config dir" >&2; return 1; }
     if [ ! -f "${config_dir}/settings.conf" ]; then
-        cp ./tui/example_settings.conf "${config_dir}/settings.conf"
+        cp ./etc/settings.conf "${config_dir}/settings.conf" || { echo "Error: Failed to copy config to directory" >&2; return 1; }
         echo "Config created at ${config_dir}/settings.conf"
     fi
 }
 
 com() {
+    command -v jq >/dev/null 2>&1 || { echo >&2 "Error: jq is required but it's not installed. Aborting."; exit 1; }
     LIB_TEST_BIN=$(cargo test -p com --no-run --message-format=json | \
-        jq -s -r 'map(select(.profile.test == true and .target.name == "com")) | .[-1].filenames[] | select(endswith(".dSYM") | not)')
+        jq -s -r 'map(select(.profile.test == true and .target.name == "com")) | .[-1].filenames[] | select(endswith(".dSYM") | not)') || true
 
     if [[ -z "$LIB_TEST_BIN" ]] || [[ ! -f "$LIB_TEST_BIN" ]]; then
         echo "Error: Could not find the test binary for the com package."
@@ -87,14 +97,44 @@ com() {
     "$LIB_TEST_BIN" --nocapture
 }
 
+startup() {
+    echo "startup"
+}
+
 install() {
-    echo "install"
+    build "r"
+    sudo cp ./target/release/tui "${BIN_DIR}/mannd" || { echo "Error: Failed to copy mannd to directory" >&2; return 1; }
+    sudo cp ./target/release/socket "${SOCK_DIR}/mannd-socket" || { echo "Error: Failed to copy mannd socket to directory" >&2; return 1; }
+    echo "Successfully installed mannd"
+}
+
+uninstall() {
+    if [[ -f "${BIN_DIR}/mannd" ]]; then
+        sudo rm "${BIN_DIR}/mannd"
+    else
+        echo "The mannd executable could not be found at ${BIN_DIR}/mannd, was it moved?" >&2
+    fi
+
+    if [[ -f "${SOCK_DIR}/mannd-socket" ]]; then
+        sudo rm "${SOCK_DIR}/mannd-socket"
+    else
+        echo "The mannd-socket executable could not be found at ${SOCK_DIR}/mannd-socket, was it moved?" >&2
+    fi
+
+    echo "Uninstalled... :("
 }
 
 if [[ $# -eq 0 ]]; then
     echo "Error: No argument provided, use -h or --help for usage."
     exit 1
 fi
+
+RUN_TUI=false
+TUI_MODE="d"
+RUN_COM=false
+RUN_INSTALL=false
+RUN_UNINSTALL=false
+RUN_STARTUP=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -103,18 +143,62 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         -t|--tui)
-            shift
-            tui "$@"
-            exit 0
+            RUN_TUI=true
+            if [[ $# -gt 1 && -n "$2" && "$2" != -* ]]; then
+                TUI_MODE="$2"
+                shift 2
+            else
+                shift 1
+            fi
             ;;
         -c|--com)
+            RUN_COM=true
             shift
-            com  "$0"
-            exit 0
             ;;
         -i|--install)
-            install 
-            exit 0
+            RUN_INSTALL=true 
+            shift
+            ;;
+        -u|--uninstall)
+            RUN_UNINSTALL=true
+            shift
+            ;;
+        -s|--startup)
+            RUN_STARTUP=true
+            shift
+            ;;
+        -[a-zA-Z0-9]?*)
+            split_args=()
+            for ((i=1; i<${#1}; i++)); do
+                split_args+=("-${1:$i:1}")
+            done
+            shift
+            set -- "${split_args[@]}" "$@"
+            ;;
+        *)
+            echo "Error: Unkown option $1"
+            display_help 
+            exit 1
             ;;
     esac
 done
+
+if [[ "$RUN_UNINSTALL" == true ]]; then
+    uninstall
+fi
+
+if [[ "$RUN_INSTALL" == true ]]; then
+    install
+fi
+
+if [[ "$RUN_STARTUP" == true ]]; then
+    startup
+fi
+
+if [[ "$RUN_COM" == true ]]; then
+    com
+fi
+
+if [[ "$RUN_TUI" == true ]]; then
+    tui "$TUI_MODE"
+fi

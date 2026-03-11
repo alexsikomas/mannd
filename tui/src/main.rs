@@ -8,12 +8,14 @@ use tokio::{
     process::{Child, Command},
     time,
 };
-use tracing::Level;
+use tracing::{Level, instrument};
 use tui::{app::App, ui::Theme};
 
 const DEBUG_SOCK_BIN: &str = "target/debug/socket";
+const RELEASE_SOCK_BIN: &str = "/usr/libexec/mannd-socket";
 
 #[tokio::main]
+#[instrument(err)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stream = get_unix_socket().await?;
 
@@ -28,6 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[instrument(err)]
 async fn get_unix_socket() -> Result<UnixStream, ManndError> {
     let uid = unsafe { geteuid() };
     init_home_path(Some(uid));
@@ -65,14 +68,30 @@ async fn get_unix_socket() -> Result<UnixStream, ManndError> {
                     return try_connect_socket().await;
                 }
                 false => {
-                    let socket = UnixSocket::new_stream()?;
-                    return Ok(socket.connect(UNIX_SOCK_PATH).await?);
+                    let mut child = Command::new("sudo")
+                        .arg("-S")
+                        .arg(PathBuf::from(RELEASE_SOCK_BIN))
+                        .arg(format!("--parent-uid={}", uid))
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::piped())
+                        .spawn()?;
+
+                    if let Some(mut stdin) = child.stdin.take() {
+                        stdin
+                            .write_all(format!("{}\n", password).as_bytes())
+                            .await?;
+                        stdin.flush().await?;
+                    }
+
+                    return try_connect_socket().await;
                 }
             };
         }
     };
 }
 
+#[instrument(err)]
 async fn try_connect_socket() -> Result<UnixStream, ManndError> {
     let mut interval = time::interval(time::Duration::from_millis(100));
     let mut attempts = 0;

@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use tokio::sync::mpsc::Sender;
 use tokio_stream::{StreamExt, StreamMap};
 use tracing::info;
-use zbus::{proxy::SignalStream, zvariant::OwnedValue, Message};
+use zbus::{Message, proxy::SignalStream, zvariant::OwnedValue};
 
 use crate::state::network::{NetCtxFlags, NetworkAction};
 
+#[derive(Debug)]
 pub struct SignalManager<'a> {
     pub signals: StreamMap<usize, SignalStream<'a>>,
     free_keys: Vec<usize>,

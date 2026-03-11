@@ -1,11 +1,7 @@
-use std::{collections::HashMap, fs::read_to_string, path::PathBuf};
+use std::collections::HashMap;
 
-use com::{
-    CONFIG_HOME, SETTINGS,
-    ini_parse::{self, IniConfig},
-};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, ModifierKeyCode};
-use tracing::info;
+use com::SETTINGS;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum KeyAction {
@@ -56,7 +52,6 @@ impl Keymap {
             }
             None => {}
         };
-        tracing::info!("{:?}", bindings);
         Self { bindings }
     }
 }

@@ -41,8 +41,11 @@ Before you can use `mannd`, you must have the following installed on your system
 git clone https://github.com/alexsikomas/mannd
 cd mannd
 
-./run.sh -t r
-sudo mv ./target/release/tui /usr/local/bin/mannd
+# try out
+./run.sh -t d
+
+# install
+./run.sh -i
 ```
 
 <hr style="visibility: hidden"/>

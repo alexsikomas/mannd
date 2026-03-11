@@ -4,7 +4,7 @@ use bitflags::bitflags;
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::{
     controller::{Controller, DaemonType, WirelessAdapter},
@@ -20,6 +20,7 @@ use crate::{
     },
 };
 
+#[derive(Debug)]
 pub struct NetworkActor<'a> {
     pub controller: Controller,
     pub signal_manager: SignalManager<'a>,
@@ -28,6 +29,7 @@ pub struct NetworkActor<'a> {
 }
 
 impl<'a> NetworkActor<'a> {
+    #[instrument(err)]
     pub async fn new(
         signal_tx: Sender<SignalUpdate<'a>>,
         sock_tx: Sender<NetworkState>,
@@ -44,6 +46,7 @@ impl<'a> NetworkActor<'a> {
     }
 
     /// Returns true if we are quitting the application
+    #[instrument(err, skip(self))]
     pub async fn handle_action(&mut self, action: NetworkAction) -> Result<bool, ManndError> {
         // check if wifi then allow wifi requests
         let mut state_send: Vec<NetworkState> = vec![];

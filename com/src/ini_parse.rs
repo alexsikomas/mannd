@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashSet},
+    fmt::Debug,
     fs::{File, read_to_string},
     io::{self, BufWriter, Write},
     path::{Path, PathBuf},
@@ -7,8 +8,9 @@ use std::{
 
 use crate::{HOME, error::ManndError};
 use tempfile::NamedTempFile;
-use tracing::info;
+use tracing::instrument;
 
+#[derive(Debug)]
 pub struct IniConfig {
     pub file_path: PathBuf,
     // use btreemap to keep ordering
@@ -16,6 +18,7 @@ pub struct IniConfig {
 }
 
 impl IniConfig {
+    #[instrument(err)]
     pub fn new(file_path: PathBuf) -> Result<Self, ManndError> {
         let sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
         let mut conf = Self {
@@ -26,6 +29,7 @@ impl IniConfig {
         Ok(conf)
     }
 
+    #[instrument(err, skip(self))]
     fn parse_file(&mut self) -> Result<(), ManndError> {
         let file = read_to_string(self.file_path.clone())
             .map_err(|_| ManndError::FileNotFound("File not found".to_string()))?;
@@ -55,7 +59,6 @@ impl IniConfig {
             }
         }
 
-        info!("FULL FILE: {:?}", self.sections);
         Ok(())
     }
 
@@ -75,6 +78,7 @@ impl IniConfig {
         Ok(())
     }
 
+    #[instrument(err)]
     fn parse_field<'a>(input: &'a str) -> Result<String, ManndError> {
         let mut res = String::new();
 
@@ -105,6 +109,8 @@ impl IniConfig {
             }
             if !var_found {
                 res.push_str(&input[start + 1..end]);
+            } else {
+                res.push_str(&current);
             }
         } else {
             res.push_str(&input);
@@ -112,7 +118,8 @@ impl IniConfig {
         return Ok(res);
     }
 
-    pub fn get(&self, section: impl ToString, field: impl ToString) -> Result<String, ManndError> {
+    #[instrument(err, skip(self))]
+    pub fn get<T: ToString + Debug>(&self, section: T, field: T) -> Result<String, ManndError> {
         if let Some(found_section) = self.sections.get(&section.to_string()) {
             if let Some(found_field) = found_section.get(&field.to_string()) {
                 Ok(found_field.to_string())
@@ -126,6 +133,7 @@ impl IniConfig {
 
     /// Returns an IniConfig with only the provided sections and fields
     /// TODO: Performance
+    #[instrument(err, skip(self))]
     pub fn get_partial(&self, filter: BTreeMap<String, Vec<String>>) -> Result<Self, ManndError> {
         let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
         for section in filter.keys() {
@@ -152,6 +160,7 @@ impl IniConfig {
     }
 
     /// Atomic overwrite
+    #[instrument(err, skip(self))]
     pub fn overwrite(&self) -> Result<(), ManndError> {
         let dir = Path::new(&self.file_path)
             .parent()
@@ -168,6 +177,7 @@ impl IniConfig {
     }
 
     // writes a file to a provided location or a temporary location if none provided
+    #[instrument(err, skip(self))]
     pub fn write_file(&self, file_path: Option<PathBuf>) -> Result<(), ManndError> {
         let file = match file_path {
             Some(path) => &File::open(path)?,

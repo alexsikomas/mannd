@@ -1,52 +1,18 @@
-use std::{
-    io::{self},
-    net::IpAddr,
-    path::PathBuf,
-};
+use std::path::PathBuf;
 
-use tokio::{
-    fs::{File, read_dir},
-    io::AsyncWriteExt,
-};
+use tokio::fs::read_dir;
+use tracing::instrument;
 
 use crate::error::ManndError;
 
 const NETWORK_FOLDER: &'static str = "/etc/systemd/network/";
-// const VIRTUAL_INTERFACE: &'static str = "mannd";
 
 struct Section {
     name: String,
     props: Vec<(String, String)>,
 }
 
-// used for each section of .network/.netdev files
-impl Section {
-    fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            props: vec![],
-        }
-    }
-
-    /// returns &mut self to allow for chaining
-    fn set(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
-        self.props.push((key.into(), value.into()));
-        self
-    }
-
-    async fn write(&self, file: &mut File) -> io::Result<()> {
-        file.write(format!("[{}]\n", self.name).as_bytes()).await?;
-        for (key, val) in &self.props {
-            file.write_all(format!("{}={}\n", key, val).as_bytes())
-                .await?;
-            if &self.props[self.props.len() - 1].0 == key {
-                file.write_all(b"\n").await?;
-            }
-        }
-        Ok(())
-    }
-}
-
+#[instrument(err)]
 pub async fn get_netd_files() -> Result<Vec<String>, ManndError> {
     let extensions = vec!["netdev", "network"];
     let mut dirs: Vec<PathBuf> = vec![PathBuf::from(NETWORK_FOLDER)];
@@ -102,6 +68,7 @@ mod tests {
     use std::net::Ipv4Addr;
 
     #[tokio::test]
+    #[instrument(err)]
     async fn test_get_netd_files() -> Result<(), ManndError> {
         let _ = get_netd_files().await?;
         Ok(())

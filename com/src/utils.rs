@@ -21,9 +21,9 @@ use neli::{
     types::RtBuffer,
     utils::Groups,
 };
-use tracing::Level;
+use tracing::{Level, instrument};
 use tracing_error::ErrorLayer;
-use tracing_subscriber::{FmtSubscriber, layer::SubscriberExt};
+use tracing_subscriber::{FmtSubscriber, fmt::format::FmtSpan, layer::SubscriberExt};
 
 use crate::error::ManndError;
 
@@ -53,6 +53,7 @@ pub fn setup_logging(path: PathBuf, max_log_level: Level) {
         .with_ansi(true)
         .with_line_number(true)
         .with_max_level(Level::INFO)
+        .compact()
         .finish();
 
     if !in_root {
@@ -80,6 +81,7 @@ pub fn is_path_root(path: &PathBuf) -> bool {
     }
 }
 
+#[instrument(err)]
 pub async fn get_name(index: u32) -> Result<String, ManndError> {
     let socket =
         NlSocketHandle::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty())?;
@@ -116,6 +118,7 @@ pub async fn get_name(index: u32) -> Result<String, ManndError> {
     Ok("".to_string())
 }
 
+#[instrument(err)]
 pub async fn get_index(interface: &'static str) -> Result<u32, ManndError> {
     let socket =
         NlSocketHandle::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty())?;
@@ -204,6 +207,7 @@ pub fn list_interfaces() -> Vec<String> {
     res
 }
 
+#[instrument(err)]
 pub fn str_to_ip(inp: &str) -> Result<IpAddr, ManndError> {
     // we expect ipv4
     if inp.contains(".") {
@@ -229,11 +233,4 @@ pub fn format_mac_address(mac: &[u8]) -> String {
         .map(|b| format!("{:02X}", b))
         .collect::<Vec<String>>()
         .join(":")
-}
-
-fn generate_random_suffix() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos()
 }

@@ -18,7 +18,7 @@ use crate::{
         wpa_supplicant::WpaSupplicant,
     },
 };
-use tracing::info;
+use tracing::{info, instrument};
 use zbus::Connection;
 
 // used in outside functions
@@ -45,6 +45,7 @@ pub struct Controller {
 
 // Initialisations
 impl Controller {
+    #[instrument(err)]
     pub async fn new() -> Result<Self, ManndError> {
         let connection = Connection::system().await?;
         Ok(Self {
@@ -55,13 +56,13 @@ impl Controller {
         })
     }
 
-    /// Sets Wi-Fi to be either iwd, wpa, or netlink
+    /// Sets Wi-Fi to be either iwd, wpa
     pub async fn determine_adapter(&mut self) {
         match is_service_active(&self.connection, "iwd").await {
             Some(v) => {
                 if v {
                     let _ = self.connect_iwd().await;
-                    info!("iwd connected");
+                    info!("Wi-Fi Daemon Connected: iwd");
                     return;
                 }
             }
@@ -72,16 +73,17 @@ impl Controller {
             Some(v) => {
                 if v {
                     let _ = self.connect_wpa().await;
-                    info!("wpa connected");
+                    info!("Wi-Fi Daemon Connected: wpa_supplicant");
                     return;
                 }
             }
             _ => {}
         }
 
-        tracing::error!("Neither iwd or wpa found!");
+        tracing::warn!("Could not connect to any Wi-Fi daemon.");
     }
 
+    #[instrument(err, skip(self))]
     async fn connect_iwd(&mut self) -> Result<(), ManndError> {
         let agent_state = Arc::new(RwLock::new(AgentState::new()));
         let conn = zbus::connection::Builder::system()?
@@ -100,6 +102,7 @@ impl Controller {
         }
     }
 
+    #[instrument(err, skip(self))]
     async fn connect_wpa(&mut self) -> Result<(), ManndError> {
         match WpaSupplicant::new(self.connection.clone()).await {
             Ok(wpa) => {
@@ -110,6 +113,7 @@ impl Controller {
         }
     }
 
+    #[instrument(err, skip(self))]
     pub async fn start_wg(&mut self) -> Result<(), ManndError> {
         match Wireguard::start_interface(None).await {
             Ok(wg) => {
@@ -120,6 +124,7 @@ impl Controller {
         }
     }
 
+    #[instrument(err, skip(self))]
     pub fn update_wg(&self) -> Result<(Vec<String>, Vec<WgMeta>), ManndError> {
         match &self.wg {
             Some(wg) => {
@@ -137,6 +142,8 @@ impl Controller {
             None => false,
         }
     }
+
+    #[instrument(err, skip(self))]
     pub async fn connect_wg(&self, file: PathBuf) -> Result<(), ManndError> {
         match &self.wg {
             Some(wg) => {
@@ -150,6 +157,7 @@ impl Controller {
 
 // run actions
 impl Controller {
+    #[instrument(err, skip(self))]
     pub async fn scan<'a>(&mut self, sock_tx: Sender<SignalUpdate<'a>>) -> Result<(), ManndError> {
         match &mut self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
@@ -171,6 +179,7 @@ impl Controller {
         }
     }
 
+    #[instrument(err, skip(self))]
     pub async fn network_connect(&self, info: ApConnectInfo) -> Result<(), ManndError> {
         match info.credentials {
             Credentials::Password(psk) => {
@@ -194,6 +203,7 @@ impl Controller {
     }
 
     /// security required for iwd due to the way it stores network names
+    #[instrument(err, skip(self))]
     pub async fn connect_known(&self, ssid: String, security: Security) -> Result<(), ManndError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
@@ -207,6 +217,7 @@ impl Controller {
         Ok(())
     }
 
+    #[instrument(err, skip(self))]
     pub async fn disconenct_network(&self) -> Result<(), ManndError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
@@ -225,6 +236,7 @@ impl Controller {
         Ok(())
     }
 
+    #[instrument(err, skip(self))]
     pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ManndError> {
         info!("Removing network");
         match &self.wifi {
@@ -235,6 +247,7 @@ impl Controller {
         Ok(())
     }
 
+    #[instrument(err, skip(self))]
     pub async fn disconnect_wg(&mut self) -> Result<(), ManndError> {
         match &mut self.wg {
             Some(wg) => {
@@ -247,6 +260,7 @@ impl Controller {
     }
 
     /// Performs cleanup before the app exits
+    #[instrument(err, skip(self))]
     pub async fn exit(&self) -> Result<(), ManndError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
@@ -261,6 +275,7 @@ impl Controller {
 
 // get information
 impl Controller {
+    #[instrument(err, skip(self))]
     pub async fn get_all_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
         match &mut self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => match iwd.all_networks().await {
@@ -279,6 +294,7 @@ impl Controller {
         }
     }
 
+    #[instrument(err, skip(self))]
     pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
         match &mut self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => match iwd.get_known_networks().await {
@@ -315,6 +331,7 @@ impl Controller {
 
 impl Controller {
     // wpa only
+    #[instrument(err, skip(self))]
     pub async fn wpa_create_interface(&mut self, ifname: String) -> Result<(), ManndError> {
         if let Some(WirelessAdapter::Wpa(wpa)) = &mut self.wifi {
             wpa.create_interface(ifname).await?;
@@ -333,6 +350,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[instrument(err)]
     async fn test_new() -> Result<(), ManndError> {
         let controller = Controller::new().await;
         match controller {

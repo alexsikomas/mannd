@@ -5,6 +5,7 @@ use redb::{
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, os::unix::fs::PermissionsExt, path::PathBuf};
+use tracing::instrument;
 
 use crate::{SETTINGS, error::ManndError, utils::is_path_root, wireguard::network::Wireguard};
 
@@ -15,6 +16,7 @@ pub struct ManndStore {
 }
 
 impl ManndStore {
+    #[instrument(err)]
     pub fn init() -> Result<Self, ManndError> {
         let mut home = PathBuf::from(SETTINGS.get("storage", "state")?);
         let in_root = is_path_root(&home);
@@ -80,6 +82,7 @@ pub struct WgMeta {
 /// Wiregard store
 impl ManndStore {
     // Returns Ok(None) if app state has not yet been initialised, i.e. table not found.
+    #[instrument(err, skip(self))]
     pub fn read_app_state(&self) -> Result<Option<ApplicationState>, ManndError> {
         let read = self.database.begin_read()?;
         match read.open_table(APPLICATION_TABLE) {
@@ -96,12 +99,13 @@ impl ManndStore {
         }
     }
 
+    #[instrument(err, skip(self))]
     pub fn update_app_state(&self) -> Result<(), ManndError> {
         let write = self.database.begin_write()?;
         {
             let mut table = write.open_table(APPLICATION_TABLE)?;
             let data = to_allocvec(&self.app_state)?;
-            table.insert("config".to_string(), data.as_slice());
+            table.insert("config".to_string(), data.as_slice())?;
         }
         Ok(())
     }
@@ -109,6 +113,7 @@ impl ManndStore {
     /// Searches WG_DIR for .conf file, returning a hashmap of the filename
     /// and metadata information in the form of WgMeta, country field is
     /// uninitialised
+    #[instrument(err, skip(self))]
     pub fn update_wg_files(&self) -> Result<(), ManndError> {
         let mut files: HashMap<String, WgMeta, RandomState> = HashMap::default();
         let mut dir = fs::read_dir(WG_DIR)?;
@@ -188,6 +193,7 @@ impl ManndStore {
         Ok(())
     }
 
+    #[instrument(err, skip(self))]
     fn read_wg_data(&self) -> Result<HashMap<String, WgMeta, RandomState>, ManndError> {
         let read = self.database.begin_read()?;
 
@@ -202,6 +208,7 @@ impl ManndStore {
         Ok(data)
     }
 
+    #[instrument(err, skip(self))]
     pub fn get_ordered_wg_files(&self) -> Result<(Vec<String>, Vec<WgMeta>), ManndError> {
         let mut names: Vec<String> = vec![];
         let mut meta: Vec<WgMeta> = vec![];
