@@ -1,0 +1,12 @@
+[Unit]
+Description=Enables Wi-Fi networks after reboot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+type=oneshot
+ExecStart=
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

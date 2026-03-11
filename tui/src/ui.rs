@@ -9,7 +9,7 @@ use ratatui::{
 };
 use serde::{Deserialize, de::IntoDeserializer};
 use std::{borrow::Cow, path::PathBuf, sync::OnceLock};
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::{
     components::{
@@ -28,6 +28,7 @@ pub static THEME: OnceLock<Theme> = OnceLock::new();
 impl Theme {
     /// Reads config toml from a predefined location and sets the
     /// global value of `THEME`
+    #[instrument(err)]
     pub fn new() -> Result<(), ManndError> {
         let conf = &SETTINGS;
 

@@ -9,7 +9,6 @@ use com::{
     wireless::common::{AccessPoint, NetworkFlags, Security},
 };
 use crossterm::event::Event;
-use tracing::info;
 
 use crate::app::AppAction;
 use crate::keys::{KeyAction, Keymap};
@@ -76,7 +75,7 @@ impl UiState {
         match KEYMAP.set(keymap) {
             Ok(_) => {}
             Err(_) => {
-                tracing::info!("Keymap has already been initialised");
+                tracing::warn!("Keymap has already been initialised");
             }
         };
 
@@ -352,7 +351,6 @@ pub enum ConnectionFocus {
 impl WifiState {
     pub fn new(daemon: &DaemonType) -> Self {
         let mut actions = SelectableList::new(vec![ConnectionAction::Scan]);
-        info!("DAEMON TYPE: {:?}", daemon);
         if daemon == &DaemonType::Wpa {
             actions.items.push(ConnectionAction::Interfaces);
         }

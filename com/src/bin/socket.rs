@@ -21,7 +21,7 @@ use futures::{SinkExt, StreamExt};
 use postcard::to_stdvec_cobs;
 use tokio::{net::UnixListener, sync::mpsc};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tracing::Level;
+use tracing::{Level, instrument};
 
 struct UnixSocketGuard {
     path: PathBuf,
@@ -29,6 +29,7 @@ struct UnixSocketGuard {
 }
 
 #[tokio::main]
+#[instrument(err)]
 async fn main() -> Result<(), Box<dyn Error>> {
     let uid = parse_args();
     init_home_path(uid);
@@ -39,6 +40,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let max_log_level = Level::from_str(&SETTINGS.get("debug", "max_log_level")?)?;
     let mut socket_log = PathBuf::from(SETTINGS.get("storage", "state")?.clone());
+    println!("SOCKET LOG PATH: {:?}", socket_log);
     socket_log.push("mannd/logs/socket.log");
     setup_logging(socket_log, max_log_level);
 

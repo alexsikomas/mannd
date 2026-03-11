@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use postcard::{from_bytes_cobs, to_stdvec_cobs};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::{
     state::{AppContext, InfoPrompt, PopupType, PromptState, StateCommand, UiState, View},
@@ -54,6 +54,7 @@ impl App {
         Self { stream }
     }
 
+    #[instrument(err, skip(self))]
     pub async fn run(&mut self) -> Result<(), ManndError> {
         let mut state = AppState::new();
 
@@ -131,6 +132,7 @@ impl App {
 
 /// Requests the capabilities of the system to know what to
 /// display on screen for example: Wi-Fi, wireguard, networkd
+#[instrument(err, skip_all)]
 async fn init_request(
     writer: &mut FramedWrite<WriteHalf<'_>, LengthDelimitedCodec>,
     reader: &mut FramedRead<ReadHalf<'_>, LengthDelimitedCodec>,

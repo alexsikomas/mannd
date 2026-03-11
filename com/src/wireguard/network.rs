@@ -29,6 +29,7 @@ use std::{
     path::PathBuf,
     process::Command,
 };
+use tracing::instrument;
 
 const INTERFACE: &str = "wg-mannd";
 
@@ -40,6 +41,7 @@ pub struct Wireguard {
 // methods used by Network
 impl Wireguard {
     /// Connects socket and sets up [`INTERFACE`] if not already done so
+    #[instrument(err)]
     pub async fn start_interface(db: Option<Database>) -> Result<Self, ManndError> {
         let (router, _) =
             NlRouter::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty()).await?;
@@ -91,6 +93,7 @@ impl Wireguard {
         return Ok(s);
     }
 
+    #[instrument(err)]
     pub fn connect(&self, path: PathBuf) -> Result<(), ManndError> {
         let conf = IniConfig::new(path.clone())?;
 
@@ -121,6 +124,7 @@ impl Wireguard {
 
 #[allow(dead_code)]
 impl Wireguard {
+    #[instrument(err)]
     pub async fn check_state() -> Result<bool, ManndError> {
         let socket =
             NlSocketHandle::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty())?;
@@ -162,6 +166,7 @@ impl Wireguard {
     }
 
     /// `wg` util can't understand full .conf file so needs pruning
+    #[instrument(err)]
     fn prune_write_conf(path: &str) -> Result<String, ManndError> {
         let mut filter: BTreeMap<String, Vec<String>> = BTreeMap::new();
         filter.insert(
@@ -181,6 +186,7 @@ impl Wireguard {
         Ok(write_path)
     }
 
+    #[instrument(err)]
     async fn delete_interface(&self) -> Result<(), ManndError> {
         let mut attrs = RtBuffer::new();
         attrs.push(
@@ -208,7 +214,8 @@ impl Wireguard {
         Ok(())
     }
 
-    fn set_conf(path: impl Into<PathBuf>) -> Result<(), ManndError> {
+    #[instrument(err)]
+    fn set_conf<T: Into<PathBuf> + Debug>(path: T) -> Result<(), ManndError> {
         let conf_path = Self::prune_write_conf(path.into().to_str().unwrap())?;
         Command::new("wg")
             .args(vec!["setconf", INTERFACE, &conf_path])
@@ -218,6 +225,7 @@ impl Wireguard {
     }
 
     /// Adds the IPv4/6 address to the `INTERFACE`
+    #[instrument(err)]
     async fn set_addr(&self, ips: Vec<IpAddr>) -> Result<(), ManndError> {
         for ip in ips {
             match ip {
@@ -287,6 +295,7 @@ impl Wireguard {
     ///
     /// MTU typically 1420 since standard ethernet = 1500,
     /// worst case overhead = 80
+    #[instrument(err)]
     async fn set_mtu(&self, mtu: u32) -> Result<(), ManndError> {
         let mut attrs = RtBuffer::new();
 
@@ -314,6 +323,7 @@ impl Wireguard {
     }
 
     /// Set state of `INTERFACE` via Netlink
+    #[instrument(err)]
     async fn set_state(&self, go_up: bool) -> Result<(), ManndError> {
         let ifi = match go_up {
             true => IfinfomsgBuilder::default()
@@ -346,6 +356,7 @@ impl Wireguard {
     ///
     /// Applies firewall mark for port 51820 to it's outgoing
     /// packets
+    #[instrument(err)]
     async fn add_wg_fwmark(&self) -> Result<(), ManndError> {
         Command::new("wg")
             .args(vec!["set", INTERFACE, "fwmark", "51820"])
@@ -353,6 +364,7 @@ impl Wireguard {
         Ok(())
     }
 
+    #[instrument(err)]
     async fn add_ip_fwmark(&self) -> Result<(), ManndError> {
         Command::new("sudo")
             .args(vec![
@@ -381,6 +393,7 @@ impl Wireguard {
         Ok(())
     }
 
+    #[instrument(err)]
     async fn prevent_default_route(&self) -> Result<(), ManndError> {
         // neli also doesn't implement FRA_SUPPRESS_PREFIXLEN
         Command::new("sudo")
@@ -438,6 +451,7 @@ impl Wireguard {
         Ok(())
     }
 
+    #[instrument(err)]
     async fn route_traffic(&self) -> Result<(), ManndError> {
         let mut attrs = RtBuffer::new();
         // ipv4

@@ -14,6 +14,7 @@
 
 use std::{
     collections::{HashMap, HashSet, btree_map::Entry},
+    fmt::Debug,
     fs::{File, OpenOptions},
     path::PathBuf,
     time::{Duration, Instant},
@@ -22,7 +23,7 @@ use std::{
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc::Sender, time::timeout};
-use tracing::info;
+use tracing::{info, instrument};
 use zbus::{
     Connection, Proxy,
     names::MemberName,
@@ -88,6 +89,7 @@ pub struct WpaBss {
 
 // Public functions
 impl WpaSupplicant {
+    #[instrument(err, skip(conn))]
     pub async fn new(conn: Connection) -> Result<Self, ManndError> {
         let service = String::from("fi.w1.wpa_supplicant1");
         let path = String::from("/fi/w1/wpa_supplicant1");
@@ -113,6 +115,7 @@ impl WpaSupplicant {
         })
     }
 
+    #[instrument(err, skip(self))]
     pub async fn get_interfaces(&self) -> Result<Vec<WpaInterface>, ManndError> {
         let mut res: Vec<WpaInterface> = vec![];
         let mut wpa_interfaces: Vec<String> = vec![];
@@ -149,6 +152,7 @@ impl WpaSupplicant {
         Ok(res)
     }
 
+    #[instrument(err, skip(self))]
     pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ManndError> {
         let psk_len = psk.len();
         if (psk_len < 8 || psk_len > 63) && psk_len != 0 {
@@ -190,6 +194,7 @@ impl WpaSupplicant {
         }
     }
 
+    #[instrument(err, skip(self))]
     pub async fn connect_known(&self, ssid: String) -> Result<(), ManndError> {
         let networks = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
@@ -204,16 +209,19 @@ impl WpaSupplicant {
         Ok(())
     }
 
+    #[instrument(err, skip(self))]
     pub async fn disconnect(&self) -> Result<(), ManndError> {
         self.call_interface_method_noreply("Disconnect", &())
             .await?;
         Ok(())
     }
 
+    #[instrument(err, skip(self))]
     pub async fn status(&self) -> Result<String, ManndError> {
         todo!()
     }
 
+    #[instrument(err, skip(self))]
     pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ManndError> {
         let known = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
@@ -229,6 +237,7 @@ impl WpaSupplicant {
         Ok(())
     }
 
+    #[instrument(err, skip(self))]
     pub async fn scan<'a>(&self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ManndError> {
         if self.get_interface_prop::<bool>("Scanning").await? {
             return Ok(());
@@ -246,6 +255,7 @@ impl WpaSupplicant {
         }
     }
 
+    #[instrument(err, skip(self))]
     pub async fn get_all_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
         // paths with 'Networks' are known but possibly not nearby known networks
         // will also appear in 'BSS' paths
@@ -268,7 +278,6 @@ impl WpaSupplicant {
             };
 
             if seen.insert(ssid.clone()) && !hidden {
-                info!("SSID: {ssid}");
                 let ap = AccessPointBuilder::default()
                     .ssid(ssid)
                     .security(bss.security.clone().unwrap())
@@ -319,6 +328,7 @@ impl WpaSupplicant {
 impl WpaSupplicant {
     /// Modifies the wpa_supplicant systemd service as needed
     /// to allow for changes to persist through an env file
+    #[instrument(err, skip(self))]
     async fn prepare_wpa_persist(&mut self) -> Result<(), ManndError> {
         let service_path = PathBuf::from(get_service_path(&self.conn, "wpa_supplicant").await);
         let Ok(mut conf) = IniConfig::new(service_path) else {
@@ -358,6 +368,7 @@ impl WpaSupplicant {
         Ok(())
     }
 
+    #[instrument(err, skip(self))]
     pub async fn create_interface(&mut self, ifname: String) -> Result<(), ManndError> {
         let mut body: HashMap<String, OwnedValue> = HashMap::new();
         body.insert("Ifname".to_string(), Value::new(ifname).try_to_owned()?);
@@ -386,13 +397,14 @@ impl WpaSupplicant {
 
 // Helper functions
 impl WpaSupplicant {
+    #[instrument(err, skip(self))]
     async fn call_interface_method<T, U>(
         &self,
         method_name: &'static str,
         body: T,
     ) -> Result<U, ManndError>
     where
-        T: serde::ser::Serialize + zvariant::DynamicType,
+        T: serde::ser::Serialize + zvariant::DynamicType + Debug,
         U: for<'a> zvariant::DynamicDeserialize<'a>,
     {
         let proxy = Proxy::new(
@@ -406,13 +418,14 @@ impl WpaSupplicant {
         Ok(res)
     }
 
+    #[instrument(err, skip(self))]
     async fn call_interface_method_noreply<T>(
         &self,
         method_name: &'static str,
         body: T,
     ) -> Result<(), ManndError>
     where
-        T: serde::ser::Serialize + zvariant::DynamicType,
+        T: serde::ser::Serialize + zvariant::DynamicType + Debug,
     {
         let proxy = Proxy::new(
             &self.conn,
@@ -462,6 +475,7 @@ impl WpaSupplicant {
         security
     }
 
+    #[instrument(err, skip(self))]
     async fn check_connection<'a>(&self, mut stream: SignalStream<'a>) -> Result<(), ManndError> {
         let start = Instant::now();
         let max_wait = Duration::from_secs(15);
@@ -515,6 +529,7 @@ impl WpaSupplicant {
         }
     }
 
+    #[instrument(err)]
     async fn get_interface_prop<'a, T>(&self, prop: &'static str) -> Result<T, ManndError>
     where
         T: TryFrom<Value<'a>>,
@@ -530,12 +545,13 @@ impl WpaSupplicant {
         return Ok(get_prop_from_proxy::<T>(&proxy, prop).await?);
     }
 
+    #[instrument(err, skip(self))]
     async fn get_interface_signal<'a, M>(
         &self,
         signal_name: M,
     ) -> Result<SignalStream<'a>, ManndError>
     where
-        M: TryInto<MemberName<'a>>,
+        M: TryInto<MemberName<'a>> + Debug,
         M::Error: Into<zbus::Error>,
     {
         let proxy = Proxy::new(
@@ -613,6 +629,7 @@ impl WpaSupplicant {
 
     /// Used for networks which are nearby by may
     /// not have been connected to yet
+    #[instrument(err, skip(self))]
     async fn get_bss_info(&self, bss_path: OwnedObjectPath) -> Result<WpaBss, ManndError> {
         let proxy = Proxy::new(
             &self.conn,
@@ -642,6 +659,7 @@ impl WpaSupplicant {
     }
 
     // Known network, only returns SSID
+    #[instrument(err, skip(self))]
     async fn get_known_info(&self, net_path: &OwnedObjectPath) -> Result<String, ManndError> {
         let proxy = Proxy::new(
             &self.conn,
@@ -667,6 +685,7 @@ impl WpaSupplicant {
     }
 
     /// Used for known networks
+    #[instrument(err, skip(self))]
     async fn get_network_info(&self, net_path: OwnedObjectPath) -> Result<WpaBss, ManndError> {
         let proxy = Proxy::new(
             &self.conn,
@@ -700,6 +719,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    #[instrument(err)]
     async fn test_wpa_scan() -> Result<(), ManndError> {
         let conn = Connection::system().await.unwrap();
         let mut wpa = WpaSupplicant::new(conn).await?;
