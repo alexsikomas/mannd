@@ -16,7 +16,7 @@ display_help() {
                         Compiles and runs the TUI debug or release build.
                         'd' or 'debug' is the default build.
                         'r' or 'release' creates the release build.
-        -c  --com       Compiles and tests the com package in debug mode.
+        -m  --mannd     Compiles and tests the core mannd networking package in debug mode.
         -i  --install   Installs mannd.
         -u  --uninstall Uninstalls mannd.
         -s  --startup   Enable the mannd startup service
@@ -28,8 +28,8 @@ display_help() {
         Run the TUI in release mode:
         $(basename "$0") -t release
 
-        Compile and test the com package in debug mode:
-        $(basename "$0") -c
+        Compile and test the mannd package in debug mode:
+        $(basename "$0") -m
 
         Install mannd:
         $(basename "$0") -i
@@ -76,13 +76,13 @@ make_config() {
     fi
 }
 
-com() {
+mannd() {
     command -v jq >/dev/null 2>&1 || { echo >&2 "Error: jq is required but it's not installed. Aborting."; exit 1; }
-    LIB_TEST_BIN=$(cargo test -p com --no-run --message-format=json | \
-        jq -s -r 'map(select(.profile.test == true and .target.name == "com")) | .[-1].filenames[] | select(endswith(".dSYM") | not)') || true
+    LIB_TEST_BIN=$(cargo test -p mannd --no-run --message-format=json | \
+        jq -s -r 'map(select(.profile.test == true and .target.name == "mannd")) | .[-1].filenames[] | select(endswith(".dSYM") | not)') || true
 
     if [[ -z "$LIB_TEST_BIN" ]] || [[ ! -f "$LIB_TEST_BIN" ]]; then
-        echo "Error: Could not find the test binary for the com package."
+        echo "Error: Could not find the test binary for the core mannd package."
         return 1
     fi
 
@@ -131,7 +131,7 @@ fi
 
 RUN_TUI=false
 TUI_MODE="d"
-RUN_COM=false
+RUN_MANND_CORE=false
 RUN_INSTALL=false
 RUN_UNINSTALL=false
 RUN_STARTUP=false
@@ -151,8 +151,8 @@ while [[ $# -gt 0 ]]; do
                 shift 1
             fi
             ;;
-        -c|--com)
-            RUN_COM=true
+        -m|--mannd)
+            RUN_MANND_CORE=true
             shift
             ;;
         -i|--install)
@@ -195,8 +195,8 @@ if [[ "$RUN_STARTUP" == true ]]; then
     startup
 fi
 
-if [[ "$RUN_COM" == true ]]; then
-    com
+if [[ "$RUN_MANND_CORE" == true ]]; then
+    mannd
 fi
 
 if [[ "$RUN_TUI" == true ]]; then

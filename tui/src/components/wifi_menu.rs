@@ -1,19 +1,14 @@
-use core::{
-    controller::DaemonType,
-    wireless::common::{AccessPoint, NetworkFlags, Security},
-};
+use mannd::wireless::common::{AccessPoint, NetworkFlags, Security};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Flex, Layout, Rect},
-    style::{Color, Style, Stylize},
+    style::{Color, Style},
     text::{Line, Span},
-    widgets::{
-        self, Block, Borders, Clear, List, ListDirection, ListItem, ListState, Paragraph, Widget,
-    },
+    widgets::{self, Block, Borders, List, ListDirection, ListItem, ListState, Paragraph, Widget},
 };
 
 use crate::{
-    state::{ConnectionAction, ConnectionFocus, WifiState},
+    state::{ConnectionFocus, WifiState},
     ui::{THEME, Theme},
 };
 

@@ -1,4 +1,4 @@
-use core::store::WgMeta;
+use mannd::store::WgMeta;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Flex, Layout, Margin, Rect},

@@ -5,7 +5,7 @@
 //! and then terminate
 use std::error::Error;
 
-use core::controller::Controller;
+use mannd::controller::Controller;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

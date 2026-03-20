@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-core = { path = "../core" }
+mannd = { path = "../mannd" }
 ahash = "0.8.12"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 futures = { workspace = true }

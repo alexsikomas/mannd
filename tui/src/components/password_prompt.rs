@@ -1,4 +1,4 @@
-use core::wireless::common::AccessPoint;
+use mannd::wireless::common::AccessPoint;
 use ratatui::{
     layout::{Constraint, Flex, Layout, Margin, Rect, Spacing},
     style::{Style, Stylize},

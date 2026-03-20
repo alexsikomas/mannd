@@ -22,7 +22,7 @@
 //! - Binaries provide a UID CLI argument to explicitly set the UID of
 //! the user. This should be used in almost all cases.
 //! - If for some reason the above was not done try to detect the user
-//! through the`SUDO_UID` environment variable
+//! through the `SUDO_UID` environment variable
 //! - If both of the above fail we write inside of /root/ and *DO NOT*
 //! change any permissions.
 //!
@@ -35,11 +35,16 @@
 //!
 //! | Name | Type | Location |
 //! |------|------|----------|
-//! | Unix Socket | Hardcoded | [`UNIX_SOCK_PATH`] |
+//! | Unix Debug Socket | Hardcoded | [`UNIX_SOCK_PATH`] |
 //! | WG Files | Hardcoded* | [`WG_DIR`](crate::store::WG_DIR) |
 //! | App Config | Dynamic | `$HOME/.config/mannd` |
 //!
 //! \* May become a field in the configuration file in the future
+//!
+//! There are other paths not hardcoded into this crate but instead from the
+//! installation script or from your package manager. These include the directory
+//! where the binary is stored, usually `/usr/local/bin`, and the directory where
+//! the installed (not debug) socket is stored, usually `/usr/libexec/`.
 //!
 //! ## Error Handling
 //! The majority of functions will return an [`crate::error::ManndError`], which is a wrapper
@@ -98,7 +103,7 @@ pub fn init_home_path(uid: Option<u32>) {
                     println!(
                         "Cannot get the UID of the user who called sudo... using /root/ as home."
                     );
-                    home = std::path::PathBuf::from("root")
+                    home = std::path::PathBuf::from("/root")
                 }
             };
         }
