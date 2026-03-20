@@ -8,7 +8,7 @@ use crate::{
     state::{AppContext, InfoPrompt, PopupType, PromptState, StateCommand, UiState, View},
     ui::{UiContext, UiMessage},
 };
-use com::{
+use core::{
     error::ManndError,
     state::network::{
         Capability, Failure, InterfaceTypes, NetCtx, NetworkAction, NetworkState, Start, Success,

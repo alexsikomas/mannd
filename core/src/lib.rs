@@ -1,3 +1,59 @@
+//! # Core Networking Package Design
+//!
+//! Networking backend of the `mannd` application,
+//! entirely agnostic to the frontend.
+//!
+//! ## Privileges
+//! Binaries within this crate are expected to be run with UID 0,
+//! i.e. root.
+//!
+//! ### Why root?
+//! Before, it was expected to use `setcap` to add admin networking
+//! capabilities to the program. This caused issues when eventually
+//! moving to the general `wpa_supplicant` dbus service which required
+//! the root user to access it. To avoid users needing to edit the
+//! dbus security policy & fragmenting the backend between `iwd`
+//! and `wpa_supplicant` the backend binaries must be run as root.
+//!
+//! ### File Ownership
+//! Because the bianries run as root, files created by them like: logs,
+//! app state, etc.. are all owned by root by default. To ensure these
+//! files remain accessible for the calling user:
+//! - Binaries provide a UID CLI argument to explicitly set the UID of
+//! the user. This should be used in almost all cases.
+//! - If for some reason the above was not done try to detect the user
+//! through the`SUDO_UID` environment variable
+//! - If both of the above fail we write inside of /root/ and *DO NOT*
+//! change any permissions.
+//!
+//! If a UID for the user has been obtained then [`chown`](std::os::unix::fs::chown)
+//! should be used to give permissions to the user.
+//!
+//! ## Paths
+//! Fail-fast approach, when an essential hardcoded path cannot be
+//! resolved panic.
+//!
+//! | Name | Type | Location |
+//! |------|------|----------|
+//! | Unix Socket | Hardcoded | [`UNIX_SOCK_PATH`] |
+//! | WG Files | Hardcoded* | [`WG_DIR`](crate::store::WG_DIR) |
+//! | App Config | Dynamic | `$HOME/.config/mannd` |
+//!
+//! \* May become a field in the configuration file in the future
+//!
+//! ## Error Handling
+//! The majority of functions will return an [`crate::error::ManndError`], which is a wrapper
+//! around other errors with a few custom ones for `mannd`.
+//!
+//! There are occassions especially in binaries where you may see a `Box<dyn Error>`, this is
+//! likely because one of the error cases was a generic error. In general try to avoid dynamic
+//! dispatch unless it's unavoidable.
+//!
+//! It should be noted that the frontend also uses this error type.
+
+#![warn(clippy::pedantic)]
+#![warn(clippy::nursery)]
+
 use std::{
     path::PathBuf,
     sync::{LazyLock, OnceLock},

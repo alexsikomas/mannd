@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     state::{MainMenuSelection, SelectableList},
-    ui::{Theme, THEME},
+    ui::{THEME, Theme},
 };
 
 pub struct MainMenu<'a> {

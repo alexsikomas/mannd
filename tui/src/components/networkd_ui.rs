@@ -10,7 +10,7 @@ use ratatui::{
 
 use crate::{
     state::NetdState,
-    ui::{Theme, THEME},
+    ui::{THEME, Theme},
 };
 
 pub struct NetdMenu<'a> {
@@ -102,4 +102,3 @@ pub struct NetdAreas {
     config: Rect,
     select: Rect,
 }
-

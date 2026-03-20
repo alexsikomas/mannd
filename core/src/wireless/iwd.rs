@@ -279,9 +279,9 @@ impl Iwd {
     #[instrument(err, skip(conn))]
     async fn find_adapter_path(
         conn: &Connection,
-        service: &String,
+        service: &str,
     ) -> Result<Option<String>, ManndError> {
-        let proxy = ObjectManagerProxy::new(conn, service.clone(), "/").await?;
+        let proxy = ObjectManagerProxy::new(conn, service, "/").await?;
         for (path, interface) in proxy.get_managed_objects().await? {
             // BUG: if multiple adapters, return first one
             if interface.contains_key("net.connman.iwd.Station") {

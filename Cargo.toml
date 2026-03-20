@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["com", "tui"]
+members = ["core", "tui"]
 
 [workspace.dependencies]
 serde = "1.0.228"

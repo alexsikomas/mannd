@@ -1,4 +1,4 @@
-use com::{
+use core::{
     SETTINGS, UNIX_SOCK_PATH, error::ManndError, geteuid, init_home_path, utils::setup_logging,
 };
 use std::{path::PathBuf, process::Stdio, str::FromStr};

@@ -254,7 +254,7 @@ impl WgCtx {
         min(self.names.len(), self.meta.len())
     }
 
-    pub fn get_index(&self, index: usize) -> Option<(&String, &WgMeta)> {
+    pub fn get_index(&self, index: usize) -> Option<(&str, &WgMeta)> {
         if let Some(name) = self.names.get(index) {
             if let Some(meta) = self.meta.get(index) {
                 return Some((name, meta));
@@ -277,14 +277,14 @@ impl InterfaceTypes {
         }
     }
 
-    pub fn wpa_get(&self, index: usize) -> Option<&WpaInterface> {
+    pub fn get_wpa_index(&self, index: usize) -> Option<&WpaInterface> {
         match self {
             Self::Wpa(ifaces) => ifaces.get(index),
             _ => None,
         }
     }
 
-    pub fn norm_get(&self, index: usize) -> Option<&String> {
+    pub fn get_normal_index(&self, index: usize) -> Option<&String> {
         match self {
             Self::Normal(ifaces) => ifaces.get(index),
             _ => None,

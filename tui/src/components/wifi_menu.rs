@@ -1,4 +1,4 @@
-use com::{
+use core::{
     controller::DaemonType,
     wireless::common::{AccessPoint, NetworkFlags, Security},
 };
@@ -14,7 +14,7 @@ use ratatui::{
 
 use crate::{
     state::{ConnectionAction, ConnectionFocus, WifiState},
-    ui::{Theme, THEME},
+    ui::{THEME, Theme},
 };
 
 pub struct Connection<'a> {
