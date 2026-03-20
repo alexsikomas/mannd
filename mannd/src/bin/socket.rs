@@ -1,3 +1,12 @@
+//! # Socket
+//!
+//! Facilitates communication between the backend and the frontend.
+//!
+//! A UNIX socket architecture was chosen for this binary as it allows for
+//! more decoupling between the frontend and the backend. It also allows the
+//! user, if they desire, to run the socket on startup. As long as the frontend
+//! handles this appropriately they aren't hassled with entering their sudo
+//! password each time.
 use std::{
     error::Error,
     fs::{self, Permissions},
@@ -6,9 +15,11 @@ use std::{
     str::FromStr,
 };
 
-use core::{
+use clap::Parser;
+use futures::{SinkExt, StreamExt};
+use mannd::{
     SETTINGS, UNIX_SOCK_PATH,
-    controller::DaemonType,
+    controller::WifiDaemonType,
     error::ManndError,
     geteuid, init_home_path,
     state::{
@@ -17,32 +28,35 @@ use core::{
     },
     utils::setup_logging,
 };
-use futures::{SinkExt, StreamExt};
 use postcard::to_stdvec_cobs;
 use tokio::{net::UnixListener, sync::mpsc};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tracing::{Level, instrument};
+use tracing::{Level, info, instrument};
 
-struct UnixSocketGuard {
-    path: PathBuf,
-    listener: UnixListener,
+#[derive(Parser, Debug)]
+#[command(version, about = "mannd socket")]
+struct Args {
+    /// Determines where the $HOME directory is
+    #[arg(long)]
+    target_uid: Option<u32>,
 }
 
 #[tokio::main]
 #[instrument(err)]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let uid = parse_args();
-    init_home_path(uid);
-    let uid = unsafe { geteuid() };
-    if uid != 0 {
+    let args = Args::parse();
+    init_home_path(args.target_uid);
+
+    // root check
+    let euid = unsafe { geteuid() };
+    if euid != 0 {
         return Err(ManndError::NotRoot)?;
     }
 
     let max_log_level = Level::from_str(&SETTINGS.get("debug", "max_log_level")?)?;
     let mut socket_log = PathBuf::from(SETTINGS.get("storage", "state")?.clone());
-    println!("SOCKET LOG PATH: {:?}", socket_log);
     socket_log.push("mannd/logs/socket.log");
-    setup_logging(socket_log, max_log_level);
+    setup_logging(socket_log, max_log_level, args.target_uid)?;
 
     let guard = UnixSocketGuard::new(UNIX_SOCK_PATH).await?;
     let (mut sock, _) = guard.listener.accept().await?;
@@ -55,17 +69,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut writer = FramedWrite::new(sock_writer, LengthDelimitedCodec::new());
     let mut reader = FramedRead::new(sock_reader, LengthDelimitedCodec::new());
 
-    let daemon = actor.controller.daemon_type();
+    let daemon = actor.controller.get_wifi_daemon_type();
 
     loop {
         tokio::select! {
-            // write message for tui to read
             Some(msg) = sock_rx.recv() => {
                 if let Ok(res) = to_stdvec_cobs(&msg) {
-                    writer.send(res.into()).await.map_err(|_| ManndError::SocketWrite)?;
+                    if writer.send(res.into()).await.is_err() {
+                        info!("Could not write to socket, disconnecting");
+                        return Ok(());
+                    }
                 }
             },
-            Some(frame_res) = reader.next() => {
+            frame_opt = reader.next() => {
+                let Some(frame_res) = frame_opt else {
+                    return Ok(());
+                };
+
                 let mut frame = frame_res?;
                 let action = postcard::from_bytes_cobs::<NetworkAction>(&mut frame)?;
                 let res = actor.handle_action(action).await?;
@@ -77,20 +97,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 actor.signal_manager.handle_update(update);
             }
             Some(msg) = actor.signal_manager.recv() => {
-                // this is used, not sure why compiler disagrees
-                #[allow(unused_assignments)]
-                let mut action: Option<NetworkAction> = None;
-                match daemon {
-                    // iwd
-                    Some(DaemonType::Iwd) => {
-                        action = actor.signal_manager.process_iwd_msg(msg).await;
+                let action: Option<NetworkAction> = match daemon {
+                    Some(WifiDaemonType::Iwd) => {
+                        actor.signal_manager.process_iwd_msg(msg).await
                     }
-                    // wpa
-                    Some(DaemonType::Wpa) => {
-                        action = actor.signal_manager.process_wpa_msg(msg).await;
+                    Some(WifiDaemonType::Wpa) => {
+                        actor.signal_manager.process_wpa_msg(msg).await
                     }
                     _ => {
-                        continue;
+                        None
                     }
                 };
 
@@ -99,11 +114,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             _ = tokio::signal::ctrl_c() => {
-                tracing::info!("Shutting down...");
+                info!("Shutting down...");
                 return Ok(());
             }
         };
     }
+}
+
+struct UnixSocketGuard {
+    path: PathBuf,
+    listener: UnixListener,
 }
 
 impl UnixSocketGuard {
@@ -123,15 +143,4 @@ impl Drop for UnixSocketGuard {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
     }
-}
-
-fn parse_args() -> Option<u32> {
-    let args: Vec<String> = std::env::args().collect();
-
-    let parent_uid = args
-        .iter()
-        .find(|arg| arg.starts_with("--parent-uid="))
-        .and_then(|arg| arg.split('=').nth(1))
-        .and_then(|val| val.parse::<u32>().ok());
-    return parent_uid;
 }

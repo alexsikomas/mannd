@@ -2,13 +2,13 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::{fmt::Debug, usize};
 
-use core::controller::DaemonType;
-use core::state::network::{Capability, NetCtx, NetCtxFlags, NetworkAction};
-use core::{
+use crossterm::event::Event;
+use mannd::controller::WifiDaemonType;
+use mannd::state::network::{Capability, NetCtx, NetCtxFlags, NetworkAction};
+use mannd::{
     state::network::ApConnectInfoBuilder,
     wireless::common::{AccessPoint, NetworkFlags, Security},
 };
-use crossterm::event::Event;
 
 use crate::app::AppAction;
 use crate::keys::{KeyAction, Keymap};
@@ -286,7 +286,7 @@ pub enum MainMenuSelection {
 }
 
 impl MainMenuSelection {
-    fn execute(&self, daemon: &Option<DaemonType>) -> StateResult {
+    fn execute(&self, daemon: &Option<WifiDaemonType>) -> StateResult {
         match self {
             Self::Wifi => {
                 // DaemonType safe here
@@ -349,9 +349,9 @@ pub enum ConnectionFocus {
 }
 
 impl WifiState {
-    pub fn new(daemon: &DaemonType) -> Self {
+    pub fn new(daemon: &WifiDaemonType) -> Self {
         let mut actions = SelectableList::new(vec![ConnectionAction::Scan]);
-        if daemon == &DaemonType::Wpa {
+        if daemon == &WifiDaemonType::Wpa {
             actions.items.push(ConnectionAction::Interfaces);
         }
 
@@ -600,7 +600,7 @@ impl Component for PskConnectionPrompt {
                 PskPromptSelect::Connect => {
                     let ap_info = ApConnectInfoBuilder::default()
                         .ssid(self.ssid.clone())
-                        .credentials(core::state::network::Credentials::Password(
+                        .credentials(mannd::state::network::Credentials::Password(
                             self.password.clone(),
                         ))
                         .security(Security::Psk)

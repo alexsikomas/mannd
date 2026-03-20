@@ -1,3 +1,13 @@
+//! # Controller
+//!
+//! Syncronises the various networking backends.
+//!
+//! ## Backends
+//! - General Wi-Fi
+//!     - [iwd](crate::wireless::iwd)
+//!     - [wpa_supplicant](crate::wireless::wpa_supplicant)
+//! - Other
+//!     - [WireGuard](crate::wireguard)
 use serde::{Deserialize, Serialize};
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::{RwLock, mpsc::Sender};
@@ -21,14 +31,14 @@ use crate::{
 use tracing::{info, instrument};
 use zbus::Connection;
 
-// used in outside functions
+/// Used for matching when we don't have the full data
+/// or don't want to send the full data like [`Capabilities`](crate::state::network::Capability)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum DaemonType {
+pub enum WifiDaemonType {
     Iwd,
     Wpa,
 }
 
-// used for matching in controller
 #[derive(Debug)]
 pub enum WirelessAdapter {
     Iwd(Iwd),
@@ -56,8 +66,9 @@ impl Controller {
         })
     }
 
-    /// Sets Wi-Fi to be either iwd, wpa
-    pub async fn determine_adapter(&mut self) {
+    /// Tries to connect to Wi-Fi adapter, does not emit
+    /// error instead does a tracing::warn!()
+    pub async fn connect_wifi_adapter(&mut self) {
         match is_service_active(&self.connection, "iwd").await {
             Some(v) => {
                 if v {
@@ -83,6 +94,8 @@ impl Controller {
         tracing::warn!("Could not connect to any Wi-Fi daemon.");
     }
 
+    /// Connects to the `iwd` Wi-Fi adapter, if found and sets
+    /// up an agent dbus for psk sharing
     #[instrument(err, skip(self))]
     async fn connect_iwd(&mut self) -> Result<(), ManndError> {
         let agent_state = Arc::new(RwLock::new(AgentState::new()));
@@ -114,7 +127,9 @@ impl Controller {
     }
 
     #[instrument(err, skip(self))]
-    pub async fn start_wg(&mut self) -> Result<(), ManndError> {
+    /// Starts the wireguard netlink interface, sets the status
+    /// down to not ruin internet connectivity
+    pub async fn start_wireguard(&mut self) -> Result<(), ManndError> {
         match Wireguard::start_interface(None).await {
             Ok(wg) => {
                 self.wg = Some(wg);
@@ -125,9 +140,10 @@ impl Controller {
     }
 
     #[instrument(err, skip(self))]
-    pub fn update_wg(&self) -> Result<(Vec<String>, Vec<WgMeta>), ManndError> {
+    /// Updates the wireguad files in the state database
+    pub fn update_wireguard_state(&self) -> Result<(Vec<String>, Vec<WgMeta>), ManndError> {
         match &self.wg {
-            Some(wg) => {
+            Some(_) => {
                 self.store.update_wg_files()?;
                 Ok(self.store.get_ordered_wg_files()?)
             }
@@ -136,21 +152,21 @@ impl Controller {
         }
     }
 
+    #[instrument(err, skip(self))]
+    pub async fn connect_wireguard_conf(&self, file: PathBuf) -> Result<(), ManndError> {
+        match &self.wg {
+            Some(wg) => {
+                wg.connect_conf(file)?;
+                Ok(())
+            }
+            _ => Err(ManndError::WgAccess),
+        }
+    }
+
     pub async fn networkd_status(&self) -> bool {
         match is_service_active(&self.connection, "systemd-networkd".to_string()).await {
             Some(res) => res,
             None => false,
-        }
-    }
-
-    #[instrument(err, skip(self))]
-    pub async fn connect_wg(&self, file: PathBuf) -> Result<(), ManndError> {
-        match &self.wg {
-            Some(wg) => {
-                wg.connect(file)?;
-                Ok(())
-            }
-            _ => Err(ManndError::WgAccess),
         }
     }
 }
@@ -248,10 +264,10 @@ impl Controller {
     }
 
     #[instrument(err, skip(self))]
-    pub async fn disconnect_wg(&mut self) -> Result<(), ManndError> {
+    pub async fn remove_wireguard_iface(&mut self) -> Result<(), ManndError> {
         match &mut self.wg {
             Some(wg) => {
-                wg.disconnect().await?;
+                wg.delete_interface().await?;
                 self.wg = None;
             }
             _ => {}
@@ -313,15 +329,15 @@ impl Controller {
         Ok(vec![])
     }
 
-    pub fn daemon_type(&self) -> Option<DaemonType> {
+    pub fn get_wifi_daemon_type(&self) -> Option<WifiDaemonType> {
         match self.wifi {
-            Some(WirelessAdapter::Iwd(_)) => Some(DaemonType::Iwd),
-            Some(WirelessAdapter::Wpa(_)) => Some(DaemonType::Wpa),
+            Some(WirelessAdapter::Iwd(_)) => Some(WifiDaemonType::Iwd),
+            Some(WirelessAdapter::Wpa(_)) => Some(WifiDaemonType::Wpa),
             _ => None,
         }
     }
 
-    pub fn is_wg_connected(&self) -> bool {
+    pub fn is_wireguard_connected(&self) -> bool {
         match self.wg {
             Some(_) => true,
             None => false,

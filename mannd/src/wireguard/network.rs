@@ -38,9 +38,9 @@ pub struct Wireguard {
     index: u32,
 }
 
-// methods used by Network
 impl Wireguard {
-    /// Connects socket and sets up [`INTERFACE`] if not already done so
+    /// Creates or connects to the netlink [`INTERFACE`], setting the status
+    /// to be down
     #[instrument(err)]
     pub async fn start_interface(db: Option<Database>) -> Result<Self, ManndError> {
         let (router, _) =
@@ -85,16 +85,15 @@ impl Wireguard {
             .await?;
 
         let index = get_index(INTERFACE).await?;
-
         let s = Self { router, index };
-
         Self::set_state(&s, false).await?;
 
         return Ok(s);
     }
 
     #[instrument(err)]
-    pub fn connect(&self, path: PathBuf) -> Result<(), ManndError> {
+    /// Attempts to connect to a wireguard configuration
+    pub fn connect_conf(&self, path: PathBuf) -> Result<(), ManndError> {
         let conf = IniConfig::new(path.clone())?;
 
         // get ips, possibly multiple split on ,
@@ -113,11 +112,6 @@ impl Wireguard {
         };
 
         Self::set_conf(path)?;
-        Ok(())
-    }
-
-    pub async fn disconnect(&self) -> Result<(), ManndError> {
-        self.delete_interface().await?;
         Ok(())
     }
 }
@@ -187,7 +181,7 @@ impl Wireguard {
     }
 
     #[instrument(err)]
-    async fn delete_interface(&self) -> Result<(), ManndError> {
+    pub async fn delete_interface(&self) -> Result<(), ManndError> {
         let mut attrs = RtBuffer::new();
         attrs.push(
             RtattrBuilder::default()

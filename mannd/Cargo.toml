@@ -1,5 +1,5 @@
 [package]
-name = "core"
+name = "mannd"
 version = "0.1.0"
 edition = "2024"
 
@@ -29,6 +29,7 @@ zbus_systemd = { version = "0.25701.0", features = [
 ] }
 nyquest = { version = "0.4.0", default-features = false, features = ["async"] }
 tempfile = "3.26.0"
+clap = { version = "4.6.0", features = ["derive"] }
 
 
 [target.'cfg(target_os = "linux")']

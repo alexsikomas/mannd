@@ -1,4 +1,4 @@
-//! # Store Design
+//! # Store
 //!
 //! State persistence for mannd.
 //!

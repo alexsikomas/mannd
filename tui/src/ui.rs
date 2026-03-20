@@ -1,4 +1,4 @@
-use core::{
+use mannd::{
     CONFIG_HOME, SETTINGS, error::ManndError, ini_parse::IniConfig, state::network::InterfaceTypes,
 };
 use ratatui::{

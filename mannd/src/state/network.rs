@@ -7,7 +7,7 @@ use tokio::sync::mpsc::Sender;
 use tracing::{info, instrument};
 
 use crate::{
-    controller::{Controller, DaemonType, WirelessAdapter},
+    controller::{Controller, WifiDaemonType, WirelessAdapter},
     error::ManndError,
     state::signals::{SignalManager, SignalUpdate},
     store::WgMeta,
@@ -35,7 +35,7 @@ impl<'a> NetworkActor<'a> {
         sock_tx: Sender<NetworkState>,
     ) -> Result<Self, ManndError> {
         let mut controller = Controller::new().await?;
-        controller.determine_adapter().await;
+        controller.connect_wifi_adapter().await;
         let signal_manager = SignalManager::new();
         Ok(Self {
             controller,
@@ -58,7 +58,7 @@ impl<'a> NetworkActor<'a> {
         // Wi-Fi not needed
         match action {
             NetworkAction::GetCapabilities => {
-                let wifi_daemon = self.controller.daemon_type();
+                let wifi_daemon = self.controller.get_wifi_daemon_type();
                 let networkd_active = self.controller.networkd_status().await;
                 let wg_installed = Command::new("wg")
                     .arg("--version")
@@ -71,23 +71,25 @@ impl<'a> NetworkActor<'a> {
                 state_send.push(NetworkState::SetCapabilities(caps));
             }
             // WIREGUARD
-            NetworkAction::ConnectWireguard(file) => match self.controller.connect_wg(file).await {
-                Ok(res) => {
-                    info!("Success");
+            NetworkAction::ConnectWireguard(file) => {
+                match self.controller.connect_wireguard_conf(file).await {
+                    Ok(res) => {
+                        info!("Success");
+                    }
+                    Err(e) => {
+                        tracing::error!("{:?}", e)
+                    }
                 }
-                Err(e) => {
-                    tracing::error!("{:?}", e)
-                }
-            },
+            }
             NetworkAction::ToggleWireguard => {
-                if !self.controller.is_wg_connected() {
-                    if let Ok(()) = self.controller.start_wg().await {
+                if !self.controller.is_wireguard_connected() {
+                    if let Ok(()) = self.controller.start_wireguard().await {
                         state_send.push(NetworkState::Success(Success::EnableWireguard));
                         self.handle_net_ctx(NetCtxFlags::Wireguard, &mut state_send)
                             .await?;
                     }
                 } else {
-                    if let Ok(()) = self.controller.disconnect_wg().await {
+                    if let Ok(()) = self.controller.remove_wireguard_iface().await {
                         state_send.push(NetworkState::Success(Success::DisableWireguard));
                     }
                 }
@@ -214,7 +216,7 @@ impl<'a> NetworkActor<'a> {
         }
 
         if flags.intersects(NetCtxFlags::Wireguard) {
-            if let Ok((names, meta)) = self.controller.update_wg() {
+            if let Ok((names, meta)) = self.controller.update_wireguard_state() {
                 state_send.push(NetworkState::SetWireguardInfo((names, meta)));
             }
         }
@@ -386,7 +388,7 @@ pub enum NetworkState {
 // determines what options will be visible/selectable
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Capability {
-    pub wifi_daemon: Option<DaemonType>,
+    pub wifi_daemon: Option<WifiDaemonType>,
     pub networkd_active: bool,
     // installed, wg-mannd interface active
     pub wireguard: (bool, bool),
@@ -394,7 +396,7 @@ pub struct Capability {
 
 impl Capability {
     pub fn new(
-        wifi_daemon: Option<DaemonType>,
+        wifi_daemon: Option<WifiDaemonType>,
         networkd_active: bool,
         wireguard: (bool, bool),
     ) -> Self {

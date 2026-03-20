@@ -1,13 +1,16 @@
+//! # Utilities
+//!
+//! Various utilities that are used by many different parts of the program.
+//!
+//! Can be used by the frontend aswell.
+
 use std::{
-    env,
     ffi::CStr,
-    fs::{self, File, OpenOptions, read_dir},
-    io,
+    fs::{self, OpenOptions, read_dir},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    os::unix::fs::PermissionsExt,
-    path::{Path, PathBuf},
+    os::unix::fs::{PermissionsExt, chown},
+    path::PathBuf,
     str::FromStr,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use neli::{
@@ -23,22 +26,29 @@ use neli::{
 };
 use tracing::{Level, instrument};
 use tracing_error::ErrorLayer;
-use tracing_subscriber::{FmtSubscriber, fmt::format::FmtSpan, layer::SubscriberExt};
+use tracing_subscriber::{FmtSubscriber, layer::SubscriberExt};
 
 use crate::error::ManndError;
 
 const SYS_NET_PATH: &'static str = "/sys/class/net";
 const SYS_VIRT_PATH: &'static str = "/sys/devices/virtual";
 
-pub fn setup_logging(path: PathBuf, max_log_level: Level) {
-    let mut in_root = false;
+pub fn setup_logging(
+    path: PathBuf,
+    max_log_level: Level,
+    uid: Option<u32>,
+) -> Result<(), ManndError> {
+    let mut in_root: Option<bool> = None;
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            // potential error
-            fs::create_dir_all(parent);
+            fs::create_dir_all(parent)?;
         }
-        in_root = is_path_root(&parent.to_path_buf());
+
+        if uid.is_none() {
+            in_root = Some(is_path_root(&parent.to_path_buf()));
+        }
     }
+
     let subscriber = FmtSubscriber::builder()
         .compact()
         .with_file(true)
@@ -56,9 +66,11 @@ pub fn setup_logging(path: PathBuf, max_log_level: Level) {
         .compact()
         .finish();
 
-    if !in_root {
-        fs::set_permissions(path.parent().unwrap(), fs::Permissions::from_mode(0o777));
-        fs::set_permissions(path, fs::Permissions::from_mode(0o777));
+    if uid.is_some() {
+        chown(path.parent().unwrap(), uid, None)?;
+    } else if in_root.is_some_and(|r| r == true) {
+        fs::set_permissions(path.parent().unwrap(), fs::Permissions::from_mode(0o644))?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;
     }
 
     let subscriber = subscriber.with(ErrorLayer::default());
@@ -67,9 +79,10 @@ pub fn setup_logging(path: PathBuf, max_log_level: Level) {
         Err(e) => {
             tracing::error!(
                 "{e}\nCould not set the default subscriber! Continuing without logging."
-            )
+            );
+            Err(ManndError::OperationFailed(e.to_string()))
         }
-        _ => {}
+        _ => Ok(()),
     }
 }
 

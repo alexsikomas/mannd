@@ -8,14 +8,14 @@ use crate::{
     state::{AppContext, InfoPrompt, PopupType, PromptState, StateCommand, UiState, View},
     ui::{UiContext, UiMessage},
 };
-use core::{
+use crossterm::event::{EventStream, read};
+use futures::{SinkExt, StreamExt};
+use mannd::{
     error::ManndError,
     state::network::{
         Capability, Failure, InterfaceTypes, NetCtx, NetworkAction, NetworkState, Start, Success,
     },
 };
-use crossterm::event::{EventStream, read};
-use futures::{SinkExt, StreamExt};
 use tokio::{
     net::{
         UnixStream,
