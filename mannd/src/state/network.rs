@@ -65,9 +65,8 @@ impl<'a> NetworkActor<'a> {
                     .output()
                     .map_or(false, |_| true);
 
-                let wg_iface = Wireguard::check_state().await?;
-
-                let caps = Capability::new(wifi_daemon, networkd_active, (wg_installed, wg_iface));
+                // TODO: check state
+                let caps = Capability::new(wifi_daemon, networkd_active, (wg_installed, false));
                 state_send.push(NetworkState::SetCapabilities(caps));
             }
             // WIREGUARD

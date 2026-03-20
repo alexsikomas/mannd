@@ -31,6 +31,8 @@ nyquest = { version = "0.4.0", default-features = false, features = ["async"] }
 tempfile = "3.26.0"
 clap = { version = "4.6.0", features = ["derive"] }
 
+[dev-dependencies]
+mockall = "0.14.0"
 
 [target.'cfg(target_os = "linux")']
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]

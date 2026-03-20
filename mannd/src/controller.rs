@@ -14,6 +14,7 @@ use tokio::sync::{RwLock, mpsc::Sender};
 
 use crate::{
     error::ManndError,
+    netlink::NlRouterWrapper,
     state::{
         network::{ApConnectInfo, Credentials},
         signals::SignalUpdate,
@@ -49,7 +50,7 @@ pub enum WirelessAdapter {
 pub struct Controller {
     pub wifi: Option<WirelessAdapter>,
     connection: Connection,
-    wg: Option<Wireguard>,
+    wg: Option<Wireguard<NlRouterWrapper>>,
     store: ManndStore,
 }
 
@@ -130,7 +131,7 @@ impl Controller {
     /// Starts the wireguard netlink interface, sets the status
     /// down to not ruin internet connectivity
     pub async fn start_wireguard(&mut self) -> Result<(), ManndError> {
-        match Wireguard::start_interface(None).await {
+        match Wireguard::new().await {
             Ok(wg) => {
                 self.wg = Some(wg);
                 Ok(())
