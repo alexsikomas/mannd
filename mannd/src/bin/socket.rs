@@ -13,6 +13,7 @@ use std::{
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     str::FromStr,
+    time::Duration,
 };
 
 use clap::Parser;
@@ -29,7 +30,7 @@ use mannd::{
     utils::setup_logging,
 };
 use postcard::to_stdvec_cobs;
-use tokio::{net::UnixListener, sync::mpsc};
+use tokio::{net::UnixListener, sync::mpsc, time::timeout};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{Level, info, instrument};
 
@@ -39,6 +40,10 @@ struct Args {
     /// Determines where the $HOME directory is
     #[arg(long)]
     target_uid: Option<u32>,
+
+    /// Disconnects from the socket when frontend killed
+    #[arg(long)]
+    spawned: bool,
 }
 
 #[tokio::main]
@@ -59,65 +64,84 @@ async fn main() -> Result<(), Box<dyn Error>> {
     setup_logging(socket_log, max_log_level, args.target_uid)?;
 
     let guard = UnixSocketGuard::new(UNIX_SOCK_PATH).await?;
-    let (mut sock, _) = guard.listener.accept().await?;
-    let (sock_reader, sock_writer) = sock.split();
-
-    let (sock_tx, mut sock_rx) = mpsc::channel::<NetworkState>(32);
-    let (signal_tx, mut signal_rx) = mpsc::channel::<SignalUpdate>(32);
-
-    let mut actor = NetworkActor::new(signal_tx, sock_tx).await?;
-    let mut writer = FramedWrite::new(sock_writer, LengthDelimitedCodec::new());
-    let mut reader = FramedRead::new(sock_reader, LengthDelimitedCodec::new());
-
-    let daemon = actor.controller.get_wifi_daemon_type();
 
     loop {
-        tokio::select! {
-            Some(msg) = sock_rx.recv() => {
-                if let Ok(res) = to_stdvec_cobs(&msg) {
-                    if writer.send(res.into()).await.is_err() {
-                        info!("Could not write to socket, disconnecting");
-                        return Ok(());
-                    }
-                }
-            },
-            frame_opt = reader.next() => {
-                let Some(frame_res) = frame_opt else {
-                    return Ok(());
-                };
-
-                let mut frame = frame_res?;
-                let action = postcard::from_bytes_cobs::<NetworkAction>(&mut frame)?;
-                let res = actor.handle_action(action).await?;
-                if res == true {
+        let mut sock = if args.spawned {
+            match timeout(Duration::from_secs(10), guard.listener.accept()).await {
+                Ok(Ok((s, _))) => s,
+                Ok(Err(e)) => return Err(e.into()),
+                Err(_) => {
+                    info!("Timed out waiting for frontend connection, exiting.");
                     return Ok(());
                 }
             }
-            Some(update) = signal_rx.recv() => {
-                actor.signal_manager.handle_update(update);
-            }
-            Some(msg) = actor.signal_manager.recv() => {
-                let action: Option<NetworkAction> = match daemon {
-                    Some(WifiDaemonType::Iwd) => {
-                        actor.signal_manager.process_iwd_msg(msg).await
-                    }
-                    Some(WifiDaemonType::Wpa) => {
-                        actor.signal_manager.process_wpa_msg(msg).await
-                    }
-                    _ => {
-                        None
-                    }
-                };
-
-                if let Some(act) = action {
-                    actor.handle_action(act).await?;
-                }
-            }
-            _ = tokio::signal::ctrl_c() => {
-                info!("Shutting down...");
-                return Ok(());
-            }
+        } else {
+            let (s, _) = guard.listener.accept().await?;
+            s
         };
+        let (sock_reader, sock_writer) = sock.split();
+        let (sock_tx, mut sock_rx) = mpsc::channel::<NetworkState>(32);
+        let (signal_tx, mut signal_rx) = mpsc::channel::<SignalUpdate>(32);
+
+        let mut actor = NetworkActor::new(signal_tx, sock_tx).await?;
+        let mut writer = FramedWrite::new(sock_writer, LengthDelimitedCodec::new());
+        let mut reader = FramedRead::new(sock_reader, LengthDelimitedCodec::new());
+
+        let daemon = actor.controller.get_wifi_daemon_type();
+        loop {
+            tokio::select! {
+                Some(msg) = sock_rx.recv() => {
+                    if let Ok(res) = to_stdvec_cobs(&msg) {
+                        if writer.send(res.into()).await.is_err() {
+                            info!("Could not write to socket, disconnecting");
+                            return Ok(());
+                        }
+                    }
+                },
+                frame_opt = reader.next() => {
+                    let Some(frame_res) = frame_opt else {
+                        info!("Frontend has disconnected.");
+                        break;
+                    };
+
+                    let mut frame = frame_res?;
+                    let action = postcard::from_bytes_cobs::<NetworkAction>(&mut frame)?;
+                    let res = actor.handle_action(action).await?;
+                    if res == true {
+                        if args.spawned {
+                            info!("TUI requested shutdown");
+                            return Ok(());
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                Some(update) = signal_rx.recv() => {
+                    actor.signal_manager.handle_update(update);
+                }
+                Some(msg) = actor.signal_manager.recv() => {
+                    let action: Option<NetworkAction> = match daemon {
+                        Some(WifiDaemonType::Iwd) => {
+                            actor.signal_manager.process_iwd_msg(msg).await
+                        }
+                        Some(WifiDaemonType::Wpa) => {
+                            actor.signal_manager.process_wpa_msg(msg).await
+                        }
+                        _ => {
+                            None
+                        }
+                    };
+
+                    if let Some(act) = action {
+                        actor.handle_action(act).await?;
+                    }
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Shutting down...");
+                    return Ok(());
+                }
+            };
+        }
     }
 }
 

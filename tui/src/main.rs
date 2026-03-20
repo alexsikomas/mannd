@@ -38,7 +38,6 @@ async fn get_unix_socket(uid: u32) -> Result<UnixStream, ManndError> {
     }
 
     println!("Privileged access required for the socket service.");
-
     let password =
         tokio::task::spawn_blocking(|| rpassword::prompt_password("Enter sudo password: "))
             .await
@@ -51,7 +50,12 @@ async fn get_unix_socket(uid: u32) -> Result<UnixStream, ManndError> {
     };
 
     let mut child = Command::new("sudo")
-        .args(["-S", bin_path, &format!("--target-uid={}", uid)])
+        .args([
+            "-S",
+            bin_path,
+            &format!("--target-uid={}", uid),
+            "--spawned",
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -64,7 +68,8 @@ async fn get_unix_socket(uid: u32) -> Result<UnixStream, ManndError> {
         stdin.flush().await?;
     }
 
-    for _ in 0..5 {
+    // 3s
+    for _ in 0..15 {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         if let Ok(stream) = UnixStream::connect(UNIX_SOCK_PATH).await {
             return Ok(stream);
