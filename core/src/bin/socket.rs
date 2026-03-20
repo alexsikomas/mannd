@@ -6,7 +6,7 @@ use std::{
     str::FromStr,
 };
 
-use com::{
+use core::{
     SETTINGS, UNIX_SOCK_PATH,
     controller::DaemonType,
     error::ManndError,

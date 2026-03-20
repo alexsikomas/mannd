@@ -2,9 +2,9 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::{fmt::Debug, usize};
 
-use com::controller::DaemonType;
-use com::state::network::{Capability, NetCtx, NetCtxFlags, NetworkAction};
-use com::{
+use core::controller::DaemonType;
+use core::state::network::{Capability, NetCtx, NetCtxFlags, NetworkAction};
+use core::{
     state::network::ApConnectInfoBuilder,
     wireless::common::{AccessPoint, NetworkFlags, Security},
 };
@@ -600,7 +600,7 @@ impl Component for PskConnectionPrompt {
                 PskPromptSelect::Connect => {
                     let ap_info = ApConnectInfoBuilder::default()
                         .ssid(self.ssid.clone())
-                        .credentials(com::state::network::Credentials::Password(
+                        .credentials(core::state::network::Credentials::Password(
                             self.password.clone(),
                         ))
                         .security(Security::Psk)
@@ -899,7 +899,7 @@ impl Component for WpaInterfacePrompt {
                             NetworkAction::ToggleWpaPersist,
                         ));
                     } else {
-                        if let Some(iface) = ifaces.wpa_get(self.interface_cursor) {
+                        if let Some(iface) = ifaces.get_wpa_index(self.interface_cursor) {
                             return StateResult::Command(StateCommand::NetworkAction(
                                 NetworkAction::CreateWpaInterface(iface.into()),
                             ));

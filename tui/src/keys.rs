@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use com::SETTINGS;
+use core::SETTINGS;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Debug, PartialEq, Clone)]

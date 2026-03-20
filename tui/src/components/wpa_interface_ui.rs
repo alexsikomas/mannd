@@ -1,4 +1,4 @@
-use com::wireless::{common::AccessPoint, wpa_supplicant::WpaInterface};
+use core::wireless::{common::AccessPoint, wpa_supplicant::WpaInterface};
 use ratatui::{
     layout::{Constraint, Flex, Layout, Margin, Rect, Spacing},
     style::{Modifier, Style, Stylize},

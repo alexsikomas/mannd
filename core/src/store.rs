@@ -1,3 +1,33 @@
+//! # Store Design
+//!
+//! State persistence for mannd.
+//!
+//! ## Tables
+//! The store currently has the following tables:
+//! [`APPLICATION_TABLE`] and [`WG_TABLE`]
+//!
+//! [`APPLICATION_TABLE`] is used for storing... application state.
+//! It ensures continity between sessions. For example, if the last
+//! time `mannd` was run the VPN, this table can be used to restore
+//! that state without relying on inconsistent netlink queries.
+//!
+//! [`WG_TABLE`] stores metadata for wireguard configuration files.
+//! It caches data found in [`WG_DIR`], i.e. files ending in .conf
+//! and their attributes.
+//!
+//! It also contains a country code, this is still under-development.
+//! See [wireguard](crate::wireguard) for more.
+//!
+//! ## Hashing
+//! This module uses [`ahash`] crate for all hashmap operations.
+//!
+//! While [Hasher](std::hash::Hasher) is likely sufficient [`ahash`]
+//! was chosen to minimise latency for processing large directories.
+//!
+//! For instance, if [`WG_DIR`] contains thosuands of configurations,
+//! the overhead of creating [`WgMeta`] entries may be large enough
+//! to impact the TUI and how long it takes to display the entires.
+
 use ahash::RandomState;
 use postcard::{from_bytes, to_allocvec};
 use redb::{
@@ -7,12 +37,11 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, os::unix::fs::PermissionsExt, path::PathBuf};
 use tracing::instrument;
 
-use crate::{SETTINGS, error::ManndError, utils::is_path_root, wireguard::network::Wireguard};
+use crate::{SETTINGS, error::ManndError, utils::is_path_root};
 
 #[derive(Debug)]
 pub struct ManndStore {
     database: Database,
-    app_state: ApplicationState,
 }
 
 impl ManndStore {
@@ -31,21 +60,129 @@ impl ManndStore {
             fs::set_permissions(&home, fs::Permissions::from_mode(0o777))?;
         }
 
-        Ok(ManndStore {
-            database,
-            app_state: ApplicationState::new(),
-        })
+        Ok(ManndStore { database })
     }
 
     pub fn init_from_db(database: Database) -> Self {
-        Self {
-            database,
-            app_state: ApplicationState::new(),
-        }
+        Self { database }
     }
 }
 
 const APPLICATION_TABLE: TableDefinition<String, &[u8]> = TableDefinition::new("app_state_table");
+
+/// Application State
+impl ManndStore {
+    // Returns Ok(None) if app state has not yet been initialised, i.e. table not found.
+    #[instrument(err, skip(self))]
+    pub fn read_app_state(&self) -> Result<Option<ApplicationState>, ManndError> {
+        let read = self.database.begin_read()?;
+        match read.open_table(APPLICATION_TABLE) {
+            Ok(table) => {
+                // count is inclusive
+                if let Some(config) = table.get("wpa_interface_count".to_string())? {
+                    let app_state: ApplicationState = from_bytes(config.value())?;
+                    Ok(Some(app_state))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(TableError::TableDoesNotExist(_)) => Ok(None),
+            Err(e) => Err(ManndError::RedbTable(e)),
+        }
+    }
+
+    #[instrument(err, skip(self))]
+    pub fn update_wg_app_state(&self, running: bool) -> Result<(), ManndError> {
+        let write = self.database.begin_write()?;
+        {
+            let mut table = write.open_table(APPLICATION_TABLE)?;
+            let data = to_allocvec(&running)?;
+            table.insert("wireguard_running".to_string(), data.as_slice())?;
+        }
+        write.commit()?;
+        Ok(())
+    }
+
+    #[instrument(err, skip(self))]
+    pub fn add_interface_app_state(&self, interface: &str) -> Result<(), ManndError> {
+        let write = self.database.begin_write()?;
+        {
+            let mut table = write.open_table(APPLICATION_TABLE)?;
+            let mut count: usize =
+                if let Some(count_u8) = table.get("wpa_interface_count".to_string())? {
+                    from_bytes(count_u8.value())?
+                } else {
+                    0
+                };
+
+            count += 1;
+            let data = to_allocvec(interface)?;
+            table.insert(format!("wpa_interface_{count}"), data.as_slice())?;
+
+            table.insert(
+                "wpa_interface_count".to_string(),
+                to_allocvec(&count)?.as_slice(),
+            )?;
+        }
+        write.commit()?;
+        Ok(())
+    }
+
+    #[instrument(err, skip(self))]
+    pub fn remove_interface_app_state(&self, interface: &str) -> Result<(), ManndError> {
+        let write = self.database.begin_write()?;
+        {
+            let mut table = write.open_table(APPLICATION_TABLE)?;
+
+            let mut count: usize =
+                if let Some(count_u8) = table.get("wpa_interface_count".to_string())? {
+                    from_bytes(count_u8.value())?
+                } else {
+                    return Err(ManndError::WpaRemoveEmpty);
+                };
+
+            if count == 0 {
+                return Err(ManndError::WpaRemoveEmpty);
+            }
+
+            let mut remove_idx: Option<usize> = None;
+            for i in 0..count {
+                if let Some(value_u8) = table.get(format!("wpa_interface_{i}"))? {
+                    let value: String = from_bytes(value_u8.value())?;
+                    if value == interface {
+                        remove_idx = Some(i);
+                        break;
+                    }
+                }
+            }
+
+            let remove_idx = match remove_idx {
+                Some(idx) => idx,
+                None => return Err(ManndError::WpaRemoveNotFound),
+            };
+
+            if remove_idx != count {
+                let last_bytes = {
+                    let last_val = table
+                        .get(format!("wpa_interface_{count}"))?
+                        .ok_or_else(|| ManndError::WpaInterfaceHole)?;
+                    last_val.value().to_vec()
+                };
+
+                table.insert(format!("wpa_interface_{remove_idx}"), last_bytes.as_slice())?;
+            }
+
+            table.remove(format!("wpa_interface_{count}"))?;
+            count -= 1;
+            table.insert(
+                "wpa_interface_count".to_string(),
+                to_allocvec(&count)?.as_slice(),
+            )?;
+        }
+        write.commit()?;
+        Ok(())
+    }
+}
 
 /// All state here is taken from the last
 /// time the app was run
@@ -81,35 +218,6 @@ pub struct WgMeta {
 
 /// Wiregard store
 impl ManndStore {
-    // Returns Ok(None) if app state has not yet been initialised, i.e. table not found.
-    #[instrument(err, skip(self))]
-    pub fn read_app_state(&self) -> Result<Option<ApplicationState>, ManndError> {
-        let read = self.database.begin_read()?;
-        match read.open_table(APPLICATION_TABLE) {
-            Ok(table) => {
-                if let Some(config) = table.get("config".to_string())? {
-                    let app_state: ApplicationState = from_bytes(config.value())?;
-                    Ok(Some(app_state))
-                } else {
-                    Ok(None)
-                }
-            }
-            Err(TableError::TableDoesNotExist(_)) => Ok(None),
-            Err(e) => Err(ManndError::RedbTable(e)),
-        }
-    }
-
-    #[instrument(err, skip(self))]
-    pub fn update_app_state(&self) -> Result<(), ManndError> {
-        let write = self.database.begin_write()?;
-        {
-            let mut table = write.open_table(APPLICATION_TABLE)?;
-            let data = to_allocvec(&self.app_state)?;
-            table.insert("config".to_string(), data.as_slice())?;
-        }
-        Ok(())
-    }
-
     /// Searches WG_DIR for .conf file, returning a hashmap of the filename
     /// and metadata information in the form of WgMeta, country field is
     /// uninitialised

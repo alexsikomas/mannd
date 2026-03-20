@@ -36,7 +36,6 @@ Before you can use `mannd`, you must have the following installed on your system
 *Note: Your Wi-Fi daemons only allow you to connect to a network but your PC internally needs an IP address assigned to your Wi-Fi interface. This means if you're using `networkd` without any `.network` rules you will need to create them either manually or through the TUI*
 
 ### Installation
-#### Source
 ```bash
 git clone https://github.com/alexsikomas/mannd
 cd mannd
@@ -46,6 +45,18 @@ cd mannd
 
 # install
 ./run.sh -i
+
+# uninstall
+./run.sh -u
 ```
+
+## Roadmap
+
+`mannd` is not yet feature complete, here is what's missing as of now:
+- Connecting to EAP networks
+- Config management for the daemons
+- `systemd-networkd` management
+- Consistent design
+- Missing popups
 
 <hr style="visibility: hidden"/>

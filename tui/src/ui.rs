@@ -1,4 +1,4 @@
-use com::{
+use core::{
     CONFIG_HOME, SETTINGS, error::ManndError, ini_parse::IniConfig, state::network::InterfaceTypes,
 };
 use ratatui::{
@@ -193,9 +193,7 @@ impl UiContext {
                     }
                 }
                 PromptState::WpaInterface(wpa_prompt) => {
-                    info!("HERE x1");
                     if let Some(InterfaceTypes::Wpa(wpa_ifaces)) = &net_ctx.interfaces {
-                        info!("HERE x2");
                         if let Some(prompt_instance) = WpaInterfaceUi::new(
                             wpa_prompt,
                             ctx.net_ctx.persist_wpa_changes,

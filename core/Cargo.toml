@@ -1,5 +1,5 @@
 [package]
-name = "com"
+name = "core"
 version = "0.1.0"
 edition = "2024"
 
@@ -27,7 +27,7 @@ zbus_systemd = { version = "0.25701.0", features = [
     "resolve1",
     "systemd1",
 ] }
-nyquest = {version = "0.4.0", default-features = false, features = ["async"]}
+nyquest = { version = "0.4.0", default-features = false, features = ["async"] }
 tempfile = "3.26.0"
 
 

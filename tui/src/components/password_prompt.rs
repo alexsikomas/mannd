@@ -1,4 +1,4 @@
-use com::wireless::common::AccessPoint;
+use core::wireless::common::AccessPoint;
 use ratatui::{
     layout::{Constraint, Flex, Layout, Margin, Rect, Spacing},
     style::{Style, Stylize},
@@ -9,7 +9,7 @@ use ratatui::{
 
 use crate::{
     state::PskConnectionPrompt,
-    ui::{Theme, THEME},
+    ui::{THEME, Theme},
 };
 
 pub struct PasswordPrompt<'a> {

@@ -67,7 +67,7 @@ impl IniConfig {
         key: T,
         value: (T, T),
     ) -> Result<(), ManndError> {
-        let key_ref: &String = &key.into();
+        let key_ref: &str = &key.into();
         let section = self
             .sections
             .get_mut(key_ref)
