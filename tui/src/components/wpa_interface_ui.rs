@@ -7,15 +7,15 @@ use ratatui::{
 };
 
 use crate::{
-    state::WpaInterfacePrompt,
-    ui::{THEME, Theme},
+    components::layout::centered_overlay,
+    state::prompts::WpaInterfacePrompt,
+    ui::{THEME, Theme, theme},
 };
 
 pub struct WpaInterfaceUi<'a> {
     info: &'a WpaInterfacePrompt,
     ifaces: &'a [WpaInterface],
     persist: bool,
-    theme: &'a Theme,
 }
 
 impl<'a> WpaInterfaceUi<'a> {
@@ -24,18 +24,10 @@ impl<'a> WpaInterfaceUi<'a> {
         persist: bool,
         ifaces: &'a [WpaInterface],
     ) -> Option<Self> {
-        let theme: &Theme = match THEME.get() {
-            Some(t) => t,
-            None => {
-                return None;
-            }
-        };
-
         Some(Self {
             info,
             ifaces,
             persist,
-            theme,
         })
     }
 }
@@ -45,7 +37,7 @@ impl Widget for WpaInterfaceUi<'_> {
     where
         Self: Sized,
     {
-        let theme = &self.theme;
+        let theme = theme();
 
         let areas = build_areas(area);
         Clear.render(areas.outer, buf);
@@ -135,7 +127,7 @@ impl Widget for WpaInterfaceUi<'_> {
             let iface_string: String = iface.into();
             let mut iface_text = Line::from(iface_string);
 
-            if i == self.info.interface_cursor && !self.info.on_choice {
+            if i == self.info.interface_cursor.index && !self.info.on_choice {
                 iface_text.style = Style::new()
                     .bg(theme.secondary.color())
                     .fg(theme.background.color())
@@ -152,17 +144,7 @@ impl Widget for WpaInterfaceUi<'_> {
 }
 
 fn build_areas(area: Rect) -> InterfaceAreas {
-    let [outer_area] = Layout::vertical([Constraint::Percentage(75)])
-        .flex(Flex::Center)
-        .areas(
-            Layout::horizontal([Constraint::Percentage(75)])
-                .flex(Flex::Center)
-                .areas::<1>(area)[0],
-        );
-    let border_block = Block::new()
-        .borders(Borders::ALL)
-        .border_type(ratatui::widgets::BorderType::Rounded);
-    let inner_area = border_block.inner(outer_area);
+    let (outer, inner) = centered_overlay(area, 75, 75);
 
     let [info_area, choice_area, list_area] = Layout::vertical([
         Constraint::Percentage(20),
@@ -170,11 +152,11 @@ fn build_areas(area: Rect) -> InterfaceAreas {
         Constraint::Percentage(60),
     ])
     .flex(Flex::Center)
-    .areas(inner_area);
+    .areas(inner);
 
     InterfaceAreas {
-        outer: outer_area,
-        inner: inner_area,
+        outer,
+        inner,
         choice: choice_area,
         info: info_area,
         list: list_area,

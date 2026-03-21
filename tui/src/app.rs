@@ -1,12 +1,14 @@
 use std::time::Duration;
 
 use postcard::{from_bytes_cobs, to_stdvec_cobs};
+use ratatui::layout::Rect;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::instrument;
 
 use crate::{
-    state::{AppContext, InfoPrompt, PopupType, PromptState, StateCommand, UiState, View},
-    ui::{UiContext, UiMessage},
+    components::{layout::get_inner_area, wireguard_ui::WireguardMenu},
+    state::{AppContext, PopupType, PromptState, StateCommand, UiState, View, prompts::InfoPrompt},
+    ui::UiContext,
 };
 use crossterm::event::EventStream;
 use futures::{SinkExt, StreamExt};
@@ -66,20 +68,24 @@ impl App {
         let mut terminal = ratatui::init();
         let mut events = EventStream::new();
 
-        let mut ui_context = UiContext::new();
-
         let caps = init_request(&mut writer, &mut reader).await?;
         let mut ui = UiState::new(caps.clone())?;
         state.caps = caps;
 
         while !state.should_quit {
             if state.redraw {
-                let context = AppContext::create(&state.net_ctx, &state.caps, ui.vpn_cols);
-                let _ = terminal.draw(|f| ui_context.render(f, &ui, &context));
-                state.redraw = false;
-                if let Some(msg) = &ui_context.message {
-                    handle_ui_message(&mut ui, msg);
+                if let View::Vpn(_) = &ui.current_view {
+                    let terminal_size = terminal.size()?;
+                    let terminal_area = Rect::from(terminal_size);
+                    let inner_area = get_inner_area(terminal_area);
+                    let mut cols: usize = 0;
+                    let _ = WireguardMenu::build_layout_no_render(inner_area, &mut cols);
+                    ui.vpn_cols = cols;
                 }
+                let context =
+                    AppContext::create(&state.net_ctx, &state.caps.wifi_daemon, ui.vpn_cols);
+                let _ = terminal.draw(|f| UiContext::render(f, &ui, &context));
+                state.redraw = false;
             }
 
             tokio::select! {
@@ -95,7 +101,7 @@ impl App {
                         }
                         _ => {
                             if let Some(cmd) = handle_state_update(&mut state, &mut ui, msg).await {
-                                ui.process_commands([cmd]);
+                                ui.process_commands([cmd], &state.caps);
                             }
                         }
                     }
@@ -104,10 +110,9 @@ impl App {
                 Some(Ok(event)) = events.next() => {
                     state.redraw = true;
                     let context = AppContext::create(&state.net_ctx,
-                        &state.caps,
-                        ui.vpn_cols,
+                        &state.caps.wifi_daemon, ui.vpn_cols,
                     );
-                    for action in ui.handle_event(event, &context) {
+                    for action in ui.handle_event(event, &context, &state.caps) {
                         handle_app_action(action, &mut state, &mut ui, &sock_tx).await;
                     }
                 }
@@ -272,14 +277,6 @@ async fn handle_app_action(
         }
         AppAction::Exit => {
             state.should_quit = true;
-        }
-    }
-}
-
-fn handle_ui_message(ui: &mut UiState, msg: &UiMessage) {
-    match msg {
-        UiMessage::SetVpnCols(cols) => {
-            ui.vpn_cols = *cols;
         }
     }
 }

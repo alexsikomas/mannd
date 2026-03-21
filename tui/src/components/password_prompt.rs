@@ -6,31 +6,16 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 
-use crate::{
-    state::PskConnectionPrompt,
-    ui::{THEME, Theme},
-};
+use crate::{components::layout::centered_overlay, state::prompts::PskConnectionPrompt, ui::theme};
 
 pub struct PasswordPrompt<'a> {
     network: &'a AccessPoint,
     info: &'a PskConnectionPrompt,
-    theme: &'a Theme,
 }
 
 impl<'a> PasswordPrompt<'a> {
     pub fn new(ap: &'a AccessPoint, info: &'a PskConnectionPrompt) -> Option<Self> {
-        let theme: &Theme = match THEME.get() {
-            Some(t) => t,
-            None => {
-                return None;
-            }
-        };
-
-        Some(Self {
-            network: ap,
-            info,
-            theme,
-        })
+        Some(Self { network: ap, info })
     }
 }
 
@@ -39,7 +24,7 @@ impl Widget for PasswordPrompt<'_> {
     where
         Self: Sized,
     {
-        let theme = &self.theme;
+        let theme = theme();
 
         let areas = build_areas(area);
         Clear.render(areas.outer, buf);
@@ -177,29 +162,18 @@ impl Widget for PasswordPrompt<'_> {
 }
 
 fn build_areas(area: Rect) -> PasswordAreas {
-    let [outer_area] = Layout::vertical([Constraint::Percentage(75)])
-        .flex(Flex::Center)
-        .areas(
-            Layout::horizontal([Constraint::Percentage(75)])
-                .flex(Flex::Center)
-                .areas::<1>(area)[0],
-        );
-    let border_block = Block::new()
-        .borders(Borders::ALL)
-        .border_type(ratatui::widgets::BorderType::Rounded);
-    let inner_area = border_block.inner(outer_area);
-
+    let (outer, inner) = centered_overlay(area, 75, 75);
     let chunks = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(3),
     ])
     .margin(1)
-    .split(inner_area);
+    .split(inner);
 
     PasswordAreas {
-        outer: outer_area,
-        inner: inner_area,
+        outer,
+        inner,
         chunks: chunks.to_vec(),
     }
 }

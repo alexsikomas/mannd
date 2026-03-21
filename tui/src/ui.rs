@@ -1,6 +1,4 @@
-use mannd::{
-    SETTINGS, error::ManndError, state::network::InterfaceTypes,
-};
+use mannd::{SETTINGS, error::ManndError, state::network::InterfaceTypes};
 use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
@@ -24,6 +22,12 @@ use crate::{
 /// send theme data to functions that require instead
 /// if a function needs it they can read it
 pub static THEME: OnceLock<Theme> = OnceLock::new();
+
+pub fn theme() -> &'static Theme {
+    THEME
+        .get()
+        .expect("Theme must be initialised before rendering")
+}
 
 impl Theme {
     /// Reads config toml from a predefined location and sets the
@@ -53,41 +57,21 @@ impl Theme {
         );
         let theme = Theme::deserialize(hash)?;
 
-        if let Ok(()) = THEME.set(theme) { Ok(()) } else {
+        if let Ok(()) = THEME.set(theme) {
+            Ok(())
+        } else {
             tracing::info!("Theme has already been initalised.");
             Ok(())
         }
     }
 }
 
-pub struct UiContext {
-    pub message: Option<UiMessage>,
-}
-
-impl Default for UiContext {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+pub struct UiContext {}
 
 impl UiContext {
-    pub fn new() -> Self {
-        Self { message: None }
-    }
-
-    /// Renders title, border, and conditionally
-    /// renders main content depending on state
-    pub fn render(&mut self, frame: &mut Frame<'_>, state: &UiState, ctx: &AppContext) {
+    pub fn render(frame: &mut Frame<'_>, state: &UiState, ctx: &AppContext) {
         let outer_area = frame.area();
-        let theme: &Theme;
-        match THEME.get() {
-            Some(t) => {
-                theme = t;
-            }
-            None => {
-                return;
-            }
-        }
+        let theme = theme();
 
         let net_ctx = ctx.net_ctx;
 
@@ -120,10 +104,6 @@ impl UiContext {
             inner_area,
         );
 
-        // Prefer this when stabilised:
-        // let widget: impl Widget;
-        // frame.render_widget(widget, inner_area);
-
         match &state.current_view {
             View::MainMenu(list) => {
                 if let Some(menu) = MainMenu::new(list) {
@@ -135,21 +115,6 @@ impl UiContext {
             View::Wifi(connection_state) => {
                 if let Some(con) = Connection::new(&net_ctx.networks, connection_state) {
                     frame.render_widget(con, inner_area);
-                }
-                for prompt in &state.prompt_stack {
-                    if let PromptState::PskConnect(psk_prompt) = prompt {
-                        let Some(selected) =
-                            net_ctx.networks.get(connection_state.network_cursor)
-                        else {
-                            return;
-                        };
-
-                        if let Some(prompt_instance) =
-                            PasswordPrompt::new(selected, psk_prompt)
-                        {
-                            frame.render_widget(prompt_instance, inner_area);
-                        }
-                    }
                 }
             }
             View::Vpn(vpn_state) => {
@@ -168,18 +133,16 @@ impl UiContext {
                     ctx.net_ctx.wg_ctx.is_on,
                     vpn_areas,
                 ) {
-                    if cols != state.vpn_cols {
-                        self.message = Some(UiMessage::SetVpnCols(cols));
-                    }
                     frame.render_widget(vpn, inner_area);
                 }
             }
             View::Networkd(netd_state) => {
+                // TODO: Unfinished
                 let tmp: Vec<PathBuf> = vec![];
-                NetdMenu::new(netd_state, &tmp);
+                frame.render_widget(NetdMenu::new(netd_state, &tmp), inner_area);
             }
-            _ => {
-                return;
+            View::Config => {
+                // TODO: Config UI not implemented
             }
         }
 
@@ -197,19 +160,27 @@ impl UiContext {
                         && let Some(prompt_instance) = WpaInterfaceUi::new(
                             wpa_prompt,
                             ctx.net_ctx.persist_wpa_changes,
-                            wpa_ifaces,
-                        ) {
-                            frame.render_widget(prompt_instance, inner_area);
-                        }
+                            &wpa_ifaces,
+                        )
+                    {
+                        frame.render_widget(prompt_instance, inner_area);
+                    }
                 }
-                _ => {}
+                PromptState::PskConnect(psk_prompt) => {
+                    if let View::Wifi(connection_state) = &state.current_view {
+                        if let Some(selected) =
+                            net_ctx.networks.get(connection_state.network_cursor.index)
+                        {
+                            if let Some(prompt_instance) = PasswordPrompt::new(selected, psk_prompt)
+                            {
+                                frame.render_widget(prompt_instance, inner_area);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
-}
-
-pub enum UiMessage {
-    SetVpnCols(usize),
 }
 
 #[derive(Debug, Deserialize)]
