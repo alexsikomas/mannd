@@ -13,7 +13,7 @@ use neli::{consts::socket::NlFamily, router::asynchronous::NlRouter, utils::Grou
 use std::{collections::BTreeMap, fmt::Debug, net::IpAddr, path::PathBuf, process::Command};
 use tracing::instrument;
 
-const INTERFACE: &str = "wg-mannd";
+pub const INTERFACE: &str = "wg-mannd";
 
 pub struct Wireguard<H: NetlinkHandle> {
     pub handle: H,

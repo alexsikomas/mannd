@@ -8,8 +8,12 @@ use ratatui::{
 };
 
 use crate::{
-    state::{VpnSelection, VpnState},
-    ui::{THEME, Theme},
+    components::layout::{panel_with_toolbar, selection_style},
+    state::{
+        VpnState,
+        vpn::{self, VpnSelection},
+    },
+    ui::{THEME, Theme, theme},
 };
 
 // min num of cols, max num of cols, target line amount
@@ -22,7 +26,6 @@ pub struct WireguardMenu<'a> {
     names: &'a [String],
     meta: Option<&'a [WgMeta]>,
     wg_on: bool,
-    theme: &'a Theme,
     areas: VpnAreas,
 }
 
@@ -34,19 +37,11 @@ impl<'a> WireguardMenu<'a> {
         wg_on: bool,
         areas: VpnAreas,
     ) -> Option<Self> {
-        let theme: &Theme = match THEME.get() {
-            Some(t) => t,
-            None => {
-                return None;
-            }
-        };
-
         Some(Self {
             state,
             names,
             meta,
             wg_on,
-            theme,
             areas,
         })
     }
@@ -57,8 +52,9 @@ impl Widget for WireguardMenu<'_> {
     where
         Self: Sized,
     {
-        self.render_main_block(self.areas.outer, buf);
-        self.render_option_menu(self.areas.select, buf);
+        let theme = theme();
+        self.render_main_block(self.areas.outer, buf, theme);
+        self.render_option_menu(self.areas.select, buf, theme);
 
         if let Some(meta) = self.meta {
             let item_count = match self.names.len().cmp(&meta.len()) {
@@ -83,13 +79,15 @@ impl Widget for WireguardMenu<'_> {
                 return;
             }
 
-            let cols = if let Some(c) = calc_max_cols(self.areas.vpn) { c } else {
+            let cols = if let Some(c) = calc_max_cols(self.areas.vpn) {
+                c
+            } else {
                 tracing::error!("Not enough room to display a single column...");
                 return;
             };
 
             let items_per_page = rows * cols;
-            let selected_item = self.state.file_cursor;
+            let selected_item = self.state.file_cursor.index;
             let current_page = selected_item / items_per_page;
 
             let mut item_areas: Vec<Rect> = vec![];
@@ -114,28 +112,28 @@ impl Widget for WireguardMenu<'_> {
 
                 let is_selected = selected_item == i
                     && self.state.selection.selected() == Some(&VpnSelection::Files);
-                self.render_wg_item(meta, *area, buf, is_selected, i);
+                self.render_wg_item(meta, *area, buf, is_selected, i, theme);
             }
         }
     }
 }
 
 impl WireguardMenu<'_> {
-    fn render_main_block(&self, area: Rect, buf: &mut Buffer) {
+    fn render_main_block(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         let main_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
             .borders(Borders::ALL)
-            .style(self.theme.primary.color())
+            .style(theme.primary.color())
             .title_top(
                 Line::from(" WireGuard ")
                     .centered()
-                    .style(self.theme.accent.color())
+                    .style(theme.accent.color())
                     .bold(),
             );
         main_block.render(area, buf);
     }
 
-    fn render_option_menu(&self, area: Rect, buf: &mut Buffer) {
+    fn render_option_menu(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         let options_layout = Layout::horizontal([Constraint::Percentage(95)])
             .flex(Flex::Center)
             .split(area);
@@ -145,9 +143,9 @@ impl WireguardMenu<'_> {
         let opt_block = Block::new()
             .borders(Borders::ALL)
             .border_style(if is_block_selected {
-                Style::new().fg(self.theme.accent.color())
+                Style::new().fg(theme.accent.color())
             } else {
-                Style::new().fg(self.theme.muted.color())
+                Style::new().fg(theme.muted.color())
             });
 
         let opt_inner = opt_block.inner(options_layout[0]);
@@ -180,11 +178,11 @@ impl WireguardMenu<'_> {
             .spacing(4)
             .split(opt_inner);
 
-        let mut btn_styles = [self.theme.muted.color(); 4];
+        let mut btn_styles = [theme.muted.color(); 4];
 
         // order disconnect/start -> scan -> countries -> filter
         if self.state.selection.selected() != Some(&VpnSelection::Files) {
-            btn_styles[self.state.selection.selected_index] = self.theme.info.color();
+            btn_styles[self.state.selection.selected_index] = theme.info.color();
         }
 
         if self.wg_on {
@@ -207,42 +205,16 @@ impl WireguardMenu<'_> {
             .render(btn_areas[4], buf);
     }
 
-    fn alter_area_bounds(area: &mut Rect) {
-        area.y += 1;
-        area.height -= 1;
-        area.x += 1;
-        area.width -= 2;
-    }
-
     // To reduce the amount of times this is performed this needs to be run
     // before the ui element is initialised
     pub fn build_layout_no_render(area: Rect, cols: &mut usize) -> VpnAreas {
-        let mut outer_area = Layout::horizontal([Constraint::Percentage(80)])
-            .flex(Flex::Center)
-            .split(
-                Layout::vertical([Constraint::Percentage(90)])
-                    .flex(Flex::Center)
-                    .areas::<1>(area)[0],
-            )[0];
+        let (outer, select_area, vpn_area) = panel_with_toolbar(area, 80, 90);
 
-        let original_outer_area = outer_area;
-        Self::alter_area_bounds(&mut outer_area);
-
-        let [select_area, vpn_vert_area] =
-            Layout::vertical([Constraint::Max(3), Constraint::Fill(1)]).areas::<2>(outer_area);
-
-        let vpn_area = Layout::horizontal([Constraint::Percentage(90)])
-            .flex(Flex::Center)
-            .split(vpn_vert_area)[0];
-
-        let max_cols = if let Some(c) = calc_max_cols(vpn_area) { c } else {
-            tracing::error!("Not enough room to display a single column...");
-            0
-        };
-
+        let max_cols = calc_max_cols(vpn_area).unwrap_or(0);
         *cols = max_cols;
+
         VpnAreas {
-            outer: original_outer_area,
+            outer,
             vpn: vpn_area,
             select: select_area,
         }
@@ -255,8 +227,9 @@ impl WireguardMenu<'_> {
         buf: &mut Buffer,
         is_selected: bool,
         i: usize,
+        theme: &Theme,
     ) {
-        let (border_style, text_style) = self.get_style(is_selected);
+        let (border_style, text_style) = selection_style(theme, is_selected);
         if let Some(name) = self.names.get(i) {
             let block = Block::new()
                 .borders(Borders::ALL)
@@ -290,19 +263,6 @@ impl WireguardMenu<'_> {
                 let access_line = Line::from(format!(" Used: {}", meta.last_used));
                 access_line.render(access_area, buf);
             }
-        }
-    }
-
-    // border, text
-    fn get_style(&self, is_selected: bool) -> (Style, Style) {
-        if is_selected {
-            let border = Style::new().fg(self.theme.accent.color());
-            let text = Style::new().fg(self.theme.info.color());
-            (border, text)
-        } else {
-            let border = Style::new().fg(self.theme.muted.color());
-            let text = Style::new().fg(self.theme.muted.color());
-            (border, text)
         }
     }
 }

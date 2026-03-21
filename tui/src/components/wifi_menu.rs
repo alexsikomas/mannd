@@ -8,29 +8,20 @@ use ratatui::{
 };
 
 use crate::{
-    state::{ConnectionFocus, WifiState},
-    ui::{THEME, Theme},
+    state::{WifiState, wifi::ConnectionFocus},
+    ui::{THEME, Theme, theme},
 };
 
 pub struct Connection<'a> {
     networks: &'a [AccessPoint],
     conn_state: &'a WifiState,
-    theme: &'a Theme,
 }
 
 impl<'a> Connection<'a> {
     pub fn new(networks: &'a [AccessPoint], conn_state: &'a WifiState) -> Option<Self> {
-        let theme: &Theme = match THEME.get() {
-            Some(t) => t,
-            None => {
-                return None;
-            }
-        };
-
         Some(Self {
             networks,
             conn_state,
-            theme,
         })
     }
 }
@@ -40,8 +31,8 @@ impl Widget for Connection<'_> {
     where
         Self: Sized,
     {
-        let theme = &self.theme;
-        let heading_styles = self.heading_styles(&self.conn_state.focused_area);
+        let theme = theme();
+        let heading_styles = self.heading_styles(&self.conn_state.focused_area, theme);
 
         let main_chunks =
             Layout::horizontal([Constraint::Percentage(70), Constraint::Percentage(30)])
@@ -70,7 +61,7 @@ impl Widget for Connection<'_> {
 
             // let is_selected = i == self.conn_state.network_cursor;
             let is_focused = self.conn_state.focused_area == ConnectionFocus::Networks;
-            let network_style = self.network_style(network, is_focused);
+            let network_style = self.network_style(network, is_focused, theme);
 
             let mut spans = vec![Span::styled(network.ssid.clone(), network_style)];
 
@@ -89,7 +80,7 @@ impl Widget for Connection<'_> {
             .highlight_style(Style::new().fg(theme.accent.color()).bold());
 
         let mut network_list_state = ListState::default();
-        network_list_state.select(Some(self.conn_state.network_cursor));
+        network_list_state.select(Some(self.conn_state.network_cursor.index));
 
         widgets::StatefulWidget::render(network_list, main_chunks[0], buf, &mut network_list_state);
 
@@ -122,7 +113,7 @@ impl Widget for Connection<'_> {
 
             let is_selected = i == self.conn_state.actions.selected_index;
             let (fg_col, bg_col) =
-                self.action_item_colors(&self.conn_state.focused_area, is_selected);
+                self.action_item_colors(&self.conn_state.focused_area, is_selected, theme);
 
             let paragraph = Paragraph::new(item.as_str())
                 .centered()
@@ -153,34 +144,39 @@ impl<'a> Connection<'a> {
         }
     }
 
-    fn heading_styles(&self, focus: &ConnectionFocus) -> (Style, Style) {
+    fn heading_styles(&self, focus: &ConnectionFocus, theme: &Theme) -> (Style, Style) {
         match focus {
             ConnectionFocus::Actions => (
-                Style::new().fg(self.theme.accent.color()).bold(),
-                Style::new().fg(self.theme.accent.color()),
+                Style::new().fg(theme.accent.color()).bold(),
+                Style::new().fg(theme.accent.color()),
             ),
             ConnectionFocus::Networks => (
-                Style::new().fg(self.theme.accent.color()),
-                Style::new().fg(self.theme.accent.color()).bold(),
+                Style::new().fg(theme.accent.color()),
+                Style::new().fg(theme.accent.color()).bold(),
             ),
         }
     }
 
-    fn action_item_colors(&self, focus: &ConnectionFocus, is_selected: bool) -> (Color, Color) {
+    fn action_item_colors(
+        &self,
+        focus: &ConnectionFocus,
+        is_selected: bool,
+        theme: &Theme,
+    ) -> (Color, Color) {
         if *focus == ConnectionFocus::Actions && is_selected {
-            (self.theme.background.color(), self.theme.secondary.color())
+            (theme.background.color(), theme.secondary.color())
         } else {
-            (self.theme.foreground.color(), self.theme.background.color())
+            (theme.foreground.color(), theme.background.color())
         }
     }
 
-    fn network_style(&self, ap: &AccessPoint, is_focused: bool) -> Style {
+    fn network_style(&self, ap: &AccessPoint, is_focused: bool, theme: &Theme) -> Style {
         let mut style = Style::new();
         if ap.flags.contains(NetworkFlags::CONNECTED) && is_focused {
-            let fg_col = self.theme.success.color();
+            let fg_col = theme.success.color();
             style = style.fg(fg_col).bold();
         } else if ap.flags.contains(NetworkFlags::KNOWN) && is_focused {
-            let fg_col = self.theme.tertiary.color();
+            let fg_col = theme.tertiary.color();
             style = style.fg(fg_col).italic();
         }
         style

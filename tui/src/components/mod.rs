@@ -1,4 +1,4 @@
-pub mod eap_prompt;
+pub mod layout;
 pub mod main_menu;
 pub mod networkd_ui;
 pub mod password_prompt;

@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::{
     state::PopupType,
-    ui::{THEME, Theme},
+    ui::{THEME, Theme, theme},
 };
 
 // Style that should be displayed for each
@@ -21,25 +21,13 @@ struct PromptMeta {
 }
 
 pub struct PopupPrompt<'a> {
-    theme: &'a Theme,
     text: &'a String,
     prompt_type: &'a PopupType,
 }
 
 impl<'a> PopupPrompt<'a> {
     pub fn new(text: &'a String, prompt_type: &'a PopupType) -> Option<Self> {
-        let theme = match THEME.get() {
-            Some(t) => t,
-            None => {
-                return None;
-            }
-        };
-
-        Some(Self {
-            theme,
-            text,
-            prompt_type,
-        })
+        Some(Self { text, prompt_type })
     }
 }
 
@@ -48,7 +36,7 @@ impl Widget for PopupPrompt<'_> {
     where
         Self: Sized,
     {
-        let theme = &self.theme;
+        let theme = theme();
 
         let [main_area] = Layout::vertical([Constraint::Percentage(50)])
             .flex(Flex::Center)
