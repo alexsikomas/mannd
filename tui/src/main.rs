@@ -1,6 +1,4 @@
-use mannd::{
-    SETTINGS, UNIX_SOCK_PATH, error::ManndError, geteuid, init_home_path, utils::setup_logging,
-};
+use mannd::{SETTINGS, UNIX_SOCK_PATH, error::ManndError, init_home_path, utils::setup_logging};
 use std::{path::PathBuf, process::Stdio, str::FromStr};
 use tokio::{io::AsyncWriteExt, net::UnixStream, process::Command};
 use tracing::{Level, instrument};
@@ -12,7 +10,7 @@ const RELEASE_SOCK_BIN: &str = "/usr/libexec/mannd-socket";
 #[tokio::main]
 #[instrument(err)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let uid = unsafe { geteuid() };
+    let uid = unsafe { libc::geteuid() };
     let stream = get_unix_socket(uid).await?;
 
     let max_log_level = Level::from_str(&SETTINGS.get("debug", "max_log_level")?)?;
@@ -31,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// if no connection requests password to start either debug or
 /// release service.
 async fn get_unix_socket(uid: u32) -> Result<UnixStream, ManndError> {
-    init_home_path(Some(uid));
+    init_home_path(Some(uid))?;
 
     if let Ok(stream) = UnixStream::connect(UNIX_SOCK_PATH).await {
         return Ok(stream);

@@ -28,7 +28,7 @@ impl Wireguard<NlRouterWrapper> {
         let router = NlRouterWrapper::new(router);
         router.start_wireguard_interface(INTERFACE).await?;
         let index = get_index(INTERFACE).await?;
-        router.set_interface_state(index, false);
+        router.set_interface_state(index, false).await?;
         Ok(Self {
             handle: router,
             index,

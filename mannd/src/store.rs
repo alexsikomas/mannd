@@ -49,7 +49,7 @@ impl ManndStore {
     pub fn init() -> Result<Self, ManndError> {
         let mut home = PathBuf::from(SETTINGS.get("storage", "state")?);
         let in_root = is_path_root(&home);
-        let _ = fs::create_dir_all(&home);
+        fs::create_dir_all(&home)?;
         if !in_root {
             fs::set_permissions(&home, fs::Permissions::from_mode(0o777))?;
         }
@@ -202,7 +202,7 @@ impl ApplicationState {
 }
 
 const WG_TABLE: TableDefinition<String, &[u8]> = TableDefinition::new("wg_table");
-pub const WG_DIR: &'static str = "/etc/wireguard/";
+pub const WG_DIR: &str = "/etc/wireguard/";
 
 // since last_used is the first item derive eq
 // to compare by time
@@ -282,17 +282,17 @@ impl ManndStore {
                                     ..*data
                                 };
                                 let meta_bytes = to_allocvec(&meta)?;
-                                let _ = table.insert(file.to_string(), meta_bytes.as_slice());
+                                table.insert(file.to_string(), meta_bytes.as_slice())?;
                             }
                             _ => {
                                 let meta_bytes = to_allocvec(&data)?;
-                                let _ = table.insert(file.to_string(), meta_bytes.as_slice());
+                                table.insert(file.to_string(), meta_bytes.as_slice())?;
                             }
                         };
                     }
                     None => {
                         let meta_bytes = to_allocvec(&data)?;
-                        let _ = table.insert(file.to_string(), meta_bytes.as_slice());
+                        table.insert(file.to_string(), meta_bytes.as_slice())?;
                     }
                 }
             }

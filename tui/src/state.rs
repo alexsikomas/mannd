@@ -4,6 +4,7 @@ use std::{fmt::Debug, usize};
 
 use crossterm::event::Event;
 use mannd::controller::WifiDaemonType;
+use mannd::error::ManndError;
 use mannd::state::network::{Capability, NetCtx, NetCtxFlags, NetworkAction};
 use mannd::{
     state::network::ApConnectInfoBuilder,
@@ -69,8 +70,8 @@ trait Component {
 }
 
 impl UiState {
-    pub fn new(caps: Capability) -> Self {
-        let keymap = Keymap::load_keys();
+    pub fn new(caps: Capability) -> Result<Self, ManndError> {
+        let keymap = Keymap::load_keys()?;
 
         match KEYMAP.set(keymap) {
             Ok(_) => {}
@@ -79,13 +80,13 @@ impl UiState {
             }
         };
 
-        UiState {
+        Ok(UiState {
             should_block: false,
             current_view: View::main_menu(&caps),
             prompt_stack: vec![],
             vpn_cols: 0,
             caps,
-        }
+        })
     }
 
     pub fn refresh_view(&mut self) {

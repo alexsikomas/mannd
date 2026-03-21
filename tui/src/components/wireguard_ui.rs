@@ -20,8 +20,8 @@ const ROW_H: u16 = 6;
 
 pub struct WireguardMenu<'a> {
     state: &'a VpnState,
-    names: &'a Vec<String>,
-    meta: Option<&'a Vec<WgMeta>>,
+    names: &'a [String],
+    meta: Option<&'a [WgMeta]>,
     wg_on: bool,
     theme: &'a Theme,
     areas: VpnAreas,
@@ -30,8 +30,8 @@ pub struct WireguardMenu<'a> {
 impl<'a> WireguardMenu<'a> {
     pub fn new(
         state: &'a VpnState,
-        names: &'a Vec<String>,
-        meta: Option<&'a Vec<WgMeta>>,
+        names: &'a [String],
+        meta: Option<&'a [WgMeta]>,
         wg_on: bool,
         areas: VpnAreas,
     ) -> Option<Self> {
@@ -260,7 +260,7 @@ impl<'a> WireguardMenu<'a> {
 
     fn render_wg_item(
         &self,
-        meta: &Vec<WgMeta>,
+        meta: &[WgMeta],
         area: Rect,
         buf: &mut Buffer,
         is_selected: bool,

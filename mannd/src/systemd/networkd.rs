@@ -5,7 +5,7 @@ use tracing::instrument;
 
 use crate::error::ManndError;
 
-const NETWORK_FOLDER: &'static str = "/etc/systemd/network/";
+const NETWORK_FOLDER: &str = "/etc/systemd/network/";
 
 struct Section {
     name: String,
@@ -62,25 +62,3 @@ pub async fn get_netd_files() -> Result<Vec<String>, ManndError> {
 //     network_section.write(&mut file).await?;
 //     Ok(())
 // }
-
-mod tests {
-    use super::*;
-    use std::net::Ipv4Addr;
-
-    #[tokio::test]
-    #[instrument(err)]
-    async fn test_get_netd_files() -> Result<(), ManndError> {
-        let _ = get_netd_files().await?;
-        Ok(())
-    }
-
-    // #[tokio::test]
-    // async fn test_init_virt_interface() -> Result<(), ManndError> {
-    //     init_virtual_interface(
-    //         vec![IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))],
-    //         IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
-    //     )
-    //     .await?;
-    //     Ok(())
-    // }
-}

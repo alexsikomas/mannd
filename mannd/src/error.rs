@@ -111,6 +111,13 @@ pub enum ManndError {
     WpaRemoveNotFound,
     #[error("Hole between interface entries.")]
     WpaInterfaceHole,
+
+    #[error("Malformed keybind")]
+    InputKey,
+    #[error("Home has already been initialised")]
+    HomeInitialised,
+    #[error("UID without a home")]
+    UidHome,
 }
 
 impl<T, P> From<neli::err::RouterError<T, P>> for ManndError
@@ -130,108 +137,3 @@ pub trait NeliError {
 pub trait ThreadSafeError: std::error::Error + Send + Sync + 'static {}
 
 impl<T> ThreadSafeError for T where T: std::error::Error + Send + Sync + 'static {}
-//
-// macro_rules! error_with_tracing {
-//     ($from_type:ty, $enum_variant:ident, $log_message:literal) => {
-//         impl From<$from_type> for ManndError {
-//             fn from(err: $from_type) -> Self {
-//                 tracing::error!($log_message, err);
-//                 ManndError::$enum_variant(err)
-//             }
-//         }
-//     };
-// }
-//
-// error_with_tracing!(neli::err::MsgError, NeliMsg, "Netlink Message Error: {}");
-// error_with_tracing!(
-//     neli::err::DeError,
-//     NeliDe,
-//     "Netlink Deserialisation Error: {}"
-// );
-// error_with_tracing!(
-//     neli::err::SerError,
-//     NeliSer,
-//     "Netlink Serialisation Error: {}"
-// );
-// error_with_tracing!(
-//     neli::err::BuilderError,
-//     NeliBuilder,
-//     "Netlink Builder Error: {}"
-// );
-// error_with_tracing!(
-//     neli::err::SocketError,
-//     NeliSocket,
-//     "Netlink Socket Error: {}"
-// );
-// error_with_tracing!(
-//     neli::rtnl::RtattrBuilderError,
-//     RtBuilder,
-//     "Rt Builder Error: {}"
-// );
-// error_with_tracing!(
-//     neli::rtnl::IfinfomsgBuilderError,
-//     Ifinfomsg,
-//     "Ifinfomsg error: {}"
-// );
-// error_with_tracing!(
-//     neli::rtnl::IfaddrmsgBuilderError,
-//     Ifaddrmsgbuilder,
-//     "Ifaddr error: {}"
-// );
-// error_with_tracing!(
-//     neli::genl::NlattrBuilderError,
-//     Nlmsgbuilder,
-//     "nlattrbuilder error: {}"
-// );
-// error_with_tracing!(
-//     neli::genl::AttrTypeBuilderError,
-//     AttrTypeBuilder,
-//     "AttrType Builder Error: {}"
-// );
-// error_with_tracing!(
-//     neli::rtnl::RtmsgBuilderError,
-//     RtmMsgBuilder,
-//     "Rtm Builder Error: {}"
-// );
-// error_with_tracing!(
-//     neli::nl::NlmsghdrBuilderError,
-//     NlmsgBuilder,
-//     "Nlmsg Builder Error: {}"
-// );
-// error_with_tracing!(
-//     neli::genl::GenlmsghdrBuilderError,
-//     GenlmsgBuilder,
-//     "Genlmsg Builder Error: {}"
-// );
-// error_with_tracing!(std::io::Error, IoError, "IO Error: {}");
-// error_with_tracing!(zbus::Error, Zbus, "Zbus Error: {}");
-// error_with_tracing!(
-//     zbus::fdo::Error,
-//     ZbusFreedesktop,
-//     "Freedesktop Error from Zbus: {}"
-// );
-//
-// error_with_tracing!(zbus::zvariant::Error, Zvariant, "Zbus zvariant Error: {}");
-//
-// error_with_tracing!(
-//     crate::wireless::common::AccessPointBuilderError,
-//     AccessPointBuilder,
-//     "Error building ap: {}"
-// );
-//
-// error_with_tracing!(redb::DatabaseError, RedbDatabase, "Redb database error: {}");
-// error_with_tracing!(
-//     redb::TransactionError,
-//     RedbTransaction,
-//     "Redb transaction error: {}"
-// );
-//
-// error_with_tracing!(redb::CommitError, RedbCommit, "Redb commit error: {}");
-// error_with_tracing!(redb::TableError, RedbTable, "Redb table error: {}");
-// error_with_tracing!(redb::StorageError, RedbStorage, "Redb storage error: {}");
-// error_with_tracing!(postcard::Error, Postcard, "Postcard error occured: {}");
-// error_with_tracing!(
-//     serde::de::value::Error,
-//     SerdeDe,
-//     "Serde Deserialisation error: {}"
-// );
