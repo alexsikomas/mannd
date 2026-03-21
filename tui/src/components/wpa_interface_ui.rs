@@ -1,9 +1,9 @@
-use mannd::wireless::{common::AccessPoint, wpa_supplicant::WpaInterface};
+use mannd::wireless::wpa_supplicant::WpaInterface;
 use ratatui::{
-    layout::{Constraint, Flex, Layout, Margin, Rect, Spacing},
+    layout::{Constraint, Flex, Layout, Rect},
     style::{Modifier, Style, Stylize},
-    text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, Paragraph, Widget, Wrap},
+    text::Line,
+    widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
 
 use crate::{
@@ -40,7 +40,7 @@ impl<'a> WpaInterfaceUi<'a> {
     }
 }
 
-impl<'a> Widget for WpaInterfaceUi<'a> {
+impl Widget for WpaInterfaceUi<'_> {
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized,

@@ -6,6 +6,7 @@
 
 use std::{
     ffi::CStr,
+    fmt::Write,
     fs::{self, OpenOptions, read_dir},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     os::unix::fs::{PermissionsExt, chown},
@@ -45,20 +46,14 @@ pub fn setup_logging(
         }
 
         if uid.is_none() {
-            in_root = Some(is_path_root(&parent.to_path_buf()));
+            in_root = Some(is_path_root(parent));
         }
     }
 
     let subscriber = FmtSubscriber::builder()
         .compact()
         .with_file(true)
-        .with_writer(
-            OpenOptions::new()
-                .append(true)
-                .create(true)
-                .open(&path)
-                .unwrap(),
-        )
+        .with_writer(OpenOptions::new().append(true).create(true).open(&path)?)
         .with_max_level(max_log_level)
         .with_ansi(true)
         .with_line_number(true)
@@ -66,10 +61,14 @@ pub fn setup_logging(
         .compact()
         .finish();
 
+    let parent = path
+        .parent()
+        .ok_or_else(|| ManndError::OperationFailed("Cannot get parent directory".to_string()))?;
+
     if uid.is_some() {
-        chown(path.parent().unwrap(), uid, None)?;
+        chown(parent, uid, None)?;
     } else if in_root.is_some_and(|r| r) {
-        fs::set_permissions(path.parent().unwrap(), fs::Permissions::from_mode(0o644))?;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o644))?;
         fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;
     }
 
@@ -87,11 +86,16 @@ pub fn setup_logging(
 }
 
 pub fn is_path_root(path: &Path) -> bool {
-    if path.starts_with("/root") {
-        true
-    } else {
-        false
+    path.starts_with("/root")
+}
+
+pub fn ssid_to_hex(ssid: &str) -> String {
+    let bytes = ssid.as_bytes();
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        write!(s, "{b:02x}").unwrap();
     }
+    s
 }
 
 #[instrument(err)]
@@ -99,7 +103,7 @@ pub async fn get_name(index: u32) -> Result<String, ManndError> {
     let socket =
         NlSocketHandle::connect(neli::consts::socket::NlFamily::Route, None, Groups::empty())?;
     let ifinfomsg = IfinfomsgBuilder::default()
-        .ifi_index(index as i32)
+        .ifi_index(index.cast_signed())
         .ifi_family(neli::consts::rtnl::RtAddrFamily::Unspecified)
         .build()?;
 
@@ -113,22 +117,20 @@ pub async fn get_name(index: u32) -> Result<String, ManndError> {
 
     let messages = socket.recv_all::<NlTypeWrapper, Ifinfomsg>().await?;
     for msg in messages.0 {
-        if let Some(payload) = msg.get_payload() {
-            if let Some(name) = payload
+        if let Some(payload) = msg.get_payload()
+            && let Some(name) = payload
                 .rtattrs()
                 .get_attr_handle()
                 .get_attribute(Ifla::Ifname)
-            {
-                if let Ok(mut name) = String::from_utf8((*name.rta_payload().as_ref()).to_vec()) {
-                    // remove the \0 char
-                    name.remove(name.len() - 1);
-                    return Ok(name);
-                }
-            }
+            && let Ok(mut name) = String::from_utf8((*name.rta_payload().as_ref()).to_vec())
+        {
+            // remove the \0 char
+            name.remove(name.len() - 1);
+            return Ok(name);
         }
     }
 
-    Ok("".to_string())
+    Ok(String::new())
 }
 
 #[instrument(err)]
@@ -158,8 +160,8 @@ pub async fn get_index(interface: &'static str) -> Result<u32, ManndError> {
     socket.send(&nlmsg).await?;
 
     while let Ok(messages) = socket.recv::<NlTypeWrapper, Ifinfomsg>().await {
-        for msg in messages.0.into_iter() {
-            if let Some(payload) = msg.unwrap().get_payload() {
+        for msg in messages.0 {
+            if let Some(payload) = msg?.get_payload() {
                 let cur_index = payload.ifi_index();
                 if let Some(name) = payload
                     .rtattrs()
@@ -171,14 +173,14 @@ pub async fn get_index(interface: &'static str) -> Result<u32, ManndError> {
                     match CStr::from_bytes_until_nul(bytes) {
                         Ok(v) => {
                             if v.to_string_lossy().into_owned() == interface {
-                                index = cur_index.clone() as u32;
+                                index = (*cur_index).cast_unsigned();
                                 return Ok(index);
                             }
                         }
                         Err(e) => {
                             tracing::error!("Could not convert into Cstr. {e}");
                         }
-                    };
+                    }
                 }
             }
         }
@@ -197,8 +199,8 @@ pub fn list_interfaces() -> Vec<String> {
     let virt_path = PathBuf::from(SYS_VIRT_PATH);
     let virt_path_comp: Vec<_> = virt_path.components().collect();
 
-    if let Ok(mut dir) = read_dir(SYS_NET_PATH) {
-        while let Some(entry) = dir.next() {
+    if let Ok(dir) = read_dir(SYS_NET_PATH) {
+        for entry in dir {
             if entry.is_err() {
                 continue;
             }
@@ -223,16 +225,10 @@ pub fn list_interfaces() -> Vec<String> {
 #[instrument(err)]
 pub fn str_to_ip(inp: &str) -> Result<IpAddr, ManndError> {
     // we expect ipv4
-    if inp.contains(".") {
-        match Ipv4Addr::from_str(inp) {
-            Ok(ip) => Ok(IpAddr::V4(ip)),
-            Err(_) => Err(ManndError::StrToIp),
-        }
-    } else if inp.contains(":") {
-        match Ipv6Addr::from_str(inp) {
-            Ok(ip) => Ok(IpAddr::V6(ip)),
-            Err(_) => Err(ManndError::StrToIp),
-        }
+    if inp.contains('.') {
+        Ipv4Addr::from_str(inp).map_or_else(|_| Err(ManndError::StrToIp), |ip| Ok(IpAddr::V4(ip)))
+    } else if inp.contains(':') {
+        Ipv6Addr::from_str(inp).map_or_else(|_| Err(ManndError::StrToIp), |ip| Ok(IpAddr::V6(ip)))
     } else {
         Err(ManndError::StrToIp)
     }
@@ -243,7 +239,7 @@ pub fn format_mac_address(mac: &[u8]) -> String {
         return "N/A".to_string();
     }
     mac.iter()
-        .map(|b| format!("{:02X}", b))
+        .map(|b| format!("{b:02X}"))
         .collect::<Vec<String>>()
         .join(":")
 }

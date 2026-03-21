@@ -4,9 +4,8 @@ use ratatui::{
     layout::{Constraint, Flex, Layout, Margin, Rect},
     style::{Style, Stylize},
     text::Line,
-    widgets::{self, Block, Borders, Widget},
+    widgets::{Block, Borders, Widget},
 };
-use tracing::info;
 
 use crate::{
     state::{VpnSelection, VpnState},
@@ -53,7 +52,7 @@ impl<'a> WireguardMenu<'a> {
     }
 }
 
-impl<'a> Widget for WireguardMenu<'a> {
+impl Widget for WireguardMenu<'_> {
     fn render(self, _area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
@@ -61,73 +60,67 @@ impl<'a> Widget for WireguardMenu<'a> {
         self.render_main_block(self.areas.outer, buf);
         self.render_option_menu(self.areas.select, buf);
 
-        match self.meta {
-            Some(meta) => {
-                let item_count = match self.names.len().cmp(&meta.len()) {
-                    std::cmp::Ordering::Equal => self.names.len(),
-                    std::cmp::Ordering::Less => {
-                        tracing::warn!("Wireguard names & meta are not the same length");
-                        self.names.len()
-                    }
-                    std::cmp::Ordering::Greater => {
-                        tracing::warn!("Wireguard names & meta are not the same length");
-                        meta.len()
-                    }
-                };
-                if item_count <= 0 {
-                    return;
+        if let Some(meta) = self.meta {
+            let item_count = match self.names.len().cmp(&meta.len()) {
+                std::cmp::Ordering::Equal => self.names.len(),
+                std::cmp::Ordering::Less => {
+                    tracing::warn!("Wireguard names & meta are not the same length");
+                    self.names.len()
                 }
-
-                // rows displayable
-                let rows = (self.areas.vpn.height / ROW_H) as usize;
-                if rows <= 0 {
-                    tracing::error!("Not enough room to display a single row...");
-                    return;
+                std::cmp::Ordering::Greater => {
+                    tracing::warn!("Wireguard names & meta are not the same length");
+                    meta.len()
                 }
-
-                let cols = match calc_max_cols(self.areas.vpn) {
-                    Some(c) => c,
-                    None => {
-                        tracing::error!("Not enough room to display a single column...");
-                        return;
-                    }
-                };
-
-                let items_per_page = rows * cols;
-                let selected_item = self.state.file_cursor;
-                let current_page = selected_item / items_per_page;
-
-                let mut item_areas: Vec<Rect> = vec![];
-                let rows_layout =
-                    Layout::vertical(vec![Constraint::Percentage(97 / (rows as u16)); rows])
-                        .split(self.areas.vpn);
-
-                for row in rows_layout.into_iter() {
-                    let cols =
-                        Layout::horizontal(vec![Constraint::Percentage(100 / (cols as u16)); cols])
-                            .flex(Flex::Center)
-                            .split(*row);
-
-                    item_areas.append(&mut cols.to_vec());
-                }
-
-                for (mut i, area) in item_areas.iter().enumerate() {
-                    i += items_per_page * current_page;
-                    if i > item_count {
-                        break;
-                    }
-
-                    let is_selected = selected_item == i
-                        && self.state.selection.selected() == Some(&VpnSelection::Files);
-                    self.render_wg_item(&meta, *area, buf, is_selected, i);
-                }
+            };
+            if item_count <= 0 {
+                return;
             }
-            None => {}
+
+            // rows displayable
+            let rows = (self.areas.vpn.height / ROW_H) as usize;
+            if rows <= 0 {
+                tracing::error!("Not enough room to display a single row...");
+                return;
+            }
+
+            let cols = if let Some(c) = calc_max_cols(self.areas.vpn) { c } else {
+                tracing::error!("Not enough room to display a single column...");
+                return;
+            };
+
+            let items_per_page = rows * cols;
+            let selected_item = self.state.file_cursor;
+            let current_page = selected_item / items_per_page;
+
+            let mut item_areas: Vec<Rect> = vec![];
+            let rows_layout =
+                Layout::vertical(vec![Constraint::Percentage(97 / (rows as u16)); rows])
+                    .split(self.areas.vpn);
+
+            for row in rows_layout.iter() {
+                let cols =
+                    Layout::horizontal(vec![Constraint::Percentage(100 / (cols as u16)); cols])
+                        .flex(Flex::Center)
+                        .split(*row);
+
+                item_areas.append(&mut cols.to_vec());
+            }
+
+            for (mut i, area) in item_areas.iter().enumerate() {
+                i += items_per_page * current_page;
+                if i > item_count {
+                    break;
+                }
+
+                let is_selected = selected_item == i
+                    && self.state.selection.selected() == Some(&VpnSelection::Files);
+                self.render_wg_item(meta, *area, buf, is_selected, i);
+            }
         }
     }
 }
 
-impl<'a> WireguardMenu<'a> {
+impl WireguardMenu<'_> {
     fn render_main_block(&self, area: Rect, buf: &mut Buffer) {
         let main_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
@@ -162,10 +155,10 @@ impl<'a> WireguardMenu<'a> {
         opt_block.render(options_layout[0], buf);
 
         // TODO: find better way to do this
-        let layouts = if !self.wg_on {
+        let layouts = if self.wg_on {
             vec![
                 Constraint::Min(0),
-                Constraint::Length(5),
+                Constraint::Length(10),
                 Constraint::Length(4),
                 Constraint::Length(13),
                 Constraint::Length(6),
@@ -174,7 +167,7 @@ impl<'a> WireguardMenu<'a> {
         } else {
             vec![
                 Constraint::Min(0),
-                Constraint::Length(10),
+                Constraint::Length(5),
                 Constraint::Length(4),
                 Constraint::Length(13),
                 Constraint::Length(6),
@@ -232,7 +225,7 @@ impl<'a> WireguardMenu<'a> {
                     .areas::<1>(area)[0],
             )[0];
 
-        let original_outer_area = outer_area.clone();
+        let original_outer_area = outer_area;
         Self::alter_area_bounds(&mut outer_area);
 
         let [select_area, vpn_vert_area] =
@@ -242,12 +235,9 @@ impl<'a> WireguardMenu<'a> {
             .flex(Flex::Center)
             .split(vpn_vert_area)[0];
 
-        let max_cols = match calc_max_cols(vpn_area) {
-            Some(c) => c,
-            None => {
-                tracing::error!("Not enough room to display a single column...");
-                0
-            }
+        let max_cols = if let Some(c) = calc_max_cols(vpn_area) { c } else {
+            tracing::error!("Not enough room to display a single column...");
+            0
         };
 
         *cols = max_cols;
@@ -267,43 +257,38 @@ impl<'a> WireguardMenu<'a> {
         i: usize,
     ) {
         let (border_style, text_style) = self.get_style(is_selected);
-        match self.names.get(i) {
-            Some(name) => {
-                let block = Block::new()
-                    .borders(Borders::ALL)
-                    .border_style(border_style)
-                    .border_type(ratatui::widgets::BorderType::Rounded)
-                    .style(text_style)
-                    .title_top(Line::from(format!(" {} ", name)).left_aligned());
+        if let Some(name) = self.names.get(i) {
+            let block = Block::new()
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .border_type(ratatui::widgets::BorderType::Rounded)
+                .style(text_style)
+                .title_top(Line::from(format!(" {name} ")).left_aligned());
 
-                let meta = &meta[i];
-                let mod_area = block.inner(area);
+            let meta = &meta[i];
+            let mod_area = block.inner(area);
 
-                if meta.country != [0, 0] {
-                    let block = block.title_bottom(
-                        Line::from(format!(
-                            " [{}{}] ",
-                            char::from(meta.country[0]),
-                            char::from(meta.country[1])
-                        ))
-                        .right_aligned(),
-                    );
-                    block.render(area, buf);
-                } else {
-                    block.render(area, buf);
-                }
-
-                let mod_line = Line::from(format!(" Modified: {}", meta.last_modified));
-                let access_area = mod_area.inner(Margin::new(mod_line.width() as u16, 2));
-                mod_line.render(mod_area, buf);
-
-                if meta.last_used != 0 {
-                    let access_line = Line::from(format!(" Used: {}", meta.last_used));
-                    access_line.render(access_area, buf);
-                }
+            if meta.country == [0, 0] {
+                block.render(area, buf);
+            } else {
+                let block = block.title_bottom(
+                    Line::from(format!(
+                        " [{}{}] ",
+                        char::from(meta.country[0]),
+                        char::from(meta.country[1])
+                    ))
+                    .right_aligned(),
+                );
+                block.render(area, buf);
             }
-            None => {
-                return;
+
+            let mod_line = Line::from(format!(" Modified: {}", meta.last_modified));
+            let access_area = mod_area.inner(Margin::new(mod_line.width() as u16, 2));
+            mod_line.render(mod_area, buf);
+
+            if meta.last_used != 0 {
+                let access_line = Line::from(format!(" Used: {}", meta.last_used));
+                access_line.render(access_area, buf);
             }
         }
     }

@@ -91,7 +91,7 @@ impl Controller {
     /// up an agent dbus for psk sharing
     #[instrument(err, skip(self))]
     async fn connect_iwd(&mut self) -> Result<(), ManndError> {
-        let agent_state = Arc::new(RwLock::new(AgentState::new()));
+        let agent_state = Arc::new(RwLock::new(AgentState::default()));
         let conn = zbus::connection::Builder::system()?
             .serve_at("/org/mannd/IwdAgent", IwdAgent::new(agent_state.clone()))?
             .build()

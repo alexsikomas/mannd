@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Flex, Layout, Margin, Rect},
+    layout::{Constraint, Flex, Layout, Rect},
     style::{Style, Stylize},
     text::Line,
     widgets::{Block, Borders, Widget},
@@ -36,7 +36,7 @@ impl<'a> NetdMenu<'a> {
     }
 }
 
-impl<'a> Widget for NetdMenu<'a> {
+impl Widget for NetdMenu<'_> {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
@@ -46,7 +46,7 @@ impl<'a> Widget for NetdMenu<'a> {
     }
 }
 
-impl<'a> NetdMenu<'a> {
+impl NetdMenu<'_> {
     fn render_main_block(&self, area: Rect, buf: &mut Buffer) {
         let main = Block::default()
             .border_type(ratatui::widgets::BorderType::Rounded)

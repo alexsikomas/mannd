@@ -71,7 +71,7 @@ impl<'a> NetworkActor<'a> {
             // WIREGUARD
             NetworkAction::ConnectWireguard(file) => {
                 match self.controller.connect_wireguard_conf(file).await {
-                    Ok(res) => {
+                    Ok(_res) => {
                         info!("Success");
                     }
                     Err(e) => {
@@ -167,7 +167,6 @@ impl<'a> NetworkActor<'a> {
                 if let Ok(()) = self.controller.disconenct_network().await {
                     info!("Disconnected from a network");
                     should_refresh = true;
-                } else {
                 }
             }
             NetworkAction::Forget(ssid, sec) => {
@@ -221,7 +220,7 @@ impl<'a> NetworkActor<'a> {
                 state_send.push(NetworkState::SetWireguardInfo((names, meta)));
             }
         }
-        if flags.intersects(NetCtxFlags::Netd) {
+        if flags.intersects(NetCtxFlags::SystemdNetworkd) {
             let files = get_netd_files().await?;
             state_send.push(NetworkState::SetNetdFiles(files));
         }
@@ -310,13 +309,13 @@ impl Default for NetCtx {
 bitflags! {
     #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
     pub struct NetCtxFlags: u8 {
-        const Network = 0b00000001;
-        const Interfaces = 0b00000010;
-        const Wireguard = 0b00000100;
-        const Netd = 0b00001000;
+        const Network = 0b0000_0001;
+        const Interfaces = 0b0000_0010;
+        const Wireguard = 0b0000_0100;
+        const SystemdNetworkd = 0b0000_1000;
         /// Similar to Interfaces flag but checks
         /// if interface already used by wpa
-        const InterfacesWpa = 0b00010000;
+        const InterfacesWpa = 0b0001_0000;
     }
 }
 

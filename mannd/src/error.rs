@@ -102,6 +102,10 @@ pub enum ManndError {
     ParseInt(#[from] std::num::ParseIntError),
     #[error("Serde issue deserialising: {0}")]
     SerdeDe(#[from] serde::de::value::Error),
+    #[error("Issue with int conversion")]
+    TryFromIntErr(#[from] std::num::TryFromIntError),
+    #[error("Time error")]
+    SystemTime(#[from] std::time::SystemTimeError),
 
     #[error("wpa_supplicant has no interfaces")]
     WpaNoInterfaces,

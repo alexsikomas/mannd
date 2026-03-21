@@ -1,5 +1,5 @@
 use mannd::{
-    CONFIG_HOME, SETTINGS, error::ManndError, ini_parse::IniConfig, state::network::InterfaceTypes,
+    SETTINGS, error::ManndError, state::network::InterfaceTypes,
 };
 use ratatui::{
     Frame,
@@ -9,7 +9,7 @@ use ratatui::{
 };
 use serde::{Deserialize, de::IntoDeserializer};
 use std::{borrow::Cow, path::PathBuf, sync::OnceLock};
-use tracing::{info, instrument};
+use tracing::instrument;
 
 use crate::{
     components::{
@@ -41,7 +41,7 @@ impl Theme {
             .get("selected")
             .ok_or_else(|| ManndError::PropertyNotFound("selected".to_string()))?;
 
-        let theme_name = format!("theme.{}", selected_theme);
+        let theme_name = format!("theme.{selected_theme}");
 
         let selected_theme_section = conf
             .sections
@@ -53,18 +53,21 @@ impl Theme {
         );
         let theme = Theme::deserialize(hash)?;
 
-        match THEME.set(theme) {
-            Ok(_) => Ok(()),
-            Err(_) => {
-                tracing::info!("Theme has already been initalised.");
-                Ok(())
-            }
+        if let Ok(()) = THEME.set(theme) { Ok(()) } else {
+            tracing::info!("Theme has already been initalised.");
+            Ok(())
         }
     }
 }
 
 pub struct UiContext {
     pub message: Option<UiMessage>,
+}
+
+impl Default for UiContext {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl UiContext {
@@ -74,7 +77,7 @@ impl UiContext {
 
     /// Renders title, border, and conditionally
     /// renders main content depending on state
-    pub fn render<'a>(&mut self, frame: &mut Frame<'a>, state: &UiState, ctx: &AppContext) {
+    pub fn render(&mut self, frame: &mut Frame<'_>, state: &UiState, ctx: &AppContext) {
         let outer_area = frame.area();
         let theme: &Theme;
         match THEME.get() {
@@ -123,33 +126,30 @@ impl UiContext {
 
         match &state.current_view {
             View::MainMenu(list) => {
-                if let Some(menu) = MainMenu::new(&list) {
+                if let Some(menu) = MainMenu::new(list) {
                     frame.render_widget(menu, inner_area);
                 } else {
                     return;
                 }
             }
             View::Wifi(connection_state) => {
-                if let Some(con) = Connection::new(&net_ctx.networks, &connection_state) {
+                if let Some(con) = Connection::new(&net_ctx.networks, connection_state) {
                     frame.render_widget(con, inner_area);
                 }
                 for prompt in &state.prompt_stack {
-                    match prompt {
-                        PromptState::PskConnect(psk_prompt) => {
-                            let Some(selected) =
-                                net_ctx.networks.get(connection_state.network_cursor)
-                            else {
-                                return;
-                            };
+                    if let PromptState::PskConnect(psk_prompt) = prompt {
+                        let Some(selected) =
+                            net_ctx.networks.get(connection_state.network_cursor)
+                        else {
+                            return;
+                        };
 
-                            if let Some(prompt_instance) =
-                                PasswordPrompt::new(selected, &psk_prompt)
-                            {
-                                frame.render_widget(prompt_instance, inner_area);
-                            }
+                        if let Some(prompt_instance) =
+                            PasswordPrompt::new(selected, psk_prompt)
+                        {
+                            frame.render_widget(prompt_instance, inner_area);
                         }
-                        _ => {}
-                    };
+                    }
                 }
             }
             View::Vpn(vpn_state) => {
@@ -162,7 +162,7 @@ impl UiContext {
                 };
 
                 if let Some(vpn) = WireguardMenu::new(
-                    &vpn_state,
+                    vpn_state,
                     &net_ctx.wg_ctx.names,
                     wg_meta,
                     ctx.net_ctx.wg_ctx.is_on,
@@ -176,7 +176,7 @@ impl UiContext {
             }
             View::Networkd(netd_state) => {
                 let tmp: Vec<PathBuf> = vec![];
-                NetdMenu::new(&netd_state, &tmp);
+                NetdMenu::new(netd_state, &tmp);
             }
             _ => {
                 return;
@@ -193,18 +193,17 @@ impl UiContext {
                     }
                 }
                 PromptState::WpaInterface(wpa_prompt) => {
-                    if let Some(InterfaceTypes::Wpa(wpa_ifaces)) = &net_ctx.interfaces {
-                        if let Some(prompt_instance) = WpaInterfaceUi::new(
+                    if let Some(InterfaceTypes::Wpa(wpa_ifaces)) = &net_ctx.interfaces
+                        && let Some(prompt_instance) = WpaInterfaceUi::new(
                             wpa_prompt,
                             ctx.net_ctx.persist_wpa_changes,
-                            &wpa_ifaces,
+                            wpa_ifaces,
                         ) {
                             frame.render_widget(prompt_instance, inner_area);
                         }
-                    }
                 }
                 _ => {}
-            };
+            }
         }
     }
 }
@@ -251,9 +250,9 @@ impl<'a> TryFrom<Cow<'_, str>> for ThemeRgb {
 
     fn try_from(value: Cow<'_, str>) -> Result<Self, Self::Error> {
         Ok(ThemeRgb {
-            red: u8::from_str_radix(&value[1..=2], 16).map_err(|e| ManndError::ParseInt(e))?,
-            green: u8::from_str_radix(&value[3..=4], 16).map_err(|e| ManndError::ParseInt(e))?,
-            blue: u8::from_str_radix(&value[5..=6], 16).map_err(|e| ManndError::ParseInt(e))?,
+            red: u8::from_str_radix(&value[1..=2], 16).map_err(ManndError::ParseInt)?,
+            green: u8::from_str_radix(&value[3..=4], 16).map_err(ManndError::ParseInt)?,
+            blue: u8::from_str_radix(&value[5..=6], 16).map_err(ManndError::ParseInt)?,
         })
     }
 }
@@ -261,7 +260,7 @@ impl<'a> TryFrom<Cow<'_, str>> for ThemeRgb {
 impl ThemeRgb {
     /// Tinting and shading alogrithm
     pub fn shift(&self, percent: i8) -> Color {
-        let percent = (percent as f32).clamp(-100.0, 100.0) / 100.0;
+        let percent = f32::from(percent).clamp(-100.0, 100.0) / 100.0;
 
         let col: [u8; 3] = [self.red, self.green, self.blue];
         let mut new_col = [0u8; 3];
@@ -269,9 +268,9 @@ impl ThemeRgb {
         for (i, c) in col.iter().enumerate() {
             let res: u8;
             if percent > 0.0 {
-                res = (*c as f32 + (255.0 - *c as f32) * percent).round() as u8;
+                res = (f32::from(*c) + (255.0 - f32::from(*c)) * percent).round() as u8;
             } else {
-                res = (*c as f32 * (1.0 + percent)).round() as u8;
+                res = (f32::from(*c) * (1.0 + percent)).round() as u8;
             }
             new_col[i] = res;
         }

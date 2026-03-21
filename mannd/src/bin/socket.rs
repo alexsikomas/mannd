@@ -1,4 +1,4 @@
-//! # Socket
+//! # Socketsocket
 //!
 //! Facilitates communication between the backend and the frontend.
 //!
@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // root check
     let euid = unsafe { libc::getuid() };
     if euid != 0 {
-        return Err(ManndError::NotRoot)?;
+        Err(ManndError::NotRoot)?;
     }
 
     let max_log_level = Level::from_str(&SETTINGS.get("debug", "max_log_level")?)?;
@@ -91,12 +91,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         loop {
             tokio::select! {
                 Some(msg) = sock_rx.recv() => {
-                    if let Ok(res) = to_stdvec_cobs(&msg) {
-                        if writer.send(res.into()).await.is_err() {
+                    if let Ok(res) = to_stdvec_cobs(&msg)
+                        && writer.send(res.into()).await.is_err() {
                             info!("Could not write to socket, disconnecting");
                             return Ok(());
                         }
-                    }
                 },
                 frame_opt = reader.next() => {
                     let Some(frame_res) = frame_opt else {
@@ -111,9 +110,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         if args.spawned {
                             info!("TUI requested shutdown");
                             return Ok(());
-                        } else {
-                            break;
                         }
+                        break;
                     }
                 }
                 Some(update) = signal_rx.recv() => {
@@ -122,10 +120,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 Some(msg) = actor.signal_manager.recv() => {
                     let action: Option<NetworkAction> = match daemon {
                         Some(WifiDaemonType::Iwd) => {
-                            actor.signal_manager.process_iwd_msg(msg).await
+                            actor.signal_manager.process_iwd_msg(msg)
                         }
                         Some(WifiDaemonType::Wpa) => {
-                            actor.signal_manager.process_wpa_msg(msg).await
+                            actor.signal_manager.process_wpa_msg(msg)
                         }
                         _ => {
                             None

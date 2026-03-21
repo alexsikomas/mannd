@@ -74,11 +74,11 @@ impl UiState {
         let keymap = Keymap::load_keys()?;
 
         match KEYMAP.set(keymap) {
-            Ok(_) => {}
+            Ok(()) => {}
             Err(_) => {
                 tracing::warn!("Keymap has already been initialised");
             }
-        };
+        }
 
         Ok(UiState {
             should_block: false,
@@ -90,11 +90,8 @@ impl UiState {
     }
 
     pub fn refresh_view(&mut self) {
-        match &self.current_view {
-            View::MainMenu(_) => {
-                self.current_view = View::main_menu(&self.caps);
-            }
-            _ => {}
+        if let View::MainMenu(_) = &self.current_view {
+            self.current_view = View::main_menu(&self.caps);
         }
     }
 
@@ -118,12 +115,11 @@ impl UiState {
             _ => &KeyAction::None,
         };
 
-        if key_action == &KeyAction::Escape {
-            if !self.prompt_stack.is_empty() {
+        if key_action == &KeyAction::Escape
+            && !self.prompt_stack.is_empty() {
                 self.prompt_stack.pop();
                 return vec![];
             }
-        }
 
         if let Some(prompt) = self.prompt_stack.last_mut() {
             let res = prompt.on_key(key_action, ctx);
@@ -136,7 +132,7 @@ impl UiState {
                 }
                 StateResult::Consumed => return vec![],
                 StateResult::Ignored => {}
-            };
+            }
         }
 
         let res = self.current_view.on_key(key_action, ctx);
@@ -168,19 +164,16 @@ impl UiState {
                         //     actions.push(AppAction::Network(NetworkAction::))
                         // }
                         _ => {}
-                    };
+                    }
                 }
                 StateCommand::Prompt(prompt) => {
-                    match &prompt {
-                        PromptState::Info(info) => {
-                            // removes clutter of general messages
-                            // if there is an error
-                            if info.kind == PopupType::Error {
-                                self.remove_general_prompts();
-                            }
+                    if let PromptState::Info(info) = &prompt {
+                        // removes clutter of general messages
+                        // if there is an error
+                        if info.kind == PopupType::Error {
+                            self.remove_general_prompts();
                         }
-                        _ => {}
-                    };
+                    }
                     self.prompt_stack.push(prompt);
                 }
                 StateCommand::Back => {
@@ -195,7 +188,7 @@ impl UiState {
                 StateCommand::ClearPrompts => {
                     self.prompt_stack = vec![];
                 }
-            };
+            }
         }
         actions
     }
@@ -203,11 +196,7 @@ impl UiState {
     fn remove_general_prompts(&mut self) {
         self.prompt_stack.retain(|prompt| match prompt {
             PromptState::Info(info) => {
-                if info.kind == PopupType::General {
-                    false
-                } else {
-                    true
-                }
+                info.kind != PopupType::General
             }
             _ => true,
         });
@@ -272,7 +261,7 @@ impl Component for View {
             View::Vpn(state) => return state.on_key(key, ctx),
             View::Networkd(_state) => {}
             View::Config => {}
-        };
+        }
         StateResult::Ignored
     }
 }
@@ -397,7 +386,7 @@ impl Component for WifiState {
                 return StateResult::Consumed;
             }
             _ => {}
-        };
+        }
 
         match self.focused_area {
             ConnectionFocus::Actions => {
@@ -524,7 +513,7 @@ impl Component for PromptState {
                 return prompt.on_key(key, ctx);
             }
             _ => {}
-        };
+        }
         StateResult::Consumed
     }
 }
@@ -591,11 +580,8 @@ impl Component for PskConnectionPrompt {
                     self.select.set(PskPromptSelect::Connect);
                 }
             },
-            KeyAction::Backspace => match selected {
-                PskPromptSelect::Password => {
-                    self.password.pop();
-                }
-                _ => {}
+            KeyAction::Backspace => if selected == &PskPromptSelect::Password {
+                self.password.pop();
             },
             KeyAction::Enter => match selected {
                 PskPromptSelect::Connect => {
@@ -620,14 +606,11 @@ impl Component for PskConnectionPrompt {
                 }
                 _ => {}
             },
-            KeyAction::Char(c) => match selected {
-                PskPromptSelect::Password => {
-                    self.password.push(*c);
-                }
-                _ => {}
+            KeyAction::Char(c) => if selected == &PskPromptSelect::Password {
+                self.password.push(*c);
             },
             _ => {}
-        };
+        }
         StateResult::Consumed
     }
 }
@@ -651,7 +634,7 @@ impl InfoPrompt {
 }
 
 impl Component for InfoPrompt {
-    fn on_key(&mut self, key: &KeyAction, ctx: &AppContext) -> StateResult {
+    fn on_key(&mut self, key: &KeyAction, _ctx: &AppContext) -> StateResult {
         match key {
             KeyAction::Enter | KeyAction::Backspace => {
                 StateResult::Command(StateCommand::PopPrompt)
@@ -791,7 +774,7 @@ impl Component for VpnState {
                     VpnSelection::Files => {
                         let mut wg_path = PathBuf::from("/etc/wireguard");
                         if let Some(data) = ctx.net_ctx.wg_ctx.get_index(self.file_cursor) {
-                            wg_path.push(format!("{}", data.0));
+                            wg_path.push(data.0);
                             return StateResult::Command(StateCommand::NetworkAction(
                                 NetworkAction::ConnectWireguard(wg_path),
                             ));
@@ -824,7 +807,7 @@ impl Component for VpnState {
                         _ => {
                             self.selection.next();
                         }
-                    };
+                    }
                 }
                 KeyAction::Down => {
                     if selected == &VpnSelection::Files {
@@ -899,25 +882,21 @@ impl Component for WpaInterfacePrompt {
                         return StateResult::Command(StateCommand::NetworkAction(
                             NetworkAction::ToggleWpaPersist,
                         ));
-                    } else {
-                        if let Some(iface) = ifaces.get_wpa_index(self.interface_cursor) {
-                            return StateResult::Command(StateCommand::NetworkAction(
-                                NetworkAction::CreateWpaInterface(iface.into()),
-                            ));
-                        }
+                    } else if let Some(iface) = ifaces.get_wpa_index(self.interface_cursor) {
+                        return StateResult::Command(StateCommand::NetworkAction(
+                            NetworkAction::CreateWpaInterface(iface.into()),
+                        ));
                     }
                 }
                 KeyAction::Up => {
                     if self.on_choice {
                         self.interface_cursor = ifaces.len() - 1;
                         self.on_choice = false;
+                    } else if self.interface_cursor == 0 {
+                        self.interface_cursor = 0;
+                        self.on_choice = true;
                     } else {
-                        if self.interface_cursor == 0 {
-                            self.interface_cursor = 0;
-                            self.on_choice = true;
-                        } else {
-                            self.interface_cursor = self.interface_cursor.saturating_sub(1);
-                        }
+                        self.interface_cursor = self.interface_cursor.saturating_sub(1);
                     }
                 }
                 KeyAction::Down => {
@@ -929,7 +908,7 @@ impl Component for WpaInterfacePrompt {
                     }
                 }
                 _ => {}
-            };
+            }
         }
 
         StateResult::Consumed

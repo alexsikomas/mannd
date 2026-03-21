@@ -2,7 +2,6 @@ use mannd::wireless::common::AccessPoint;
 use ratatui::{
     layout::{Constraint, Flex, Layout, Margin, Rect, Spacing},
     style::{Style, Stylize},
-    symbols::border,
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
@@ -35,7 +34,7 @@ impl<'a> PasswordPrompt<'a> {
     }
 }
 
-impl<'a> Widget for PasswordPrompt<'a> {
+impl Widget for PasswordPrompt<'_> {
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized,

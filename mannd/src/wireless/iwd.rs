@@ -1,4 +1,7 @@
-use std::{fmt::Debug, sync::Arc};
+use std::{
+    fmt::{Debug, Write},
+    sync::Arc,
+};
 use tokio::sync::{RwLock, mpsc::Sender};
 
 use tracing::{info, instrument};
@@ -11,6 +14,7 @@ use zbus::{
 use crate::{
     error::ManndError,
     state::signals::SignalUpdate,
+    utils::ssid_to_hex,
     wireless::{
         agent::AgentState,
         common::{AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy},
@@ -36,9 +40,9 @@ impl Iwd {
 
         match Self::find_adapter_path(&conn, &service).await {
             Ok(Some(path)) => Ok(Self {
-                conn,
-                service,
                 path,
+                service,
+                conn,
                 agent_state,
             }),
             Err(e) => Err(ManndError::AdapterNotFound(format!(
@@ -74,12 +78,7 @@ impl Iwd {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            format!(
-                "{}/{}_{}",
-                self.path.clone(),
-                Self::ssid_to_hex(ssid),
-                security
-            ),
+            format!("{}/{}_{}", self.path.clone(), ssid_to_hex(&ssid), security),
             "net.connman.iwd.Network",
         )
         .await?;
@@ -93,7 +92,7 @@ impl Iwd {
             }
             Err(e) => {
                 tracing::error!("Error occured: {e}");
-                Err(ManndError::OperationFailed(format!("{}", e)))
+                Err(ManndError::OperationFailed(format!("{e}")))
             }
         }
     }
@@ -103,12 +102,7 @@ impl Iwd {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            format!(
-                "{}/{}_{}",
-                self.path.clone(),
-                Self::ssid_to_hex(ssid),
-                security
-            ),
+            format!("{}/{}_{}", self.path.clone(), ssid_to_hex(&ssid), security),
             "net.connman.iwd.Network",
         )
         .await?;
@@ -139,20 +133,12 @@ impl Iwd {
     /// Removes a network from the configured networks
     #[instrument(err, skip(self))]
     pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ManndError> {
-        info!(
-            "/net/connman/iwd/{}_{}",
-            Self::ssid_to_hex(ssid.to_string()),
-            security,
-        );
+        info!("/net/connman/iwd/{}_{}", ssid_to_hex(&ssid), security,);
 
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            format!(
-                "/net/connman/iwd/{}_{}",
-                Self::ssid_to_hex(ssid.to_string()),
-                security,
-            ),
+            format!("/net/connman/iwd/{}_{}", ssid_to_hex(&ssid), security,),
             "net.connman.iwd.KnownNetwork",
         )
         .await?;
@@ -181,11 +167,11 @@ impl Iwd {
         .await?;
 
         let agent_path = "/org/mannd/IwdAgent";
-        let agent_objpath = zbus::zvariant::OwnedObjectPath::try_from(agent_path).unwrap();
+        let agent_objpath = zbus::zvariant::OwnedObjectPath::try_from(agent_path)?;
 
         let resp: Result<(), zbus::Error> = proxy.call("UnregisterAgent", &(agent_objpath)).await;
         match resp {
-            Ok(_) => {
+            Ok(()) => {
                 info!("Sucessfully unregisted agent");
                 Ok(())
             }
@@ -197,10 +183,7 @@ impl Iwd {
     }
 
     #[instrument(err)]
-    pub async fn scan<'a>(
-        &mut self,
-        signal_tx: Sender<SignalUpdate<'a>>,
-    ) -> Result<(), ManndError> {
+    pub async fn scan(&mut self, signal_tx: Sender<SignalUpdate<'_>>) -> Result<(), ManndError> {
         let proxy = self.get_interface_proxy("Station").await?;
         if !get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
             proxy.call_noreply("Scan", &()).await?;
@@ -226,11 +209,9 @@ impl Iwd {
 
         let mut access_points: Vec<AccessPoint> = vec![];
         for ap in nearby_aps {
-            if let Some(ap_name) = ap.0.as_str().split("/").last() {
+            if let Some(ap_name) = ap.0.as_str().split('/').next_back() {
                 let ap_info = self.get_ap_info(ap_name).await?;
                 access_points.push(ap_info);
-            } else {
-                continue;
             }
         }
 
@@ -248,13 +229,13 @@ impl Iwd {
     pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
         let mut known_networks: Vec<AccessPoint> = vec![];
         let proxy = ObjectManagerProxy::new(&self.conn, self.service.clone(), "/").await?;
-        for (path, interface) in proxy.get_managed_objects().await? {
+        for (_path, interface) in proxy.get_managed_objects().await? {
             if let Some(known_network_props) = interface.get("net.connman.iwd.KnownNetwork") {
-                let mut ssid: String = "".to_string();
-
-                if let Some(name) = known_network_props.get("Name") {
-                    ssid = name.downcast_ref::<String>().unwrap_or("".to_string());
-                }
+                let ssid = known_network_props
+                    .get("Name")
+                    .map_or_else(String::new, |name| {
+                        name.downcast_ref::<String>().unwrap_or(String::new())
+                    });
 
                 let mut ap_builder = AccessPointBuilder::default()
                     .ssid(ssid)
@@ -262,7 +243,7 @@ impl Iwd {
 
                 if let Some(net_security) = known_network_props.get("Type") {
                     let security_str = net_security.downcast_ref::<&str>().unwrap_or("psk");
-                    let security = Security::from_str(security_str);
+                    let security: Security = security_str.into();
                     ap_builder = ap_builder.security(security);
                 }
 
@@ -291,11 +272,6 @@ impl Iwd {
         Ok(None)
     }
 
-    fn ssid_to_hex(ssid: String) -> String {
-        let bytes = ssid.as_bytes();
-        bytes.into_iter().map(|b| format!("{:02x}", b)).collect()
-    }
-
     #[instrument(err, skip(self))]
     pub async fn register_agent(&self) -> Result<(), ManndError> {
         let proxy = Proxy::new(
@@ -306,11 +282,10 @@ impl Iwd {
         )
         .await?;
 
-        let agent_path =
-            ObjectPath::from_static_str("/org/mannd/IwdAgent").expect("Static path is valid");
+        let agent_path = ObjectPath::from_static_str("/org/mannd/IwdAgent")?;
         let resp: Result<(), zbus::Error> = proxy.call("RegisterAgent", &(agent_path)).await;
         match resp {
-            Ok(_) => {
+            Ok(()) => {
                 info!("Agent registration call successful.");
                 Ok(())
             }
@@ -327,7 +302,7 @@ impl Iwd {
             &self.conn,
             self.service.clone(),
             self.path.clone(),
-            format!("net.connman.iwd.{}", interface),
+            format!("net.connman.iwd.{interface}"),
         )
         .await?)
     }
@@ -353,23 +328,18 @@ impl Iwd {
         let security_str = get_prop_from_proxy::<String>(&proxy, "Type").await?;
         info!("sec: {:?}", security_str);
 
-        let security = Security::from_str(security_str.as_str());
+        let security: Security = security_str.as_str().into();
         let mut flags = NetworkFlags::NEARBY;
 
-        // let known_network: Option<OwnedObjectPath>;
-        match get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork").await {
-            Ok(_) => {
-                flags = flags | NetworkFlags::KNOWN;
-            }
-            // not actually an error the field is just optional
-            Err(_) => {}
-        };
+        if (get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork").await).is_ok() {
+            flags |= NetworkFlags::KNOWN;
+        }
 
         get_prop_from_proxy::<bool>(&proxy, "Connected")
             .await
             .inspect(|b| {
                 if *b {
-                    flags = flags | NetworkFlags::CONNECTED;
+                    flags |= NetworkFlags::CONNECTED;
                 }
             })?;
 

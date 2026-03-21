@@ -1,7 +1,7 @@
 use neli::consts::nl::{NlTypeWrapper, NlmF};
 use neli::consts::rtnl::{Arphrd, Ifa, Iff, Ifla, IflaInfo, RtAddrFamily, Rta, Rtm};
 use neli::nl::{NlPayload, NlmsghdrBuilder};
-use neli::router::asynchronous::{NlRouter, NlRouterReceiverHandle};
+use neli::router::asynchronous::NlRouter;
 use neli::rtnl::{
     Ifaddrmsg, IfaddrmsgBuilder, Ifinfomsg, IfinfomsgBuilder, RtattrBuilder, RtmsgBuilder,
 };

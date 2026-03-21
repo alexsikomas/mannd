@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::BTreeMap,
     fmt::Debug,
     fs::{File, read_to_string},
     io::{self, BufWriter, Write},

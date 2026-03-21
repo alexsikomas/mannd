@@ -50,7 +50,7 @@ impl Wireguard<NlRouterWrapper> {
         match conf.sections.get("Interface") {
             Some(iface) => match iface.get("Address") {
                 Some(addrs) => {
-                    for addr in addrs.split(",") {
+                    for addr in addrs.split(',') {
                         let ip = str_to_ip(addr)?;
                         ips.push(ip);
                     }
@@ -58,7 +58,7 @@ impl Wireguard<NlRouterWrapper> {
                 None => return Err(ManndError::WgIps),
             },
             None => return Err(ManndError::SectionNotFound("Interface".to_string())),
-        };
+        }
 
         Self::set_conf(path)?;
         Ok(())
@@ -80,7 +80,7 @@ impl Wireguard<NlRouterWrapper> {
         let conf = IniConfig::new(path.into())?;
         let conf = conf.get_partial(filter)?;
 
-        let write_path = format!("{}.mannd.tmp", path);
+        let write_path = format!("{path}.mannd.tmp");
         conf.write_file(Some(write_path.clone().into()))?;
         Ok(write_path)
     }
@@ -196,16 +196,13 @@ impl Wireguard<NlRouterWrapper> {
 }
 
 impl Debug for Wireguard<NlRouterWrapper> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Result::Ok(())
     }
 }
 
 // tests
 mod tests {
-    use tempfile::NamedTempFile;
-
-    use super::*;
 
     #[tokio::test]
     async fn wg_intergration_test() -> Result<(), ManndError> {

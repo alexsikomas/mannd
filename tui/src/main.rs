@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     setup_logging(tui_log, max_log_level, Some(uid))?;
 
     let _ = Theme::new();
-    let _ = App::new(stream).run().await?;
+    let () = App::new(stream).run().await?;
     Ok(())
 }
 
@@ -51,7 +51,7 @@ async fn get_unix_socket(uid: u32) -> Result<UnixStream, ManndError> {
         .args([
             "-S",
             bin_path,
-            &format!("--target-uid={}", uid),
+            &format!("--target-uid={uid}"),
             "--spawned",
         ])
         .stdin(Stdio::piped())
@@ -61,7 +61,7 @@ async fn get_unix_socket(uid: u32) -> Result<UnixStream, ManndError> {
 
     if let Some(mut stdin) = child.stdin.take() {
         stdin
-            .write_all(format!("{}\n", password).as_bytes())
+            .write_all(format!("{password}\n").as_bytes())
             .await?;
         stdin.flush().await?;
     }

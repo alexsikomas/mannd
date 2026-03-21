@@ -43,7 +43,7 @@ impl<'a> PopupPrompt<'a> {
     }
 }
 
-impl<'a> Widget for PopupPrompt<'a> {
+impl Widget for PopupPrompt<'_> {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
