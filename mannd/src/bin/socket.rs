@@ -30,7 +30,11 @@ use mannd::{
     utils::setup_logging,
 };
 use postcard::to_stdvec_cobs;
-use tokio::{net::UnixListener, sync::mpsc, time::timeout};
+use tokio::{
+    net::UnixListener,
+    sync::mpsc,
+    time::{Instant, timeout},
+};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{Level, info, instrument};
 
@@ -50,7 +54,7 @@ struct Args {
 #[instrument(err)]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    init_home_path(args.target_uid);
+    init_home_path(args.target_uid)?;
 
     // root check
     let euid = unsafe { libc::getuid() };
@@ -86,8 +90,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let mut actor = NetworkActor::new(signal_tx, sock_tx).await?;
         let mut writer = FramedWrite::new(sock_writer, LengthDelimitedCodec::new());
         let mut reader = FramedRead::new(sock_reader, LengthDelimitedCodec::new());
-
         let daemon = actor.controller.get_wifi_daemon_type();
+
         loop {
             tokio::select! {
                 Some(msg) = sock_rx.recv() => {
@@ -139,6 +143,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     return Ok(());
                 }
             };
+        }
+
+        if args.spawned {
+            info!("Spawned backend exiting after client disconnect");
+            return Ok(());
         }
     }
 }
