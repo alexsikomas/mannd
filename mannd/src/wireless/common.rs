@@ -17,21 +17,21 @@ pub enum Security {
 impl std::fmt::Display for Security {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Security::Open => write!(f, "open"),
-            Security::Psk => write!(f, "psk"),
-            Security::Ieee8021x => write!(f, "8021x"),
-            Security::Unknown => write!(f, ""),
+            Self::Open => write!(f, "open"),
+            Self::Psk => write!(f, "psk"),
+            Self::Ieee8021x => write!(f, "8021x"),
+            Self::Unknown => write!(f, ""),
         }
     }
 }
 
-impl Security {
-    pub fn from_str(str: &str) -> Self {
-        match str {
-            "open" => Security::Open,
-            "psk" => Security::Psk,
-            "8021x" => Security::Ieee8021x,
-            _ => Security::Unknown,
+impl From<&str> for Security {
+    fn from(value: &str) -> Self {
+        match value {
+            "open" => Self::Open,
+            "psk" => Self::Psk,
+            "8021x" => Self::Ieee8021x,
+            _ => Self::Unknown,
         }
     }
 }
@@ -50,14 +50,13 @@ where
     T: TryFrom<Value<'a>>,
     <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
 {
-    let interface_path = format!("{}.{}", service, subpath);
+    let interface_path = format!("{service}.{subpath}");
     let proxy = zbus::Proxy::new(conn, service, path, interface_path.clone()).await?;
 
     match proxy.get_property(prop).await? {
         Some(val) => Ok(<zbus::zvariant::Value<'_> as Clone>::clone(&val).downcast::<T>()?),
         None => Err(ManndError::PropertyNotFound(format!(
-            "Could not find given property {} at {}",
-            prop, interface_path
+            "Could not find given property {prop} at {interface_path}"
         ))),
     }
 }
@@ -83,19 +82,14 @@ where
     }
 }
 
-pub fn ssid_to_hex(ssid: String) -> String {
-    let bytes = ssid.as_bytes();
-    bytes.into_iter().map(|b| format!("{:02x}", b)).collect()
-}
-
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
     #[serde(transparent)]
     pub struct NetworkFlags: u8 {
-        const KNOWN = 0b00000001;
-        const CONNECTED = 0b00000010;
-        const NEARBY = 0b00000100;
-        const HIDDEN = 0b00001000;
+        const KNOWN = 0b0000_0001;
+        const CONNECTED = 0b0000_0010;
+        const NEARBY = 0b0000_0100;
+        const HIDDEN = 0b0000_1000;
     }
 }
 

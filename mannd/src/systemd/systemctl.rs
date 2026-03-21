@@ -1,5 +1,3 @@
-use std::fmt::Debug;
-
 use tracing::instrument;
 use zbus::{Connection, Proxy, zvariant::OwnedObjectPath};
 use zbus_systemd::systemd1::UnitProxy;
@@ -17,11 +15,12 @@ pub async fn get_system_unit(
         conn,
         SYSTEMD_BUS,
         SYSTEMD_PATH,
-        format!("{}.Manager", SYSTEMD_BUS),
+        format!("{SYSTEMD_BUS}.Manager"),
     )
     .await?;
     let res: Result<OwnedObjectPath, _> =
-        proxy.call("GetUnit", &format!("{}.service", service)).await;
+        proxy.call("GetUnit", &format!("{service}.service")).await;
+
     match res {
         Ok(path) => Ok(path),
         Err(e) => Err(ManndError::Zbus(e)),
@@ -36,10 +35,10 @@ pub async fn is_service_active(conn: &Connection, service: impl Into<String>) ->
     let path = path.unwrap();
 
     if let Ok(unit) = UnitProxy::new(conn, path).await {
-        if let Ok(status) = unit.active_state().await {
-            if status == "active" {
-                return Some(true);
-            }
+        if let Ok(status) = unit.active_state().await
+            && status == "active"
+        {
+            return Some(true);
         }
     }
     None

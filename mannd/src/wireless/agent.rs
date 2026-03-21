@@ -24,8 +24,8 @@ pub enum IwdAgentMsg {
     SetPassword(String),
 }
 
-impl AgentState {
-    pub fn new() -> Self {
+impl Default for AgentState {
+    fn default() -> Self {
         Self {
             username: None,
             password: None,
@@ -34,7 +34,7 @@ impl AgentState {
 }
 
 impl IwdAgent {
-    pub fn new(state: Arc<RwLock<AgentState>>) -> Self {
+    pub const fn new(state: Arc<RwLock<AgentState>>) -> Self {
         Self { state }
     }
 }
@@ -43,49 +43,48 @@ impl IwdAgent {
 #[interface(name = "net.connman.iwd.Agent")]
 #[allow(non_snake_case)]
 impl IwdAgent {
-    async fn release(&mut self) {
+    async fn release(&self) {
         info!("Relase");
         let mut writer = self.state.write().await;
         writer.username = None;
         writer.password = None;
     }
 
-    async fn requestPassphrase(&self, _network: OwnedObjectPath) -> String {
+    fn requestPassphrase(&self, _network: OwnedObjectPath) -> String {
         info!("Passphrase has been requested");
-        match self.state.try_read() {
-            Ok(reader) => match &reader.password {
-                Some(pass) => pass.clone(),
-                None => {
-                    info!("Sending empty string because password is not set.");
-                    "".to_string()
-                }
-            },
-            Err(e) => {
+        self.state.try_read().map_or_else(
+            |_| {
                 tracing::error!("Error obtaining reading lock.");
-                "".to_string()
-            }
-        }
+                String::new()
+            },
+            |reader| {
+                reader.password.as_ref().map_or_else(
+                    || {
+                        info!("Sending empty string because password is not set.");
+                        String::new()
+                    },
+                    Clone::clone,
+                )
+            },
+        )
     }
 
-    async fn requestPrivateKeyPassphrase(&self, _network: OwnedObjectPath) -> String {
+    fn requestPrivateKeyPassphrase(&self, _network: OwnedObjectPath) -> String {
         info!("Private Key Passphrase");
         todo!()
     }
 
-    async fn requestUserNameAndPassword(&self, _network: OwnedObjectPath) -> (String, String) {
+    fn requestUserNameAndPassword(&self, _network: OwnedObjectPath) -> (String, String) {
         info!("Username and Password");
         todo!()
     }
 
-    async fn requestUserPassword(
-        &self,
-        _network: OwnedObjectPath,
-    ) -> Result<String, IwdAgentError> {
+    fn requestUserPassword(&self, _network: OwnedObjectPath) -> Result<String, IwdAgentError> {
         info!("User Password");
         todo!()
     }
 
-    async fn cancel(&self) {
+    fn cancel(&self) {
         info!("Cancel");
     }
 }

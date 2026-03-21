@@ -29,7 +29,7 @@ impl<'a> MainMenu<'a> {
     }
 }
 
-impl<'a> Widget for MainMenu<'a> {
+impl Widget for MainMenu<'_> {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,

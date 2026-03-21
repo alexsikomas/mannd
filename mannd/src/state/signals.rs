@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use tokio_stream::{StreamExt, StreamMap};
-use tracing::info;
 use zbus::{Message, proxy::SignalStream, zvariant::OwnedValue};
 
 use crate::state::network::{NetCtxFlags, NetworkAction};
@@ -57,14 +56,9 @@ impl<'a> SignalManager<'a> {
         self.signals.next().await
     }
 
-    pub async fn process_iwd_msg(&mut self, msg: (usize, Message)) -> Option<NetworkAction> {
+    pub fn process_iwd_msg(&mut self, msg: (usize, Message)) -> Option<NetworkAction> {
         let (_, changed_properties, _): (String, HashMap<String, OwnedValue>, Vec<String>) =
             msg.1.body().deserialize().unwrap();
-
-        // info!(
-        //     "Interface name: {}\n changed: {:?}\n Invalidated props: {:?}\n",
-        //     interface_name, changed_properties, invalidated_properties
-        // );
 
         // stopped scanning
         if changed_properties
@@ -77,10 +71,9 @@ impl<'a> SignalManager<'a> {
         None
     }
 
-    pub async fn process_wpa_msg(&mut self, msg: (usize, Message)) -> Option<NetworkAction> {
+    pub fn process_wpa_msg(&mut self, msg: (usize, Message)) -> Option<NetworkAction> {
         let body = msg.1.body();
         if let Some(method) = body.message().header().member() {
-            info!("PROCESSING: {:?}", method);
             match method.as_str() {
                 "ScanDone" => {
                     self.handle_update(SignalUpdate::Remove(msg.0));

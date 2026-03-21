@@ -2,13 +2,13 @@ use std::time::Duration;
 
 use postcard::{from_bytes_cobs, to_stdvec_cobs};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
-use tracing::{info, instrument};
+use tracing::instrument;
 
 use crate::{
     state::{AppContext, InfoPrompt, PopupType, PromptState, StateCommand, UiState, View},
     ui::{UiContext, UiMessage},
 };
-use crossterm::event::{EventStream, read};
+use crossterm::event::EventStream;
 use futures::{SinkExt, StreamExt};
 use mannd::{
     error::ManndError,
@@ -21,7 +21,6 @@ use tokio::{
         UnixStream,
         unix::{ReadHalf, WriteHalf},
     },
-    process::Child,
     sync::mpsc::{self, Sender},
     time::timeout,
 };
@@ -78,12 +77,9 @@ impl App {
                 let context = AppContext::create(&state.net_ctx, &state.caps, ui.vpn_cols);
                 let _ = terminal.draw(|f| ui_context.render(f, &ui, &context));
                 state.redraw = false;
-                match &ui_context.message {
-                    Some(msg) => {
-                        handle_ui_message(&mut ui, msg);
-                    }
-                    None => {}
-                };
+                if let Some(msg) = &ui_context.message {
+                    handle_ui_message(&mut ui, msg);
+                }
             }
 
             tokio::select! {
@@ -102,7 +98,7 @@ impl App {
                                 ui.process_commands([cmd]);
                             }
                         }
-                    };
+                    }
                     state.redraw = true;
                 }
                 Some(Ok(event)) = events.next() => {
@@ -180,11 +176,8 @@ async fn handle_state_update(
     match msg {
         NetworkState::SetNetworks(aps) => {
             state.net_ctx.networks = aps;
-            match &mut ui.current_view {
-                View::Wifi(wifi_state) => {
-                    wifi_state.refresh_available_actions(&state.net_ctx.networks);
-                }
-                _ => {}
+            if let View::Wifi(wifi_state) = &mut ui.current_view {
+                wifi_state.refresh_available_actions(&state.net_ctx.networks);
             }
         }
         NetworkState::ToggleWpaPersist => {
@@ -204,7 +197,7 @@ async fn handle_state_update(
         NetworkState::Success(succeeded) => return handle_success(state, ui, succeeded),
         NetworkState::Failed(failure) => return handle_failure(state, ui, failure),
         _ => {}
-    };
+    }
     None
 }
 
@@ -243,7 +236,7 @@ fn handle_success(
         Success::DisableWireguard => {
             state.net_ctx.wg_ctx.is_on = false;
         }
-    };
+    }
     None
 }
 
@@ -255,10 +248,10 @@ fn handle_failure(
     match failed {
         Failure::Wifi(err) => {
             ui.should_block = false;
-            return Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
+            Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
                 err,
                 PopupType::Error,
-            ))));
+            ))))
         }
     }
 }

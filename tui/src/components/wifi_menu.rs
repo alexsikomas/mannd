@@ -35,7 +35,7 @@ impl<'a> Connection<'a> {
     }
 }
 
-impl<'a> Widget for Connection<'a> {
+impl Widget for Connection<'_> {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
@@ -65,7 +65,7 @@ impl<'a> Widget for Connection<'a> {
 
         // Networks (left)
         let mut network_ssids: Vec<ListItem> = vec![];
-        for (_i, network) in self.networks.iter().enumerate() {
+        for network in self.networks {
             // precedence: selected > connected > known > default
 
             // let is_selected = i == self.conn_state.network_cursor;
@@ -149,7 +149,7 @@ impl<'a> Connection<'a> {
             Security::Psk => Span::styled("  ".to_string(), network_style.bold()),
             Security::Open => Span::styled(" (Open)".to_string(), network_style),
             Security::Ieee8021x => Span::styled(" (EAP)".to_string(), network_style),
-            Security::Unknown => Span::styled("".to_string(), network_style),
+            Security::Unknown => Span::styled(String::new(), network_style),
         }
     }
 
@@ -168,9 +168,9 @@ impl<'a> Connection<'a> {
 
     fn action_item_colors(&self, focus: &ConnectionFocus, is_selected: bool) -> (Color, Color) {
         if *focus == ConnectionFocus::Actions && is_selected {
-            return (self.theme.background.color(), self.theme.secondary.color());
+            (self.theme.background.color(), self.theme.secondary.color())
         } else {
-            return (self.theme.foreground.color(), self.theme.background.color());
+            (self.theme.foreground.color(), self.theme.background.color())
         }
     }
 

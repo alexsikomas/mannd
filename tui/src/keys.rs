@@ -16,9 +16,9 @@ pub enum KeyAction {
     None,
 }
 
-impl Into<KeyAction> for String {
-    fn into(self) -> KeyAction {
-        let res = self.as_str();
+impl From<String> for KeyAction {
+    fn from(val: String) -> Self {
+        let res = val.as_str();
         match res {
             "up" => KeyAction::Up,
             "down" => KeyAction::Down,
@@ -41,22 +41,19 @@ impl Keymap {
         let conf = &SETTINGS;
         let mut bindings: HashMap<KeyEvent, KeyAction> = HashMap::default();
 
-        match conf.sections.get("keybinds") {
-            Some(keybinds) => {
-                let keys = keybinds.keys();
-                for key in keys {
-                    let event = key_str_to_event(key);
-                    let action: KeyAction = keybinds.get(key).unwrap().clone().into();
-                    bindings.insert(event?, action.into());
-                }
+        if let Some(keybinds) = conf.sections.get("keybinds") {
+            let keys = keybinds.keys();
+            for key in keys {
+                let event = key_str_to_event(key);
+                let action: KeyAction = keybinds.get(key).unwrap().clone().into();
+                bindings.insert(event?, action);
             }
-            None => {}
-        };
+        }
         Ok(Self { bindings })
     }
 }
 
-/// Follows https://vimhelp.org/intro.txt.html#key-notation if
+/// Follows <https://vimhelp.org/intro.txt.html#key-notation> if
 /// there is a direct match to a keycode, keypad unimplemented
 fn key_str_to_event(key: &str) -> Result<KeyEvent, ManndError> {
     // remove "<>"
@@ -64,10 +61,10 @@ fn key_str_to_event(key: &str) -> Result<KeyEvent, ManndError> {
     let mut modifier: KeyModifiers = KeyModifiers::NONE;
 
     // removes all the modifiers from keys
-    let mut key_to_read: String = "".to_string();
+    let mut key_to_read: String = String::new();
 
     // modifiers
-    for split in key.split("-") {
+    for split in key.split('-') {
         match split {
             "S" => modifier.insert(KeyModifiers::SHIFT),
             "C" => modifier.insert(KeyModifiers::CONTROL),
@@ -77,7 +74,7 @@ fn key_str_to_event(key: &str) -> Result<KeyEvent, ManndError> {
             _ => {
                 key_to_read = key_to_read + &String::from(split);
             }
-        };
+        }
     }
 
     let key_code: KeyCode;
@@ -117,7 +114,7 @@ fn key_str_to_event(key: &str) -> Result<KeyEvent, ManndError> {
                 tracing::error!("Key: {key_to_read} does not correspond to a valid keycode");
                 return Err(ManndError::InputKey);
             }
-        };
+        }
     }
 
     Ok(KeyEvent::new(key_code, modifier))

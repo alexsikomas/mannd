@@ -1,16 +1,8 @@
 //! [Reference](https://w1.fi/wpa_supplicant/devel/dbus.html#dbus_network)
 //!
-//! The WpaBss struct has a lot of optional types mainly because it
-//! differs significantly to what's provided from a scan vs a connected
-//! network.
+//! The `WpaBss` struct has a lot of optional types mainly because it differs significantly to what's provided from a scan vs a connected network.
 //!
-//! When getting networks after a scan there can be duplicate SSIDs
-//! because wpa_supplicant shows the different possible freqs.
-//!
-//! Regarding call_interface methods:
-//! Not a huge fan of needing these two methods
-//! but if you try to use .call() expecting ()
-//! you'll get an error
+//! When getting networks after a scan there can be duplicate SSIDs because `wpa_supplicant` shows the different possible freqs.
 
 use std::{
     collections::{HashMap, HashSet, btree_map::Entry},
@@ -69,8 +61,7 @@ pub enum WpaInterface {
 impl<'a> From<&'a WpaInterface> for String {
     fn from(value: &'a WpaInterface) -> Self {
         match value {
-            WpaInterface::Managed(v) => v.clone(),
-            WpaInterface::Unmanaged(v) => v.clone(),
+            WpaInterface::Managed(v) | WpaInterface::Unmanaged(v) => v.clone(),
         }
     }
 }
@@ -97,13 +88,11 @@ impl WpaSupplicant {
 
         let mut active_interfaces =
             get_prop_from_proxy::<Vec<OwnedObjectPath>>(&proxy, "Interfaces").await?;
-        let active_interface: OwnedObjectPath;
-
-        if active_interfaces.is_empty() {
-            active_interface = OwnedObjectPath::null_value();
+        let active_interface: OwnedObjectPath = if active_interfaces.is_empty() {
+            OwnedObjectPath::null_value()
         } else {
-            active_interface = active_interfaces.swap_remove(0);
-        }
+            active_interfaces.swap_remove(0)
+        };
 
         Ok(Self {
             conn,
@@ -145,9 +134,9 @@ impl WpaSupplicant {
         }
         interfaces.retain(|v| !wpa_interfaces.contains(v));
 
-        interfaces
-            .iter()
-            .for_each(|v| res.push(WpaInterface::Unmanaged(v.clone())));
+        for v in &interfaces {
+            res.push(WpaInterface::Unmanaged(v.clone()));
+        }
 
         Ok(res)
     }
@@ -155,7 +144,7 @@ impl WpaSupplicant {
     #[instrument(err, skip(self))]
     pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ManndError> {
         let psk_len = psk.len();
-        if (psk_len < 8 || psk_len > 63) && psk_len != 0 {
+        if !(8..=63).contains(&psk_len) && psk_len != 0 {
             return Err(ManndError::PasswordLength);
         }
         // let networks = self.networks.get(&ssid).unwrap();
@@ -238,7 +227,7 @@ impl WpaSupplicant {
     }
 
     #[instrument(err, skip(self))]
-    pub async fn scan<'a>(&self, signal_tx: Sender<SignalUpdate<'a>>) -> Result<(), ManndError> {
+    pub async fn scan(&self, signal_tx: Sender<SignalUpdate<'_>>) -> Result<(), ManndError> {
         if self.get_interface_prop::<bool>("Scanning").await? {
             return Ok(());
         }
@@ -271,11 +260,7 @@ impl WpaSupplicant {
             // ap at different freqs
             let bss = self.get_bss_info(network.clone()).await?;
             let ssid = bss.ssid.clone();
-            let hidden = if ssid.is_empty() || ssid.clone().into_bytes().iter().all(|&v| v == 0) {
-                true
-            } else {
-                false
-            };
+            let hidden = ssid.is_empty() || ssid.clone().into_bytes().iter().all(|&v| v == 0);
 
             if seen.insert(ssid.clone()) && !hidden {
                 let ap = AccessPointBuilder::default()
@@ -306,12 +291,10 @@ impl WpaSupplicant {
                     .flags(NetworkFlags::KNOWN)
                     .build()?;
                 aps.push(ap);
-            } else {
-                if let Some(ap) = aps.iter_mut().find(|ap| ap.ssid == known_ssid) {
-                    ap.flags.insert(NetworkFlags::KNOWN);
-                    if network == conn_net {
-                        ap.flags.insert(NetworkFlags::CONNECTED);
-                    }
+            } else if let Some(ap) = aps.iter_mut().find(|ap| ap.ssid == known_ssid) {
+                ap.flags.insert(NetworkFlags::KNOWN);
+                if network == conn_net {
+                    ap.flags.insert(NetworkFlags::CONNECTED);
                 }
             }
         }
@@ -319,7 +302,7 @@ impl WpaSupplicant {
         Ok(aps)
     }
 
-    pub fn toggle_persist(&mut self) {
+    pub const fn toggle_persist(&mut self) {
         self.persist = !self.persist;
     }
 }
@@ -337,7 +320,7 @@ impl WpaSupplicant {
             ));
         };
 
-        let Some(service_sect) = conf.sections.get_mut(&"Service".to_string()) else {
+        let Some(service_sect) = conf.sections.get_mut("Service") else {
             return Err(ManndError::SectionNotFound(
                 "In wpa_supplicant service file, [Service] could not be located".into(),
             ));
@@ -362,7 +345,7 @@ impl WpaSupplicant {
                 entry.insert(env_as_str);
                 conf.overwrite()?;
             }
-        };
+        }
 
         self.persist_files_prepared = true;
         Ok(())
@@ -388,7 +371,7 @@ impl WpaSupplicant {
             }
         } else {
             let interface_path: OwnedObjectPath = proxy.call("CreateInterface", &body).await?;
-            self.active_interface = interface_path.clone();
+            self.active_interface = interface_path;
         }
 
         Ok(())
@@ -404,7 +387,7 @@ impl WpaSupplicant {
         body: T,
     ) -> Result<U, ManndError>
     where
-        T: serde::ser::Serialize + zvariant::DynamicType + Debug,
+        T: serde::ser::Serialize + zvariant::DynamicType + Debug + Send + Sync,
         U: for<'a> zvariant::DynamicDeserialize<'a>,
     {
         let proxy = Proxy::new(
@@ -425,7 +408,7 @@ impl WpaSupplicant {
         body: T,
     ) -> Result<(), ManndError>
     where
-        T: serde::ser::Serialize + zvariant::DynamicType + Debug,
+        T: serde::ser::Serialize + zvariant::DynamicType + Debug + Send + Sync,
     {
         let proxy = Proxy::new(
             &self.conn,
@@ -438,7 +421,7 @@ impl WpaSupplicant {
         Ok(())
     }
 
-    fn get_security<'a>(rsn: HashMap<String, Value<'a>>) -> Security {
+    fn get_security(rsn: &HashMap<String, Value<'_>>) -> Security {
         let mut security = Security::Open;
 
         // eap and psk are exclusive
@@ -476,7 +459,7 @@ impl WpaSupplicant {
     }
 
     #[instrument(err, skip(self))]
-    async fn check_connection<'a>(&self, mut stream: SignalStream<'a>) -> Result<(), ManndError> {
+    async fn check_connection(&self, mut stream: SignalStream<'_>) -> Result<(), ManndError> {
         let start = Instant::now();
         let max_wait = Duration::from_secs(15);
 
@@ -542,7 +525,7 @@ impl WpaSupplicant {
             "fi.w1.wpa_supplicant1.Interface",
         )
         .await?;
-        Ok(get_prop_from_proxy::<T>(&proxy, prop).await?)
+        get_prop_from_proxy::<T>(&proxy, prop).await
     }
 
     #[instrument(err, skip(self))]
@@ -578,24 +561,17 @@ impl WpaSupplicant {
         let Ok(mut conf) = IniConfig::new(service_path) else {
             return false;
         };
-        let Some(service_sect) = conf.sections.get_mut(&"Service".to_string()) else {
+        let Some(service_sect) = conf.sections.get_mut("Service") else {
             return false;
         };
         let env_file = Self::get_env_file();
-        match service_sect.get("EnvironmentFile") {
+        if let Some(val) = service_sect.get("EnvironmentFile") {
             // file already has env file
-            Some(val) => {
-                if val.to_lowercase().contains("mannd") {
-                    match File::open(&env_file) {
-                        Ok(_) => {
-                            return true;
-                        }
-                        _ => {}
-                    }
-                }
+            if val.to_lowercase().contains("mannd") && File::open(&env_file).is_ok() {
+                return true;
             }
-            None => {}
-        };
+        }
+
         false
     }
 
@@ -604,19 +580,17 @@ impl WpaSupplicant {
         let Ok(mut conf) = IniConfig::new(service_path) else {
             return false;
         };
-        let Some(service_sect) = conf.sections.get_mut(&"Service".to_string()) else {
+
+        let Some(service_sect) = conf.sections.get_mut("Service") else {
             return false;
         };
+
         let env_file = Self::get_env_file();
-        match service_sect.get("EnvironmentFile") {
-            // file already has env file
-            Some(val) => {
-                if val == &env_file {
-                    return true;
-                }
-            }
-            None => {}
-        };
+        if let Some(val) = service_sect.get("EnvironmentFile")
+            && val == &env_file
+        {
+            return true;
+        }
 
         // write env file
         service_sect.insert(
@@ -647,7 +621,7 @@ impl WpaSupplicant {
         let rates = Some(get_prop_from_proxy::<Vec<u32>>(&proxy, "Rates").await?);
 
         let rsn = get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "RSN").await?;
-        let security = Some(Self::get_security(rsn));
+        let security = Some(Self::get_security(&rsn));
 
         Ok(WpaBss {
             ssid,
@@ -679,9 +653,8 @@ impl WpaSupplicant {
                 }
                 _ => return Err(ManndError::NetworkNotFound),
             }
-        } else {
-            return Err(ManndError::NetworkNotFound);
-        };
+        }
+        Err(ManndError::NetworkNotFound)
     }
 
     /// Used for known networks

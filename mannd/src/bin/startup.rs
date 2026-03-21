@@ -9,6 +9,6 @@ use mannd::controller::Controller;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let controller = Controller::new().await?;
+    let _controller = Controller::new().await?;
     Ok(())
 }

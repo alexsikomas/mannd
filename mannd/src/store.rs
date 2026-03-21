@@ -156,9 +156,8 @@ impl ManndStore {
                 }
             }
 
-            let remove_idx = match remove_idx {
-                Some(idx) => idx,
-                None => return Err(ManndError::WpaRemoveNotFound),
+            let Some(remove_idx) = remove_idx else {
+                return Err(ManndError::WpaRemoveNotFound);
             };
 
             if remove_idx != count {
@@ -192,8 +191,8 @@ pub struct ApplicationState {
     pub managed_interfaces: Vec<String>,
 }
 
-impl ApplicationState {
-    fn new() -> Self {
+impl Default for ApplicationState {
+    fn default() -> Self {
         Self {
             wg_running: false,
             managed_interfaces: vec![],
@@ -224,16 +223,20 @@ impl ManndStore {
     #[instrument(err, skip(self))]
     pub fn update_wg_files(&self) -> Result<(), ManndError> {
         let mut files: HashMap<String, WgMeta, RandomState> = HashMap::default();
-        let mut dir = fs::read_dir(WG_DIR)?;
-        while let Some(entry) = dir.next() {
+        let dir = fs::read_dir(WG_DIR)?;
+        for entry in dir {
             let entry = entry?;
             if entry.path().extension().is_some_and(|ext| ext == "conf") {
                 let meta = fs::metadata(entry.path())?;
                 if !meta.is_file() {
                     continue;
                 }
-                let time = meta.modified().unwrap().elapsed().unwrap().as_secs();
-                let filename = entry.file_name().into_string().unwrap();
+                let time = meta.modified().unwrap().elapsed()?.as_secs();
+                let filename = entry.file_name().into_string().map_err(|_| {
+                    ManndError::OperationFailed(
+                        "OsString couldn't be converted to string".to_string(),
+                    )
+                })?;
 
                 files.insert(
                     filename,
@@ -269,31 +272,25 @@ impl ManndStore {
             let mut table = write.open_table(WG_TABLE)?;
             for file in files.keys() {
                 let data = files.get(file).unwrap();
-                let name = file.to_string();
+                let name = file.clone();
 
                 // check against db data to not overwrite
                 // stored country flags
-                match &db_data {
-                    Some(found_data) => {
-                        match found_data.get(&name) {
-                            Some(stored_data) => {
-                                let meta = WgMeta {
-                                    country: stored_data.country,
-                                    ..*data
-                                };
-                                let meta_bytes = to_allocvec(&meta)?;
-                                table.insert(file.to_string(), meta_bytes.as_slice())?;
-                            }
-                            _ => {
-                                let meta_bytes = to_allocvec(&data)?;
-                                table.insert(file.to_string(), meta_bytes.as_slice())?;
-                            }
+                if let Some(found_data) = &db_data {
+                    if let Some(stored_data) = found_data.get(&name) {
+                        let meta = WgMeta {
+                            country: stored_data.country,
+                            ..*data
                         };
-                    }
-                    None => {
+                        let meta_bytes = to_allocvec(&meta)?;
+                        table.insert(file.to_string(), meta_bytes.as_slice())?;
+                    } else {
                         let meta_bytes = to_allocvec(&data)?;
                         table.insert(file.to_string(), meta_bytes.as_slice())?;
                     }
+                } else {
+                    let meta_bytes = to_allocvec(&data)?;
+                    table.insert(file.clone(), meta_bytes.as_slice())?;
                 }
             }
         }
@@ -307,7 +304,7 @@ impl ManndStore {
 
         let table = read.open_table(WG_TABLE)?;
         let mut data: HashMap<String, WgMeta, RandomState> =
-            HashMap::with_capacity_and_hasher(table.len()? as usize, RandomState::new());
+            HashMap::with_capacity_and_hasher(usize::try_from(table.len()?)?, RandomState::new());
 
         for item in table.iter()? {
             let (k, v) = item?;
