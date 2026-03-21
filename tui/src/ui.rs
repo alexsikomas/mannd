@@ -156,7 +156,7 @@ impl UiContext {
                 let mut cols: usize = 0;
                 let vpn_areas = WireguardMenu::build_layout_no_render(inner_area, &mut cols);
                 let wg_meta = if ctx.net_ctx.wg_ctx.is_on {
-                    Some(&net_ctx.wg_ctx.meta)
+                    Some(net_ctx.wg_ctx.meta.as_slice())
                 } else {
                     None
                 };
@@ -251,15 +251,9 @@ impl<'a> TryFrom<Cow<'_, str>> for ThemeRgb {
 
     fn try_from(value: Cow<'_, str>) -> Result<Self, Self::Error> {
         Ok(ThemeRgb {
-            red: u8::from_str_radix(&value[1..=2], 16).map_err(|e| {
-                return ManndError::ParseInt(e);
-            })?,
-            green: u8::from_str_radix(&value[3..=4], 16).map_err(|e| {
-                return ManndError::ParseInt(e);
-            })?,
-            blue: u8::from_str_radix(&value[5..=6], 16).map_err(|e| {
-                return ManndError::ParseInt(e);
-            })?,
+            red: u8::from_str_radix(&value[1..=2], 16).map_err(|e| ManndError::ParseInt(e))?,
+            green: u8::from_str_radix(&value[3..=4], 16).map_err(|e| ManndError::ParseInt(e))?,
+            blue: u8::from_str_radix(&value[5..=6], 16).map_err(|e| ManndError::ParseInt(e))?,
         })
     }
 }
@@ -287,6 +281,6 @@ impl ThemeRgb {
 
     pub fn color(&self) -> Color {
         let col: Color = self.into();
-        return col;
+        col
     }
 }

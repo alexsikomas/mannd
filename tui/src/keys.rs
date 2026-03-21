@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use mannd::SETTINGS;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use mannd::{SETTINGS, error::ManndError};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum KeyAction {
@@ -37,7 +37,7 @@ pub struct Keymap {
 }
 
 impl Keymap {
-    pub fn load_keys() -> Self {
+    pub fn load_keys() -> Result<Self, ManndError> {
         let conf = &SETTINGS;
         let mut bindings: HashMap<KeyEvent, KeyAction> = HashMap::default();
 
@@ -47,18 +47,18 @@ impl Keymap {
                 for key in keys {
                     let event = key_str_to_event(key);
                     let action: KeyAction = keybinds.get(key).unwrap().clone().into();
-                    bindings.insert(event, action.into());
+                    bindings.insert(event?, action.into());
                 }
             }
             None => {}
         };
-        Self { bindings }
+        Ok(Self { bindings })
     }
 }
 
 /// Follows https://vimhelp.org/intro.txt.html#key-notation if
 /// there is a direct match to a keycode, keypad unimplemented
-fn key_str_to_event(key: &str) -> KeyEvent {
+fn key_str_to_event(key: &str) -> Result<KeyEvent, ManndError> {
     // remove "<>"
     let key = &key[2..key.len() - 2];
     let mut modifier: KeyModifiers = KeyModifiers::NONE;
@@ -115,10 +115,10 @@ fn key_str_to_event(key: &str) -> KeyEvent {
             "F12" => key_code = KeyCode::F(12),
             _ => {
                 tracing::error!("Key: {key_to_read} does not correspond to a valid keycode");
-                panic!("Input key does not correspond to keycode.");
+                return Err(ManndError::InputKey);
             }
         };
     }
 
-    KeyEvent::new(key_code, modifier)
+    Ok(KeyEvent::new(key_code, modifier))
 }

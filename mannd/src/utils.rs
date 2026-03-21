@@ -9,7 +9,7 @@ use std::{
     fs::{self, OpenOptions, read_dir},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     os::unix::fs::{PermissionsExt, chown},
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::FromStr,
 };
 
@@ -30,8 +30,8 @@ use tracing_subscriber::{FmtSubscriber, layer::SubscriberExt};
 
 use crate::error::ManndError;
 
-const SYS_NET_PATH: &'static str = "/sys/class/net";
-const SYS_VIRT_PATH: &'static str = "/sys/devices/virtual";
+const SYS_NET_PATH: &str = "/sys/class/net";
+const SYS_VIRT_PATH: &str = "/sys/devices/virtual";
 
 pub fn setup_logging(
     path: PathBuf,
@@ -68,7 +68,7 @@ pub fn setup_logging(
 
     if uid.is_some() {
         chown(path.parent().unwrap(), uid, None)?;
-    } else if in_root.is_some_and(|r| r == true) {
+    } else if in_root.is_some_and(|r| r) {
         fs::set_permissions(path.parent().unwrap(), fs::Permissions::from_mode(0o644))?;
         fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;
     }
@@ -86,7 +86,7 @@ pub fn setup_logging(
     }
 }
 
-pub fn is_path_root(path: &PathBuf) -> bool {
+pub fn is_path_root(path: &Path) -> bool {
     if path.starts_with("/root") {
         true
     } else {

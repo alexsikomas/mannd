@@ -6,8 +6,8 @@ use zbus_systemd::systemd1::UnitProxy;
 
 use crate::error::ManndError;
 
-const SYSTEMD_BUS: &'static str = "org.freedesktop.systemd1";
-const SYSTEMD_PATH: &'static str = "/org/freedesktop/systemd1";
+const SYSTEMD_BUS: &str = "org.freedesktop.systemd1";
+const SYSTEMD_PATH: &str = "/org/freedesktop/systemd1";
 
 pub async fn get_system_unit(
     conn: &Connection,
@@ -42,7 +42,7 @@ pub async fn is_service_active(conn: &Connection, service: impl Into<String>) ->
             }
         }
     }
-    return None;
+    None
 }
 
 pub async fn get_service_path(conn: &Connection, service: impl Into<String>) -> String {

@@ -13,7 +13,7 @@ use crate::{
 
 pub struct WpaInterfaceUi<'a> {
     info: &'a WpaInterfacePrompt,
-    ifaces: &'a Vec<WpaInterface>,
+    ifaces: &'a [WpaInterface],
     persist: bool,
     theme: &'a Theme,
 }
@@ -22,7 +22,7 @@ impl<'a> WpaInterfaceUi<'a> {
     pub fn new(
         info: &'a WpaInterfacePrompt,
         persist: bool,
-        ifaces: &'a Vec<WpaInterface>,
+        ifaces: &'a [WpaInterface],
     ) -> Option<Self> {
         let theme: &Theme = match THEME.get() {
             Some(t) => t,

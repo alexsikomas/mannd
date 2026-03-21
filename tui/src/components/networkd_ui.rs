@@ -15,12 +15,12 @@ use crate::{
 
 pub struct NetdMenu<'a> {
     state: &'a NetdState,
-    configs: &'a Vec<PathBuf>,
+    configs: &'a [PathBuf],
     theme: &'a Theme,
 }
 
 impl<'a> NetdMenu<'a> {
-    pub fn new(state: &'a NetdState, configs: &'a Vec<PathBuf>) -> Option<Self> {
+    pub fn new(state: &'a NetdState, configs: &'a [PathBuf]) -> Option<Self> {
         let theme: &Theme = match THEME.get() {
             Some(t) => t,
             None => {

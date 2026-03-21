@@ -66,9 +66,9 @@ pub enum WpaInterface {
     Unmanaged(String),
 }
 
-impl<'a> Into<String> for &'a WpaInterface {
-    fn into(self) -> String {
-        match self {
+impl<'a> From<&'a WpaInterface> for String {
+    fn from(value: &'a WpaInterface) -> Self {
+        match value {
             WpaInterface::Managed(v) => v.clone(),
             WpaInterface::Unmanaged(v) => v.clone(),
         }
@@ -542,7 +542,7 @@ impl WpaSupplicant {
             "fi.w1.wpa_supplicant1.Interface",
         )
         .await?;
-        return Ok(get_prop_from_proxy::<T>(&proxy, prop).await?);
+        Ok(get_prop_from_proxy::<T>(&proxy, prop).await?)
     }
 
     #[instrument(err, skip(self))]

@@ -26,6 +26,7 @@ postcard = { version = "1.1.3", default-features = false, features = [
 ] }
 tracing-subscriber = { version = "0.3.20", features = ["fmt"] }
 bitflags = { version = "2.10.0", features = ["serde"] }
+libc = { version = "0.2.183" }
 
 [profile.dev]
 opt-level = 0
@@ -38,3 +39,8 @@ lto = true
 panic = "abort"
 debug = false
 incremental = false
+
+[workspace.lints.clippy]
+redundant_static_lifetimes = "warn"
+from_over_into = "warn"
+ptr_arg = "warn"

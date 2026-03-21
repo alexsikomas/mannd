@@ -115,7 +115,7 @@ impl IniConfig {
         } else {
             res.push_str(&input);
         }
-        return Ok(res);
+        Ok(res)
     }
 
     #[instrument(err, skip(self))]
@@ -169,7 +169,8 @@ impl IniConfig {
         let mut temp = NamedTempFile::new_in(dir)?;
         self.write_to(&mut temp)?;
         temp.as_file().sync_all()?;
-        let _ = temp.persist(self.file_path.clone());
+        temp.persist(self.file_path.clone())
+            .map_err(|_| ManndError::OperationFailed("Persist Failed".to_string()))?;
 
         File::open(dir)?.sync_all()?;
 
@@ -199,7 +200,7 @@ impl IniConfig {
             for (key, value) in keys {
                 writeln!(writer, "{}={}", key, value)?;
             }
-            writeln!(writer, "")?;
+            writeln!(writer)?;
         }
 
         writer.flush()?;

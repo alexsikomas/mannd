@@ -70,26 +70,18 @@ impl Controller {
     /// Tries to connect to Wi-Fi adapter, does not emit
     /// error instead does a tracing::warn!()
     pub async fn connect_wifi_adapter(&mut self) {
-        match is_service_active(&self.connection, "iwd").await {
-            Some(v) => {
-                if v {
-                    let _ = self.connect_iwd().await;
-                    info!("Wi-Fi Daemon Connected: iwd");
-                    return;
-                }
-            }
-            _ => {}
+        let mut opt = is_service_active(&self.connection, "iwd").await;
+        if opt.is_some_and(|v| v) {
+            let _ = self.connect_iwd().await;
+            info!("Wi-Fi Daemon Connected: iwd");
+            return;
         }
 
-        match is_service_active(&self.connection, "wpa_supplicant").await {
-            Some(v) => {
-                if v {
-                    let _ = self.connect_wpa().await;
-                    info!("Wi-Fi Daemon Connected: wpa_supplicant");
-                    return;
-                }
-            }
-            _ => {}
+        opt = is_service_active(&self.connection, "wpa_supplicant").await;
+        if opt.is_some_and(|v| v) {
+            let _ = self.connect_wpa().await;
+            info!("Wi-Fi Daemon Connected: wpa_supplicant");
+            return;
         }
 
         tracing::warn!("Could not connect to any Wi-Fi daemon.");
@@ -118,13 +110,9 @@ impl Controller {
 
     #[instrument(err, skip(self))]
     async fn connect_wpa(&mut self) -> Result<(), ManndError> {
-        match WpaSupplicant::new(self.connection.clone()).await {
-            Ok(wpa) => {
-                self.wifi = Some(WirelessAdapter::Wpa(wpa));
-                Ok(())
-            }
-            Err(e) => return Err(e),
-        }
+        let wpa = WpaSupplicant::new(self.connection.clone()).await?;
+        self.wifi = Some(WirelessAdapter::Wpa(wpa));
+        Ok(())
     }
 
     #[instrument(err, skip(self))]

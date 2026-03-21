@@ -13,7 +13,6 @@ use crate::{
     store::WgMeta,
     systemd::networkd::get_netd_files,
     utils::list_interfaces,
-    wireguard::network::Wireguard,
     wireless::{
         common::{AccessPoint, Security},
         wpa_supplicant::WpaInterface,
@@ -147,7 +146,10 @@ impl<'a> NetworkActor<'a> {
                         ));
                         should_refresh = true;
                     }
-                    Err(e) => {}
+                    Err(e) => {
+                        tracing::warn!("Could not connect to a known network. Error: {e}");
+                        state_send.push(NetworkState::Failed(Failure::Wifi(e.to_string())));
+                    }
                 }
             }
             NetworkAction::CreateWpaInterface(ifname) => {
@@ -430,60 +432,3 @@ pub enum Credentials {
     Password(String),
     // Eap(EapInfo),
 }
-
-// #[derive(Builder, Debug, Clone, Serialize, Deserialize)]
-// pub struct EapInfo {
-//     pub eap_method: EapMethod,
-//     pub identity: String,
-//     #[builder(default = "None")]
-//     pub anonymous_identity: Option<String>,
-//
-//     // Optional because EAP-TLS uses certs instead.
-//     pub password: Option<String>,
-//     pub ca_cert: PathBuf,
-//
-//     // limits accepted certs
-//     #[builder(default = "None")]
-//     pub domain_match: Option<String>,
-//
-//     // Required for PEAP and TTLS
-//     pub phase2: Option<PhaseTwo>,
-//     // EAP-TLS
-//     #[builder(default = "None")]
-//     pub client_cert: Option<PathBuf>,
-//     #[builder(default = "None")]
-//     pub client_key: Option<PathBuf>,
-//     // Used if client key is encrypted
-//     #[builder(default = "None")]
-//     pub client_key_password: Option<String>,
-// }
-//
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub enum PhaseTwo {
-//     Eap(EapMethod),
-//     // non-eap variants
-//     Pap,
-//     Chap,
-//     Mschap,
-//     Mschapv2,
-//     // user can specify custom
-//     Legacy(String),
-// }
-//
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub enum EapMethod {
-//     TLS,
-//     PEAP,
-//     TTLS,
-//     PWD,
-//     SIM,
-//     AKA,
-//     // AKA'
-//     AKA_PRIME,
-//     MSCHAPV2,
-//     GTC,
-//     // methods below not in iwd
-//     MD5,
-//     FAST,
-//     LEAP,
-// }

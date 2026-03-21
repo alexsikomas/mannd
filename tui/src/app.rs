@@ -70,7 +70,7 @@ impl App {
         let mut ui_context = UiContext::new();
 
         let caps = init_request(&mut writer, &mut reader).await?;
-        let mut ui = UiState::new(caps.clone());
+        let mut ui = UiState::new(caps.clone())?;
         state.caps = caps;
 
         while !state.should_quit {

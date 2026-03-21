@@ -22,7 +22,7 @@ use mannd::{
     SETTINGS, UNIX_SOCK_PATH,
     controller::WifiDaemonType,
     error::ManndError,
-    geteuid, init_home_path,
+    init_home_path,
     state::{
         network::{NetworkAction, NetworkActor, NetworkState},
         signals::SignalUpdate,
@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     init_home_path(args.target_uid);
 
     // root check
-    let euid = unsafe { geteuid() };
+    let euid = unsafe { libc::getuid() };
     if euid != 0 {
         return Err(ManndError::NotRoot)?;
     }
@@ -107,7 +107,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let mut frame = frame_res?;
                     let action = postcard::from_bytes_cobs::<NetworkAction>(&mut frame)?;
                     let res = actor.handle_action(action).await?;
-                    if res == true {
+                    if res {
                         if args.spawned {
                             info!("TUI requested shutdown");
                             return Ok(());
