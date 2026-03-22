@@ -142,7 +142,7 @@ impl WpaSupplicant {
     }
 
     #[instrument(err, skip(self))]
-    pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ManndError> {
+    pub async fn connect_network_psk(&self, ssid: &str, psk: &String) -> Result<(), ManndError> {
         let psk_len = psk.len();
         if !(8..=63).contains(&psk_len) && psk_len != 0 {
             return Err(ManndError::PasswordLength);
@@ -184,7 +184,7 @@ impl WpaSupplicant {
     }
 
     #[instrument(err, skip(self))]
-    pub async fn connect_known(&self, ssid: String) -> Result<(), ManndError> {
+    pub async fn connect_known(&self, ssid: &str) -> Result<(), ManndError> {
         let networks = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
             .await?;
@@ -211,7 +211,7 @@ impl WpaSupplicant {
     }
 
     #[instrument(err, skip(self))]
-    pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ManndError> {
+    pub async fn remove_network(&self, ssid: &str, security: &Security) -> Result<(), ManndError> {
         let known = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
             .await?;
@@ -352,7 +352,7 @@ impl WpaSupplicant {
     }
 
     #[instrument(err, skip(self))]
-    pub async fn create_interface(&mut self, ifname: String) -> Result<(), ManndError> {
+    pub async fn create_interface(&mut self, ifname: &str) -> Result<(), ManndError> {
         let mut body: HashMap<String, OwnedValue> = HashMap::new();
         body.insert("Ifname".to_string(), Value::new(ifname).try_to_owned()?);
 

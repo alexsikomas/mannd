@@ -1,4 +1,4 @@
-use mannd::{SETTINGS, error::ManndError, state::network::InterfaceTypes};
+use mannd::{SETTINGS, error::ManndError};
 use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
@@ -10,6 +10,7 @@ use std::{borrow::Cow, path::PathBuf, sync::OnceLock};
 use tracing::instrument;
 
 use crate::{
+    app::InterfaceTypes,
     components::{
         main_menu::MainMenu, networkd_ui::NetdMenu, password_prompt::PasswordPrompt,
         popup_prompt::PopupPrompt, wifi_menu::Connection, wireguard_ui::WireguardMenu,
@@ -160,22 +161,19 @@ impl UiContext {
                         && let Some(prompt_instance) = WpaInterfaceUi::new(
                             wpa_prompt,
                             ctx.net_ctx.persist_wpa_changes,
-                            &wpa_ifaces,
+                            wpa_ifaces,
                         )
                     {
                         frame.render_widget(prompt_instance, inner_area);
                     }
                 }
                 PromptState::PskConnect(psk_prompt) => {
-                    if let View::Wifi(connection_state) = &state.current_view {
-                        if let Some(selected) =
+                    if let View::Wifi(connection_state) = &state.current_view
+                        && let Some(selected) =
                             net_ctx.networks.get(connection_state.network_cursor.index)
-                        {
-                            if let Some(prompt_instance) = PasswordPrompt::new(selected, psk_prompt)
-                            {
-                                frame.render_widget(prompt_instance, inner_area);
-                            }
-                        }
+                        && let Some(prompt_instance) = PasswordPrompt::new(selected, psk_prompt)
+                    {
+                        frame.render_widget(prompt_instance, inner_area);
                     }
                 }
             }

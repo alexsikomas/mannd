@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{cmp::min, time::Duration};
 
 use postcard::{from_bytes_cobs, to_stdvec_cobs};
 use ratatui::layout::Rect;
@@ -14,9 +14,11 @@ use crossterm::event::EventStream;
 use futures::{SinkExt, StreamExt};
 use mannd::{
     error::ManndError,
-    state::network::{
-        Capability, Failure, InterfaceTypes, NetCtx, NetworkAction, NetworkState, Start, Success,
+    state::messages::{
+        Capability, Failure, NetworkAction, NetworkState, Process, Started, Success,
     },
+    store::WgMeta,
+    wireless::{common::AccessPoint, wpa_supplicant::WpaInterface},
 };
 use tokio::{
     net::{
@@ -36,7 +38,7 @@ pub struct AppState {
     redraw: bool,
 
     caps: Capability,
-    net_ctx: NetCtx,
+    net_ctx: NetworkContext,
 }
 
 impl AppState {
@@ -45,7 +47,7 @@ impl AppState {
             should_quit: false,
             redraw: true,
             caps: Capability::default(),
-            net_ctx: NetCtx::default(),
+            net_ctx: NetworkContext::default(),
         }
     }
 }
@@ -95,15 +97,8 @@ impl App {
                 Some(frame_res) = reader.next() => {
                     let mut frame = frame_res?;
                     let msg = from_bytes_cobs::<NetworkState>(&mut frame)?;
-                    match msg {
-                        NetworkState::CallAction(action) => {
-                            let _ = sock_tx.send(to_stdvec_cobs(&action)?).await;
-                        }
-                        _ => {
-                            if let Some(cmd) = handle_state_update(&mut state, &mut ui, msg).await {
-                                ui.process_commands([cmd], &state.caps);
-                            }
-                        }
+                    if let Some(cmd) = handle_state_update(&mut state, &mut ui, msg).await {
+                        ui.process_commands([cmd], &state.caps);
                     }
                     state.redraw = true;
                 }
@@ -185,7 +180,7 @@ async fn handle_state_update(
                 wifi_state.refresh_available_actions(&state.net_ctx.networks);
             }
         }
-        NetworkState::ToggleWpaPersist => {
+        NetworkState::ToggleWpaPesist => {
             state.net_ctx.persist_wpa_changes = !state.net_ctx.persist_wpa_changes;
         }
         NetworkState::SetWireguardInfo((names, meta)) => {
@@ -206,19 +201,19 @@ async fn handle_state_update(
     None
 }
 
-fn handle_start(_state: &mut AppState, ui: &mut UiState, started: Start) -> Option<StateCommand> {
+fn handle_start(_state: &mut AppState, ui: &mut UiState, started: Started) -> Option<StateCommand> {
     match started {
-        Start::Wifi => {
+        Started(Process::WifiConnect) => {
             ui.should_block = true;
             Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
                 "Connecting...".to_string(),
                 PopupType::General,
             ))))
         }
-        Start::Scan => Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
-            "Scanning...".to_string(),
-            PopupType::General,
-        )))),
+        Started(Process::WifiScan) => Some(StateCommand::Prompt(PromptState::Info(
+            InfoPrompt::new("Scanning...".to_string(), PopupType::General),
+        ))),
+        Started(Process::Wireguard) => todo!(),
     }
 }
 
@@ -228,11 +223,8 @@ fn handle_success(
     succeeded: Success,
 ) -> Option<StateCommand> {
     match succeeded {
-        Success::Wifi => {
+        Success::Generic => {
             ui.should_block = false;
-            return Some(StateCommand::ClearPrompts);
-        }
-        Success::Scan => {
             return Some(StateCommand::ClearPrompts);
         }
         Success::EnableWireguard => {
@@ -250,14 +242,19 @@ fn handle_failure(
     ui: &mut UiState,
     failed: Failure,
 ) -> Option<StateCommand> {
-    match failed {
-        Failure::Wifi(err) => {
+    match failed.process {
+        Process::WifiConnect => {
             ui.should_block = false;
             Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
-                err,
+                failed.reason,
                 PopupType::Error,
             ))))
         }
+        Process::WifiScan => Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
+            failed.reason,
+            PopupType::Error,
+        )))),
+        Process::Wireguard => todo!(),
     }
 }
 
@@ -286,4 +283,81 @@ pub enum AppAction {
     Network(NetworkAction),
     AddPrompt(PromptState),
     Exit,
+}
+
+pub struct NetworkContext {
+    pub networks: Vec<AccessPoint>,
+    pub interfaces: Option<InterfaceTypes>,
+    pub wg_ctx: WireguardContext,
+    pub persist_wpa_changes: bool,
+    pub netd_files: Vec<String>,
+}
+
+pub struct WireguardContext {
+    pub names: Vec<String>,
+    pub meta: Vec<WgMeta>,
+    pub is_on: bool,
+}
+
+impl WireguardContext {
+    fn new() -> Self {
+        Self {
+            names: vec![],
+            meta: vec![],
+            is_on: false,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        min(self.names.len(), self.meta.len())
+    }
+
+    pub fn get_index(&self, index: usize) -> Option<(&str, &WgMeta)> {
+        if let Some(name) = self.names.get(index) {
+            if let Some(meta) = self.meta.get(index) {
+                return Some((name, meta));
+            }
+        }
+        None
+    }
+}
+
+pub enum InterfaceTypes {
+    Wpa(Vec<WpaInterface>),
+    Normal(Vec<String>),
+}
+
+impl InterfaceTypes {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Wpa(ifaces) => ifaces.len(),
+            Self::Normal(ifaces) => ifaces.len(),
+        }
+    }
+
+    pub fn get_wpa_index(&self, index: usize) -> Option<&WpaInterface> {
+        match self {
+            Self::Wpa(ifaces) => ifaces.get(index),
+            _ => None,
+        }
+    }
+
+    pub fn get_normal_index(&self, index: usize) -> Option<&str> {
+        match self {
+            Self::Normal(ifaces) => ifaces.get(index).map(|s| s.as_str()),
+            _ => None,
+        }
+    }
+}
+
+impl Default for NetworkContext {
+    fn default() -> Self {
+        Self {
+            networks: vec![],
+            interfaces: None,
+            wg_ctx: WireguardContext::new(),
+            persist_wpa_changes: false,
+            netd_files: vec![],
+        }
+    }
 }

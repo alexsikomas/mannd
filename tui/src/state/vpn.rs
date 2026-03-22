@@ -1,6 +1,10 @@
 use std::path::PathBuf;
 
-use mannd::{state::network::NetworkAction, store::WG_DIR};
+use mannd::{
+    state::messages::{NetworkAction, WireguardAction},
+    store::WG_DIR,
+    wireguard::network::Wireguard,
+};
 
 use crate::{
     keys::KeyAction,
@@ -64,7 +68,7 @@ impl Component for VpnState {
                 KeyAction::Enter => match selected {
                     VpnSelection::Toggle => {
                         return StateResult::Command(StateCommand::NetworkAction(
-                            NetworkAction::ToggleWireguard,
+                            NetworkAction::Wireguard(WireguardAction::ToggleWireguard),
                         ));
                     }
                     VpnSelection::Files => {
@@ -72,7 +76,9 @@ impl Component for VpnState {
                         if let Some(data) = ctx.net_ctx.wg_ctx.get_index(self.file_cursor.index) {
                             wg_path.push(data.0);
                             return StateResult::Command(StateCommand::NetworkAction(
-                                NetworkAction::ConnectWireguard(wg_path),
+                                NetworkAction::Wireguard(WireguardAction::ConnectWireguard(
+                                    wg_path,
+                                )),
                             ));
                         }
                     }

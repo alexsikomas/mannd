@@ -1,6 +1,6 @@
 use mannd::{
     controller::WifiDaemonType,
-    state::network::{NetCtxFlags, NetworkAction},
+    state::messages::{NetworkAction, WifiAction, WpaAction},
     wireless::common::{AccessPoint, NetworkFlags, Security},
 };
 
@@ -101,17 +101,17 @@ impl Component for WifiState {
                 self.actions.on_key(key, ctx);
                 if key == &KeyAction::Enter {
                     return match self.actions.selected() {
-                        Some(ConnectionAction::Scan) => {
-                            StateResult::Command(StateCommand::NetworkAction(NetworkAction::Scan))
-                        }
+                        Some(ConnectionAction::Scan) => StateResult::Command(
+                            StateCommand::NetworkAction(NetworkAction::Wifi(WifiAction::Scan)),
+                        ),
                         Some(ConnectionAction::Connect) => {
                             if let Some(network) = net_ctx.networks.get(self.network_cursor.index) {
                                 if network.flags.contains(NetworkFlags::KNOWN) {
                                     return StateResult::Command(StateCommand::NetworkAction(
-                                        NetworkAction::ConnectKnown(
+                                        NetworkAction::Wifi(WifiAction::ConnectKnown(
                                             network.ssid.clone(),
                                             network.security.clone(),
-                                        ),
+                                        )),
                                     ));
                                 }
 
@@ -128,17 +128,19 @@ impl Component for WifiState {
                                 StateResult::Consumed
                             }
                         }
-                        Some(ConnectionAction::Disconnect) => StateResult::Command(
-                            StateCommand::NetworkAction(NetworkAction::Disconnect),
-                        ),
+                        Some(ConnectionAction::Disconnect) => {
+                            StateResult::Command(StateCommand::NetworkAction(NetworkAction::Wifi(
+                                WifiAction::Disconnect,
+                            )))
+                        }
                         Some(ConnectionAction::Forget) => {
                             if let Some(network) = net_ctx.networks.get(self.network_cursor.index) {
                                 if network.flags.contains(NetworkFlags::KNOWN) {
                                     return StateResult::Command(StateCommand::NetworkAction(
-                                        NetworkAction::Forget(
+                                        NetworkAction::Wifi(WifiAction::Forget(
                                             network.ssid.clone(),
                                             network.security.clone(),
-                                        ),
+                                        )),
                                     ));
                                 }
                                 StateResult::Consumed
@@ -151,9 +153,9 @@ impl Component for WifiState {
                             cmds.push(StateCommand::Prompt(PromptState::WpaInterface(
                                 WpaInterfacePrompt::default(),
                             )));
-                            cmds.push(StateCommand::NetworkAction(
-                                NetworkAction::GetNetworkContext(NetCtxFlags::InterfacesWpa),
-                            ));
+                            cmds.push(StateCommand::NetworkAction(NetworkAction::Wpa(
+                                WpaAction::GetInterfaces,
+                            )));
                             return StateResult::Commands(cmds);
                         }
                         _ => StateResult::Consumed,

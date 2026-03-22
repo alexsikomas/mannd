@@ -11,9 +11,9 @@ use crate::{
     components::layout::{panel_with_toolbar, selection_style},
     state::{
         VpnState,
-        vpn::{self, VpnSelection},
+        vpn::VpnSelection,
     },
-    ui::{THEME, Theme, theme},
+    ui::{Theme, theme},
 };
 
 // min num of cols, max num of cols, target line amount

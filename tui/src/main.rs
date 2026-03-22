@@ -1,9 +1,8 @@
-use libc::sleep;
 use mannd::{
-    SETTINGS, UNIX_SOCK_PATH, error::ManndError, init_home_path, state::network::NetworkAction,
+    SETTINGS, UNIX_SOCK_PATH, error::ManndError, init_home_path, state::messages::NetworkAction,
     utils::setup_logging,
 };
-use postcard::{to_stdvec, to_stdvec_cobs};
+use postcard::to_stdvec_cobs;
 use std::{path::PathBuf, process::Stdio, str::FromStr, time::Duration};
 use tokio::{fs, io::AsyncWriteExt, net::UnixStream, process::Command, time::timeout};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};

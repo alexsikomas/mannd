@@ -10,9 +10,9 @@ use std::{fmt::Debug, usize};
 use crossterm::event::Event;
 use mannd::controller::WifiDaemonType;
 use mannd::error::ManndError;
-use mannd::state::network::{Capability, NetCtx, NetCtxFlags, NetworkAction};
+use mannd::state::messages::{Capability, NetworkAction, WifiAction};
 
-use crate::app::AppAction;
+use crate::app::{AppAction, NetworkContext};
 use crate::keys::{KeyAction, Keymap};
 pub use crate::state::menu::MainMenuSelection;
 pub use crate::state::networkd::NetdState;
@@ -42,7 +42,7 @@ pub enum StateCommand {
 }
 
 pub struct AppContext<'a> {
-    pub net_ctx: &'a NetCtx,
+    pub net_ctx: &'a NetworkContext,
     pub wifi_daemon: &'a Option<WifiDaemonType>,
     pub vpn_cols: usize,
 }
@@ -57,7 +57,7 @@ pub struct UiState {
 
 impl<'a> AppContext<'a> {
     pub fn create(
-        net_ctx: &'a NetCtx,
+        net_ctx: &'a NetworkContext,
         wifi_daemon: &'a Option<WifiDaemonType>,
         // one-to-one map
         vpn_cols: usize,
@@ -166,9 +166,9 @@ impl UiState {
                     match self.current_view {
                         // improves usability by fetching any networks
                         // that are currently known in connection
-                        View::Wifi(_) => actions.push(AppAction::Network(
-                            NetworkAction::GetNetworkContext(NetCtxFlags::Network),
-                        )),
+                        View::Wifi(_) => actions.push(AppAction::Network(NetworkAction::Wifi(
+                            WifiAction::GetNetworks,
+                        ))),
                         // View::Vpn(_) => {
                         //     actions.push(AppAction::Network(NetworkAction::))
                         // }
@@ -342,15 +342,9 @@ impl<T: PartialEq> SelectableList<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Cursor {
     pub index: usize,
-}
-
-impl Default for Cursor {
-    fn default() -> Self {
-        Self { index: 0 }
-    }
 }
 
 impl Cursor {

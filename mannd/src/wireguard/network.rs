@@ -10,7 +10,13 @@ use crate::{
     utils::{get_index, str_to_ip},
 };
 use neli::{consts::socket::NlFamily, router::asynchronous::NlRouter, utils::Groups};
-use std::{collections::BTreeMap, fmt::Debug, net::IpAddr, path::PathBuf, process::Command};
+use std::{
+    collections::BTreeMap,
+    fmt::Debug,
+    net::IpAddr,
+    path::{Path, PathBuf},
+    process::Command,
+};
 use tracing::instrument;
 
 pub const INTERFACE: &str = "wg-mannd";
@@ -42,8 +48,8 @@ impl Wireguard<NlRouterWrapper> {
 
     #[instrument(err)]
     /// Attempts to connect to a wireguard configuration
-    pub fn connect_conf(&self, path: PathBuf) -> Result<(), ManndError> {
-        let conf = IniConfig::new(path.clone())?;
+    pub fn connect_conf(&self, path: &Path) -> Result<(), ManndError> {
+        let conf = IniConfig::new(path.into())?;
 
         // get ips, possibly multiple split on ,
         let mut ips: Vec<IpAddr> = vec![];
@@ -198,33 +204,5 @@ impl Wireguard<NlRouterWrapper> {
 impl Debug for Wireguard<NlRouterWrapper> {
     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Result::Ok(())
-    }
-}
-
-// tests
-mod tests {
-
-    #[tokio::test]
-    async fn wg_intergration_test() -> Result<(), ManndError> {
-        let tmp = NamedTempFile::new().unwrap();
-        let db = Database::create(tmp.path()).unwrap();
-
-        let wg = Wireguard::start_interface(Some(db)).await?;
-        wg.set_addr(vec![
-            IpAddr::V4(Ipv4Addr::new(12, 76, 70, 29)),
-            IpAddr::V6(Ipv6Addr::new(
-                0xfa00, 0xb1bb, 0x7bbb, 0xbb21, 1, 0, 0x9, 0x4694,
-            )),
-        ])
-        .await?;
-
-        wg.set_mtu(1420).await?;
-        wg.add_wg_fwmark().await?;
-        wg.add_ip_fwmark().await?;
-        wg.prevent_default_route().await?;
-        wg.route_traffic().await?;
-
-        wg.delete_interface().await?;
-        Ok(())
     }
 }

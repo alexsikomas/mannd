@@ -8,15 +8,19 @@
 //!     - [wpa_supplicant](crate::wireless::wpa_supplicant)
 //! - Other
 //!     - [WireGuard](crate::wireguard)
+
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::sync::{RwLock, mpsc::Sender};
 
 use crate::{
     error::ManndError,
     netlink::NlRouterWrapper,
     state::{
-        network::{ApConnectInfo, Credentials},
+        messages::{ApConnectInfo, Credentials},
         signals::SignalUpdate,
     },
     store::{ManndStore, WgMeta},
@@ -142,7 +146,7 @@ impl Controller {
     }
 
     #[instrument(err, skip(self))]
-    pub async fn connect_wireguard_conf(&self, file: PathBuf) -> Result<(), ManndError> {
+    pub async fn connect_wireguard_conf(&self, file: &Path) -> Result<(), ManndError> {
         match &self.wg {
             Some(wg) => {
                 wg.connect_conf(file)?;
@@ -185,15 +189,15 @@ impl Controller {
     }
 
     #[instrument(err, skip(self))]
-    pub async fn network_connect(&self, info: ApConnectInfo) -> Result<(), ManndError> {
-        match info.credentials {
+    pub async fn network_connect(&self, info: &ApConnectInfo) -> Result<(), ManndError> {
+        match &info.credentials {
             Credentials::Password(psk) => {
                 match &self.wifi {
                     Some(WirelessAdapter::Iwd(iwd)) => {
-                        iwd.connect_network_psk(info.ssid, psk).await?;
+                        iwd.connect_network_psk(&info.ssid, &psk).await?;
                     }
                     Some(WirelessAdapter::Wpa(wpa)) => {
-                        wpa.connect_network_psk(info.ssid, psk).await?;
+                        wpa.connect_network_psk(&info.ssid, &psk).await?;
                     }
                     None => {
                         tracing::error!(
@@ -209,7 +213,7 @@ impl Controller {
 
     /// security required for iwd due to the way it stores network names
     #[instrument(err, skip(self))]
-    pub async fn connect_known(&self, ssid: String, security: Security) -> Result<(), ManndError> {
+    pub async fn connect_known(&self, ssid: &str, security: &Security) -> Result<(), ManndError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 iwd.connect_known(ssid, security).await?;
@@ -242,7 +246,7 @@ impl Controller {
     }
 
     #[instrument(err, skip(self))]
-    pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ManndError> {
+    pub async fn remove_network(&self, ssid: &str, security: &Security) -> Result<(), ManndError> {
         info!("Removing network");
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => return iwd.remove_network(ssid, security).await,
@@ -337,7 +341,7 @@ impl Controller {
 impl Controller {
     // wpa only
     #[instrument(err, skip(self))]
-    pub async fn wpa_create_interface(&mut self, ifname: String) -> Result<(), ManndError> {
+    pub async fn wpa_create_interface(&mut self, ifname: &str) -> Result<(), ManndError> {
         if let Some(WirelessAdapter::Wpa(wpa)) = &mut self.wifi {
             wpa.create_interface(ifname).await?;
 
