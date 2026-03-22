@@ -25,7 +25,6 @@ pub enum NetworkAction {
 pub enum WifiAction {
     Scan,
     GetNetworks,
-    GetInterfaces,
     Connect(ApConnectInfo),
     ConnectKnown(String, Security),
     Disconnect,
@@ -34,9 +33,9 @@ pub enum WifiAction {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum WireguardAction {
-    ToggleWireguard,
-    GetWireguardInfo,
-    ConnectWireguard(PathBuf),
+    Toggle,
+    GetInfo,
+    Connect(PathBuf),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -60,8 +59,9 @@ pub enum NetworkState {
 
     // wireguard
     SetWireguardInfo((Vec<String>, Vec<WgMeta>)),
-    SetNetworkdFiles(Vec<PathBuf>),
 
+    // FUTURE: NETWORKD
+    // SetNetworkdFiles(Vec<PathBuf>),
     Start(Started),
     Success(Success),
     Failed(Failure),
@@ -79,7 +79,6 @@ pub enum Success {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Process {
-    Wireguard,
     WifiConnect,
     WifiScan,
 }

@@ -43,10 +43,8 @@ impl<'a> NetworkActor<'a> {
     /// Returns true if we are quitting the application
     #[instrument(err, skip(self))]
     pub async fn handle_action(&mut self, action: NetworkAction) -> Result<bool, ManndError> {
-        // check if wifi then allow wifi requests
         let mut state_send: Vec<NetworkState> = vec![];
 
-        // Wi-Fi not needed
         match action {
             NetworkAction::GetCapabilities => {
                 let wifi_daemon = self.controller.get_wifi_daemon_type();
@@ -67,6 +65,9 @@ impl<'a> NetworkActor<'a> {
             NetworkAction::Wireguard(wg_action) => {
                 self.handle_wireguard_action(&wg_action, &mut state_send)
                     .await?;
+            }
+            NetworkAction::Wpa(wpa_action) => {
+                self.handle_wpa_action(&wpa_action, &mut state_send).await?;
             }
             // WIREGUARD
             NetworkAction::Exit => {
@@ -97,6 +98,12 @@ impl<'a> NetworkActor<'a> {
             WifiAction::Scan => {
                 state_send.push(NetworkState::Start(Started(Process::WifiScan)));
                 let _ = self.controller.scan(self.signal_tx.clone()).await;
+            }
+            WifiAction::GetNetworks => {
+                if let Ok(aps) = self.controller.get_all_networks().await {
+                    state_send.push(NetworkState::SetNetworks(aps));
+                    state_send.push(NetworkState::Success(Success::Generic));
+                }
             }
             WifiAction::Connect(info) => {
                 state_send.push(NetworkState::Start(Started(Process::WifiConnect)));
@@ -165,7 +172,12 @@ impl<'a> NetworkActor<'a> {
         state_send: &mut Vec<NetworkState>,
     ) -> Result<(), ManndError> {
         match action {
-            WireguardAction::ConnectWireguard(file) => {
+            WireguardAction::GetInfo => {
+                if let Ok((names, meta)) = self.controller.update_wireguard_state() {
+                    state_send.push(NetworkState::SetWireguardInfo((names, meta)));
+                }
+            }
+            WireguardAction::Connect(file) => {
                 match self.controller.connect_wireguard_conf(file).await {
                     Ok(_res) => {
                         info!("[Wireguard]: Successfully connection to a configuration.");
@@ -176,7 +188,7 @@ impl<'a> NetworkActor<'a> {
                     }
                 }
             }
-            WireguardAction::ToggleWireguard => {
+            WireguardAction::Toggle => {
                 if !self.controller.is_wireguard_connected() {
                     if let Ok(()) = self.controller.start_wireguard().await {
                         state_send.push(NetworkState::Success(Success::EnableWireguard));
@@ -189,17 +201,26 @@ impl<'a> NetworkActor<'a> {
                     }
                 }
             }
-            WireguardAction::GetWireguardInfo => {}
         }
 
         Ok(())
     }
 
-    async fn handle_wpa_action(&mut self, action: &WpaAction, state_send: &mut Vec<NetworkState>) {
+    async fn handle_wpa_action(
+        &mut self,
+        action: &WpaAction,
+        state_send: &mut Vec<NetworkState>,
+    ) -> Result<(), ManndError> {
         match action {
+            WpaAction::GetInterfaces => {
+                if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
+                    let interfaces = wpa.get_interfaces().await?;
+                    state_send.push(NetworkState::SetWpaInterfaces(interfaces));
+                }
+            }
             WpaAction::CreateInterface(ifname) => {
                 if let Some(WirelessAdapter::Wpa(wpa)) = self.controller.wifi.as_mut() {
-                    let _ = wpa.create_interface(ifname).await;
+                    wpa.create_interface(ifname).await?;
                 }
             }
             WpaAction::TogglePersist => {
@@ -208,7 +229,7 @@ impl<'a> NetworkActor<'a> {
                     state_send.push(NetworkState::ToggleWpaPesist);
                 }
             }
-            WpaAction::GetInterfaces => todo!(),
         }
+        Ok(())
     }
 }

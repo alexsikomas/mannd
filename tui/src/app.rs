@@ -187,11 +187,8 @@ async fn handle_state_update(
             state.net_ctx.wg_ctx.names = names;
             state.net_ctx.wg_ctx.meta = meta;
         }
-        NetworkState::SetInterfaces(ifaces) => {
-            state.net_ctx.interfaces = Some(InterfaceTypes::Normal(ifaces));
-        }
         NetworkState::SetWpaInterfaces(ifaces) => {
-            state.net_ctx.interfaces = Some(InterfaceTypes::Wpa(ifaces));
+            state.net_ctx.wpa_interfaces = Some(ifaces);
         }
         NetworkState::Start(started) => return handle_start(state, ui, started),
         NetworkState::Success(succeeded) => return handle_success(state, ui, succeeded),
@@ -213,7 +210,6 @@ fn handle_start(_state: &mut AppState, ui: &mut UiState, started: Started) -> Op
         Started(Process::WifiScan) => Some(StateCommand::Prompt(PromptState::Info(
             InfoPrompt::new("Scanning...".to_string(), PopupType::General),
         ))),
-        Started(Process::Wireguard) => todo!(),
     }
 }
 
@@ -254,7 +250,6 @@ fn handle_failure(
             failed.reason,
             PopupType::Error,
         )))),
-        Process::Wireguard => todo!(),
     }
 }
 
@@ -287,7 +282,7 @@ pub enum AppAction {
 
 pub struct NetworkContext {
     pub networks: Vec<AccessPoint>,
-    pub interfaces: Option<InterfaceTypes>,
+    pub wpa_interfaces: Option<Vec<WpaInterface>>,
     pub wg_ctx: WireguardContext,
     pub persist_wpa_changes: bool,
     pub netd_files: Vec<String>,
@@ -322,39 +317,11 @@ impl WireguardContext {
     }
 }
 
-pub enum InterfaceTypes {
-    Wpa(Vec<WpaInterface>),
-    Normal(Vec<String>),
-}
-
-impl InterfaceTypes {
-    pub fn len(&self) -> usize {
-        match self {
-            Self::Wpa(ifaces) => ifaces.len(),
-            Self::Normal(ifaces) => ifaces.len(),
-        }
-    }
-
-    pub fn get_wpa_index(&self, index: usize) -> Option<&WpaInterface> {
-        match self {
-            Self::Wpa(ifaces) => ifaces.get(index),
-            _ => None,
-        }
-    }
-
-    pub fn get_normal_index(&self, index: usize) -> Option<&str> {
-        match self {
-            Self::Normal(ifaces) => ifaces.get(index).map(|s| s.as_str()),
-            _ => None,
-        }
-    }
-}
-
 impl Default for NetworkContext {
     fn default() -> Self {
         Self {
             networks: vec![],
-            interfaces: None,
+            wpa_interfaces: None,
             wg_ctx: WireguardContext::new(),
             persist_wpa_changes: false,
             netd_files: vec![],
