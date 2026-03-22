@@ -15,7 +15,7 @@ use mannd::state::messages::{Capability, NetworkAction, WifiAction, WireguardAct
 use crate::app::{AppAction, NetworkContext};
 use crate::keys::{KeyAction, Keymap};
 pub use crate::state::menu::MainMenuSelection;
-pub use crate::state::networkd::NetdState;
+use crate::state::networkd::NetworkdState;
 pub use crate::state::prompts::{PopupType, PromptState};
 pub use crate::state::vpn::VpnState;
 pub use crate::state::wifi::WifiState;
@@ -215,7 +215,7 @@ pub enum View {
     MainMenu(SelectableList<MainMenuSelection>),
     Wifi(WifiState),
     Vpn(VpnState),
-    Networkd(NetdState),
+    Networkd(NetworkdState),
     Config,
 }
 
@@ -227,7 +227,7 @@ impl View {
             options.items.push(MainMenuSelection::Wifi);
         }
 
-        if caps.wireguard.0 {
+        if caps.wireguard.installed {
             options.items.push(MainMenuSelection::Vpn);
         }
 

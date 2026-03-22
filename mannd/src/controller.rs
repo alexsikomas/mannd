@@ -23,7 +23,7 @@ use crate::{
         messages::{ApConnectInfo, Credentials},
         signals::SignalUpdate,
     },
-    store::{ManndStore, WgMeta},
+    store::{ApplicationState, ManndStore, WgMeta},
     systemd::systemctl::is_service_active,
     wireguard::network::Wireguard,
     wireless::{
@@ -135,14 +135,8 @@ impl Controller {
     #[instrument(err, skip(self))]
     /// Updates the wireguad files in the state database
     pub fn update_wireguard_state(&self) -> Result<(Vec<String>, Vec<WgMeta>), ManndError> {
-        match &self.wg {
-            Some(_) => {
-                self.store.update_wg_files()?;
-                Ok(self.store.get_ordered_wg_files()?)
-            }
-
-            _ => Err(ManndError::WgAccess),
-        }
+        self.store.update_wg_files()?;
+        Ok(self.store.get_ordered_wg_files()?)
     }
 
     #[instrument(err, skip(self))]
@@ -161,6 +155,14 @@ impl Controller {
             Some(res) => res,
             None => false,
         }
+    }
+
+    pub fn persist_app_state(&self, state: &ApplicationState) -> Result<(), ManndError> {
+        self.store.write_app_state(state)
+    }
+
+    pub fn load_app_state(&self) -> Result<Option<ApplicationState>, ManndError> {
+        self.store.read_app_state()
     }
 }
 
@@ -227,7 +229,7 @@ impl Controller {
     }
 
     #[instrument(err, skip(self))]
-    pub async fn disconenct_network(&self) -> Result<(), ManndError> {
+    pub async fn disconnect_network(&self) -> Result<(), ManndError> {
         match &self.wifi {
             Some(WirelessAdapter::Iwd(iwd)) => {
                 iwd.disconnect().await?;
@@ -262,10 +264,10 @@ impl Controller {
             Some(wg) => {
                 wg.delete_interface().await?;
                 self.wg = None;
+                Ok(())
             }
-            _ => {}
-        };
-        Ok(())
+            None => Err(ManndError::WgAccess),
+        }
     }
 
     /// Performs cleanup before the app exits

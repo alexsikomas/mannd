@@ -11,11 +11,11 @@ use tracing::instrument;
 
 use crate::{
     components::{
-        main_menu::MainMenu, networkd_ui::NetdMenu, password_prompt::PasswordPrompt,
-        popup_prompt::PopupPrompt, wifi_menu::Connection, wireguard_ui::WireguardMenu,
+        main_menu::MainMenu, networkd_ui::NetworkdMenu, password_prompt::PasswordPrompt,
+        popup_prompt::PopupPrompt, wifi_menu::Connection, wireguard_ui::VpnMenu,
         wpa_interface_ui::WpaInterfaceUi,
     },
-    state::{AppContext, PromptState, UiState, View},
+    state::{AppContext, PromptState, UiState, View, networkd::NetworkdState},
 };
 
 /// Theme global state, used to bypass needing to
@@ -119,27 +119,26 @@ impl UiContext {
             }
             View::Vpn(vpn_state) => {
                 let mut cols: usize = 0;
-                let vpn_areas = WireguardMenu::build_layout_no_render(inner_area, &mut cols);
-                let wg_meta = if ctx.net_ctx.wg_ctx.is_on {
+                let vpn_areas = VpnMenu::build_layout_no_render(inner_area, &mut cols);
+                let wg_meta = if net_ctx.wg_ctx.active {
                     Some(net_ctx.wg_ctx.meta.as_slice())
                 } else {
                     None
                 };
 
-                if let Some(vpn) = WireguardMenu::new(
+                let vpn_menu = VpnMenu::new(
                     vpn_state,
                     &net_ctx.wg_ctx.names,
                     wg_meta,
-                    ctx.net_ctx.wg_ctx.is_on,
+                    ctx.net_ctx.wg_ctx.active,
                     vpn_areas,
-                ) {
-                    frame.render_widget(vpn, inner_area);
-                }
+                );
+                frame.render_widget(vpn_menu, inner_area);
             }
-            View::Networkd(netd_state) => {
+            View::Networkd(state) => {
                 // TODO: Unfinished
                 let tmp: Vec<PathBuf> = vec![];
-                frame.render_widget(NetdMenu::new(netd_state, &tmp), inner_area);
+                frame.render_widget(NetworkdMenu::new(state, &tmp), inner_area);
             }
             View::Config => {
                 // TODO: Config UI not implemented
@@ -157,11 +156,7 @@ impl UiContext {
                 }
                 PromptState::WpaInterface(wpa_prompt) => {
                     if let Some(wpa_ifaces) = &net_ctx.wpa_interfaces
-                        && let Some(prompt_instance) = WpaInterfaceUi::new(
-                            wpa_prompt,
-                            ctx.net_ctx.persist_wpa_changes,
-                            wpa_ifaces,
-                        )
+                        && let Some(prompt_instance) = WpaInterfaceUi::new(wpa_prompt, wpa_ifaces)
                     {
                         frame.render_widget(prompt_instance, inner_area);
                     }

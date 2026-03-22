@@ -9,7 +9,7 @@ use crate::{
     state::{
         messages::{
             Capability, Failure, NetworkAction, NetworkState, Process, Started, Success,
-            WifiAction, WireguardAction, WpaAction,
+            WifiAction, WireguardAction, WireguardCapability, WpaAction,
         },
         signals::{SignalManager, SignalUpdate},
     },
@@ -30,6 +30,11 @@ impl<'a> NetworkActor<'a> {
         sock_tx: Sender<NetworkState>,
     ) -> Result<Self, ManndError> {
         let mut controller = Controller::new().await?;
+        let app_state = controller.load_app_state()?.unwrap_or_default();
+        if app_state.wg_running {
+            let _ = controller.start_wireguard().await;
+        }
+
         controller.connect_wifi_adapter().await;
         let signal_manager = SignalManager::new();
         Ok(Self {
@@ -55,7 +60,14 @@ impl<'a> NetworkActor<'a> {
                     .map_or(false, |_| true);
 
                 // TODO: check state
-                let caps = Capability::new(wifi_daemon, networkd_active, (wg_installed, false));
+                let caps = Capability::new(
+                    wifi_daemon,
+                    networkd_active,
+                    WireguardCapability::new(
+                        wg_installed,
+                        self.controller.is_wireguard_connected(),
+                    ),
+                );
                 state_send.push(NetworkState::SetCapabilities(caps));
             }
             NetworkAction::Wifi(wifi_action) => {
@@ -143,7 +155,7 @@ impl<'a> NetworkActor<'a> {
             }
 
             WifiAction::Disconnect => {
-                if let Ok(()) = self.controller.disconenct_network().await {
+                if let Ok(()) = self.controller.disconnect_network().await {
                     info!("[Wi-Fi]: Disconnected from active network");
                     should_refresh = true;
                 }
@@ -166,6 +178,8 @@ impl<'a> NetworkActor<'a> {
         Ok(())
     }
 
+    /// Gets wireguard info no matter the `WireguardAction` to simplify logic and remove
+    /// repititions
     async fn handle_wireguard_action(
         &mut self,
         action: &WireguardAction,
@@ -173,9 +187,7 @@ impl<'a> NetworkActor<'a> {
     ) -> Result<(), ManndError> {
         match action {
             WireguardAction::GetInfo => {
-                if let Ok((names, meta)) = self.controller.update_wireguard_state() {
-                    state_send.push(NetworkState::SetWireguardInfo((names, meta)));
-                }
+                // the exact GetInfo procedure is done at the end
             }
             WireguardAction::Connect(file) => {
                 match self.controller.connect_wireguard_conf(file).await {
@@ -190,17 +202,20 @@ impl<'a> NetworkActor<'a> {
             }
             WireguardAction::Toggle => {
                 if !self.controller.is_wireguard_connected() {
-                    if let Ok(()) = self.controller.start_wireguard().await {
-                        state_send.push(NetworkState::Success(Success::EnableWireguard));
-                        // self.handle_net_ctx(NetCtxFlags::Wireguard, &mut state_send)
-                        //     .await?;
-                    }
+                    if let Ok(()) = self.controller.start_wireguard().await {}
                 } else {
-                    if let Ok(()) = self.controller.remove_wireguard_iface().await {
-                        state_send.push(NetworkState::Success(Success::DisableWireguard));
-                    }
+                    if let Ok(()) = self.controller.remove_wireguard_iface().await {}
                 }
             }
+        }
+
+        if let Ok((names, meta)) = self.controller.update_wireguard_state() {
+            let active = self.controller.is_wireguard_connected();
+            state_send.push(NetworkState::SetWireguardInfo {
+                names,
+                meta,
+                active,
+            });
         }
 
         Ok(())
@@ -226,7 +241,6 @@ impl<'a> NetworkActor<'a> {
             WpaAction::TogglePersist => {
                 if let Some(WirelessAdapter::Wpa(wpa)) = &mut self.controller.wifi {
                     wpa.toggle_persist();
-                    state_send.push(NetworkState::ToggleWpaPesist);
                 }
             }
         }

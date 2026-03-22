@@ -6,29 +6,16 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
 
-use crate::{
-    components::layout::centered_overlay,
-    state::prompts::WpaInterfacePrompt,
-    ui::theme,
-};
+use crate::{components::layout::centered_overlay, state::prompts::WpaInterfacePrompt, ui::theme};
 
 pub struct WpaInterfaceUi<'a> {
     info: &'a WpaInterfacePrompt,
     ifaces: &'a [WpaInterface],
-    persist: bool,
 }
 
 impl<'a> WpaInterfaceUi<'a> {
-    pub fn new(
-        info: &'a WpaInterfacePrompt,
-        persist: bool,
-        ifaces: &'a [WpaInterface],
-    ) -> Option<Self> {
-        Some(Self {
-            info,
-            ifaces,
-            persist,
-        })
+    pub fn new(info: &'a WpaInterfacePrompt, ifaces: &'a [WpaInterface]) -> Option<Self> {
+        Some(Self { info, ifaces })
     }
 }
 
@@ -97,7 +84,7 @@ impl Widget for WpaInterfaceUi<'_> {
             )
             .render(cols[0], buf);
 
-        Paragraph::new(if self.persist { "Yes" } else { "No" })
+        Paragraph::new(if self.info.persist { "Yes" } else { "No" })
             .style(Style::new().fg(if self.info.on_choice {
                 theme.accent.color()
             } else {
