@@ -8,24 +8,20 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::{
-    components::layout::panel_with_toolbar,
-    state::NetdState,
-    ui::theme,
-};
+use crate::{components::layout::panel_with_toolbar, state::networkd::NetworkdState, ui::theme};
 
-pub struct NetdMenu<'a> {
-    state: &'a NetdState,
+pub struct NetworkdMenu<'a> {
+    state: &'a NetworkdState,
     configs: &'a [PathBuf],
 }
 
-impl<'a> NetdMenu<'a> {
-    pub fn new(state: &'a NetdState, configs: &'a [PathBuf]) -> Option<Self> {
+impl<'a> NetworkdMenu<'a> {
+    pub fn new(state: &'a NetworkdState, configs: &'a [PathBuf]) -> Option<Self> {
         Some(Self { state, configs })
     }
 }
 
-impl Widget for NetdMenu<'_> {
+impl Widget for NetworkdMenu<'_> {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
@@ -35,7 +31,7 @@ impl Widget for NetdMenu<'_> {
     }
 }
 
-impl NetdMenu<'_> {
+impl NetworkdMenu<'_> {
     fn render_main_block(&self, area: Rect, buf: &mut Buffer) {
         let theme = theme();
         let main = Block::default()

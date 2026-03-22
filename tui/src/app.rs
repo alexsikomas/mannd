@@ -1,4 +1,4 @@
-use std::{cmp::min, time::Duration};
+use std::{cmp::min, process::id, time::Duration};
 
 use postcard::{from_bytes_cobs, to_stdvec_cobs};
 use ratatui::layout::Rect;
@@ -6,7 +6,7 @@ use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::instrument;
 
 use crate::{
-    components::{layout::get_inner_area, wireguard_ui::WireguardMenu},
+    components::{layout::get_inner_area, wireguard_ui::VpnMenu},
     state::{AppContext, PopupType, PromptState, StateCommand, UiState, View, prompts::InfoPrompt},
     ui::UiContext,
 };
@@ -81,7 +81,7 @@ impl App {
                     let terminal_area = Rect::from(terminal_size);
                     let inner_area = get_inner_area(terminal_area);
                     let mut cols: usize = 0;
-                    let _ = WireguardMenu::build_layout_no_render(inner_area, &mut cols);
+                    let _ = VpnMenu::build_layout_no_render(inner_area, &mut cols);
                     ui.vpn_cols = cols;
                 }
                 let context =
@@ -180,12 +180,14 @@ async fn handle_state_update(
                 wifi_state.refresh_available_actions(&state.net_ctx.networks);
             }
         }
-        NetworkState::ToggleWpaPesist => {
-            state.net_ctx.persist_wpa_changes = !state.net_ctx.persist_wpa_changes;
-        }
-        NetworkState::SetWireguardInfo((names, meta)) => {
+        NetworkState::SetWireguardInfo {
+            names,
+            meta,
+            active,
+        } => {
             state.net_ctx.wg_ctx.names = names;
             state.net_ctx.wg_ctx.meta = meta;
+            state.net_ctx.wg_ctx.active = active;
         }
         NetworkState::SetWpaInterfaces(ifaces) => {
             state.net_ctx.wpa_interfaces = Some(ifaces);
@@ -222,12 +224,6 @@ fn handle_success(
         Success::Generic => {
             ui.should_block = false;
             return Some(StateCommand::ClearPrompts);
-        }
-        Success::EnableWireguard => {
-            state.net_ctx.wg_ctx.is_on = true;
-        }
-        Success::DisableWireguard => {
-            state.net_ctx.wg_ctx.is_on = false;
         }
     }
     None
@@ -284,14 +280,13 @@ pub struct NetworkContext {
     pub networks: Vec<AccessPoint>,
     pub wpa_interfaces: Option<Vec<WpaInterface>>,
     pub wg_ctx: WireguardContext,
-    pub persist_wpa_changes: bool,
     pub netd_files: Vec<String>,
 }
 
 pub struct WireguardContext {
     pub names: Vec<String>,
     pub meta: Vec<WgMeta>,
-    pub is_on: bool,
+    pub active: bool,
 }
 
 impl WireguardContext {
@@ -299,7 +294,7 @@ impl WireguardContext {
         Self {
             names: vec![],
             meta: vec![],
-            is_on: false,
+            active: false,
         }
     }
 
@@ -308,12 +303,10 @@ impl WireguardContext {
     }
 
     pub fn get_index(&self, index: usize) -> Option<(&str, &WgMeta)> {
-        if let Some(name) = self.names.get(index) {
-            if let Some(meta) = self.meta.get(index) {
-                return Some((name, meta));
-            }
-        }
-        None
+        self.names
+            .get(index)
+            .zip(self.meta.get(index))
+            .map(|(name, meta)| (name.as_str(), meta))
     }
 }
 
@@ -323,7 +316,6 @@ impl Default for NetworkContext {
             networks: vec![],
             wpa_interfaces: None,
             wg_ctx: WireguardContext::new(),
-            persist_wpa_changes: false,
             netd_files: vec![],
         }
     }

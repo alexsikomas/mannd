@@ -115,27 +115,27 @@ impl Wireguard<NlRouterWrapper> {
 
     #[instrument(err)]
     async fn add_ip_fwmark(&self) -> Result<(), ManndError> {
-        Command::new("sudo")
+        Command::new("ip")
             .args(vec![
-                "ip", "-6", "rule", "del", "not", "fwmark", "51820", "table", "51820",
+                "-6", "rule", "del", "not", "fwmark", "51820", "table", "51820",
             ])
             .output()?;
 
-        Command::new("sudo")
+        Command::new("ip")
             .args(vec![
-                "ip", "-6", "rule", "add", "not", "fwmark", "51820", "table", "51820",
+                "-6", "rule", "add", "not", "fwmark", "51820", "table", "51820",
             ])
             .output()?;
 
-        Command::new("sudo")
+        Command::new("ip")
             .args(vec![
-                "ip", "-4", "rule", "del", "not", "fwmark", "51820", "table", "51820",
+                "-4", "rule", "del", "not", "fwmark", "51820", "table", "51820",
             ])
             .output()?;
 
-        Command::new("sudo")
+        Command::new("ip")
             .args(vec![
-                "ip", "-4", "rule", "add", "not", "fwmark", "51820", "table", "51820",
+                "-4", "rule", "add", "not", "fwmark", "51820", "table", "51820",
             ])
             .output()?;
 
@@ -145,9 +145,8 @@ impl Wireguard<NlRouterWrapper> {
     #[instrument(err)]
     async fn prevent_default_route(&self) -> Result<(), ManndError> {
         // neli also doesn't implement FRA_SUPPRESS_PREFIXLEN
-        Command::new("sudo")
+        Command::new("ip")
             .args(vec![
-                "ip",
                 "-6",
                 "rule",
                 "del",
@@ -158,9 +157,8 @@ impl Wireguard<NlRouterWrapper> {
             ])
             .output()?;
 
-        Command::new("sudo")
+        Command::new("ip")
             .args(vec![
-                "ip",
                 "-6",
                 "rule",
                 "add",
@@ -171,9 +169,8 @@ impl Wireguard<NlRouterWrapper> {
             ])
             .output()?;
 
-        Command::new("sudo")
+        Command::new("ip")
             .args(vec![
-                "ip",
                 "-4",
                 "rule",
                 "del",
@@ -184,9 +181,8 @@ impl Wireguard<NlRouterWrapper> {
             ])
             .output()?;
 
-        Command::new("sudo")
+        Command::new("ip")
             .args(vec![
-                "ip",
                 "-4",
                 "rule",
                 "add",

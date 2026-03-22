@@ -55,10 +55,13 @@ pub enum NetworkState {
 
     // wpa
     SetWpaInterfaces(Vec<WpaInterface>),
-    ToggleWpaPesist,
 
     // wireguard
-    SetWireguardInfo((Vec<String>, Vec<WgMeta>)),
+    SetWireguardInfo {
+        names: Vec<String>,
+        meta: Vec<WgMeta>,
+        active: bool,
+    },
 
     // FUTURE: NETWORKD
     // SetNetworkdFiles(Vec<PathBuf>),
@@ -73,8 +76,6 @@ pub struct Started(pub Process);
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Success {
     Generic,
-    EnableWireguard,
-    DisableWireguard,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -104,14 +105,14 @@ pub struct Capability {
     pub wifi_daemon: Option<WifiDaemonType>,
     pub networkd_active: bool,
     // installed, wg-mannd interface active
-    pub wireguard: (bool, bool),
+    pub wireguard: WireguardCapability,
 }
 
 impl Capability {
     pub fn new(
         wifi_daemon: Option<WifiDaemonType>,
         networkd_active: bool,
-        wireguard: (bool, bool),
+        wireguard: WireguardCapability,
     ) -> Self {
         Capability {
             wifi_daemon,
@@ -126,8 +127,29 @@ impl Default for Capability {
         Capability {
             wifi_daemon: None,
             networkd_active: false,
-            wireguard: (false, false),
+            wireguard: WireguardCapability::default(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WireguardCapability {
+    pub installed: bool,
+    pub active: bool,
+}
+
+impl Default for WireguardCapability {
+    fn default() -> Self {
+        Self {
+            installed: false,
+            active: false,
+        }
+    }
+}
+
+impl WireguardCapability {
+    pub fn new(installed: bool, active: bool) -> Self {
+        Self { installed, active }
     }
 }
 

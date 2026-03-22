@@ -69,6 +69,7 @@ impl ManndStore {
 }
 
 const APPLICATION_TABLE: TableDefinition<String, &[u8]> = TableDefinition::new("app_state_table");
+const APP_STATE_KEY: &str = "application_state";
 
 /// Application State
 impl ManndStore {
@@ -79,8 +80,8 @@ impl ManndStore {
         match read.open_table(APPLICATION_TABLE) {
             Ok(table) => {
                 // count is inclusive
-                if let Some(config) = table.get("wpa_interface_count".to_string())? {
-                    let app_state: ApplicationState = from_bytes(config.value())?;
+                if let Some(data) = table.get(APP_STATE_KEY.to_string())? {
+                    let app_state: ApplicationState = from_bytes(data.value())?;
                     Ok(Some(app_state))
                 } else {
                     Ok(None)
@@ -92,91 +93,12 @@ impl ManndStore {
     }
 
     #[instrument(err, skip(self))]
-    pub fn update_wg_app_state(&self, running: bool) -> Result<(), ManndError> {
+    pub fn write_app_state(&self, state: &ApplicationState) -> Result<(), ManndError> {
         let write = self.database.begin_write()?;
         {
             let mut table = write.open_table(APPLICATION_TABLE)?;
-            let data = to_allocvec(&running)?;
-            table.insert("wireguard_running".to_string(), data.as_slice())?;
-        }
-        write.commit()?;
-        Ok(())
-    }
-
-    #[instrument(err, skip(self))]
-    pub fn add_interface_app_state(&self, interface: &str) -> Result<(), ManndError> {
-        let write = self.database.begin_write()?;
-        {
-            let mut table = write.open_table(APPLICATION_TABLE)?;
-            let mut count: usize =
-                if let Some(count_u8) = table.get("wpa_interface_count".to_string())? {
-                    from_bytes(count_u8.value())?
-                } else {
-                    0
-                };
-
-            count += 1;
-            let data = to_allocvec(interface)?;
-            table.insert(format!("wpa_interface_{count}"), data.as_slice())?;
-
-            table.insert(
-                "wpa_interface_count".to_string(),
-                to_allocvec(&count)?.as_slice(),
-            )?;
-        }
-        write.commit()?;
-        Ok(())
-    }
-
-    #[instrument(err, skip(self))]
-    pub fn remove_interface_app_state(&self, interface: &str) -> Result<(), ManndError> {
-        let write = self.database.begin_write()?;
-        {
-            let mut table = write.open_table(APPLICATION_TABLE)?;
-
-            let mut count: usize =
-                if let Some(count_u8) = table.get("wpa_interface_count".to_string())? {
-                    from_bytes(count_u8.value())?
-                } else {
-                    return Err(ManndError::WpaRemoveEmpty);
-                };
-
-            if count == 0 {
-                return Err(ManndError::WpaRemoveEmpty);
-            }
-
-            let mut remove_idx: Option<usize> = None;
-            for i in 0..count {
-                if let Some(value_u8) = table.get(format!("wpa_interface_{i}"))? {
-                    let value: String = from_bytes(value_u8.value())?;
-                    if value == interface {
-                        remove_idx = Some(i);
-                        break;
-                    }
-                }
-            }
-
-            let Some(remove_idx) = remove_idx else {
-                return Err(ManndError::WpaRemoveNotFound);
-            };
-
-            if remove_idx != count {
-                let last_bytes = {
-                    let last_val = table
-                        .get(format!("wpa_interface_{count}"))?
-                        .ok_or_else(|| ManndError::WpaInterfaceHole)?;
-                    last_val.value().to_vec()
-                };
-
-                table.insert(format!("wpa_interface_{remove_idx}"), last_bytes.as_slice())?;
-            }
-
-            table.remove(format!("wpa_interface_{count}"))?;
-            count -= 1;
-            table.insert(
-                "wpa_interface_count".to_string(),
-                to_allocvec(&count)?.as_slice(),
-            )?;
+            let data = to_allocvec(&state)?;
+            table.insert(APP_STATE_KEY.to_string(), data.as_slice())?;
         }
         write.commit()?;
         Ok(())
@@ -209,10 +131,8 @@ pub const WG_DIR: &str = "/etc/wireguard/";
 pub struct WgMeta {
     // unix timestamp if 0 not used
     pub last_used: u64,
-    pub last_modified: u64,
     // ISO 3166-1 alpha-2
     pub country: [u8; 2],
-    // TODO: encode ipv4 ips
 }
 
 /// Wiregard store
@@ -231,7 +151,6 @@ impl ManndStore {
                 if !meta.is_file() {
                     continue;
                 }
-                let time = meta.modified().unwrap().elapsed()?.as_secs();
                 let filename = entry.file_name().into_string().map_err(|_| {
                     ManndError::OperationFailed(
                         "OsString couldn't be converted to string".to_string(),
@@ -242,7 +161,6 @@ impl ManndStore {
                     filename,
                     WgMeta {
                         last_used: 0,
-                        last_modified: time,
                         country: [0, 0],
                     },
                 );

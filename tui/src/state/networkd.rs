@@ -1,18 +1,18 @@
 use crate::state::SelectableList;
 
 #[derive(Debug)]
-pub struct NetdState {
-    pub selection: SelectableList<NetdSelection>,
+pub struct NetworkdState {
+    pub selection: SelectableList<NetworkdSelection>,
     pub config_cursor: usize,
 }
 
 #[derive(Debug)]
-pub enum NetdSelection {
+pub enum NetworkdSelection {
     Configs,
     Create,
 }
 
-impl Default for NetdState {
+impl Default for NetworkdState {
     fn default() -> Self {
         Self {
             selection: SelectableList::new(Self::get_actions()),
@@ -21,8 +21,8 @@ impl Default for NetdState {
     }
 }
 
-impl NetdState {
-    fn get_actions() -> Vec<NetdSelection> {
-        vec![NetdSelection::Configs, NetdSelection::Create]
+impl NetworkdState {
+    fn get_actions() -> Vec<NetworkdSelection> {
+        vec![NetworkdSelection::Configs, NetworkdSelection::Create]
     }
 }

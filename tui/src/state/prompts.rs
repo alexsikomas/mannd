@@ -158,6 +158,7 @@ impl Component for InfoPrompt {
 pub struct WpaInterfacePrompt {
     pub interface_cursor: Cursor,
     pub on_choice: bool,
+    pub persist: bool,
 }
 
 impl Default for WpaInterfacePrompt {
@@ -165,6 +166,7 @@ impl Default for WpaInterfacePrompt {
         Self {
             interface_cursor: Cursor::default(),
             on_choice: true,
+            persist: false,
         }
     }
 }
@@ -175,6 +177,7 @@ impl Component for WpaInterfacePrompt {
             match key {
                 KeyAction::Enter => {
                     if self.on_choice {
+                        self.persist = !self.persist;
                         return StateResult::Command(StateCommand::NetworkAction(
                             NetworkAction::Wpa(WpaAction::TogglePersist),
                         ));

@@ -9,10 +9,7 @@ use ratatui::{
 
 use crate::{
     components::layout::{panel_with_toolbar, selection_style},
-    state::{
-        VpnState,
-        vpn::VpnSelection,
-    },
+    state::{VpnState, vpn::VpnSelection},
     ui::{Theme, theme},
 };
 
@@ -21,7 +18,7 @@ const COLS: (usize, usize, u16) = (2, 6, 30);
 // target line amount
 const ROW_H: u16 = 6;
 
-pub struct WireguardMenu<'a> {
+pub struct VpnMenu<'a> {
     state: &'a VpnState,
     names: &'a [String],
     meta: Option<&'a [WgMeta]>,
@@ -29,25 +26,25 @@ pub struct WireguardMenu<'a> {
     areas: VpnAreas,
 }
 
-impl<'a> WireguardMenu<'a> {
+impl<'a> VpnMenu<'a> {
     pub fn new(
         state: &'a VpnState,
         names: &'a [String],
         meta: Option<&'a [WgMeta]>,
         wg_on: bool,
         areas: VpnAreas,
-    ) -> Option<Self> {
-        Some(Self {
+    ) -> Self {
+        Self {
             state,
             names,
             meta,
             wg_on,
             areas,
-        })
+        }
     }
 }
 
-impl Widget for WireguardMenu<'_> {
+impl Widget for VpnMenu<'_> {
     fn render(self, _area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
@@ -106,7 +103,7 @@ impl Widget for WireguardMenu<'_> {
 
             for (mut i, area) in item_areas.iter().enumerate() {
                 i += items_per_page * current_page;
-                if i > item_count {
+                if i >= item_count {
                     break;
                 }
 
@@ -118,7 +115,7 @@ impl Widget for WireguardMenu<'_> {
     }
 }
 
-impl WireguardMenu<'_> {
+impl VpnMenu<'_> {
     fn render_main_block(&self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         let main_block = Block::new()
             .border_type(ratatui::widgets::BorderType::Rounded)
@@ -239,8 +236,9 @@ impl WireguardMenu<'_> {
                 .title_top(Line::from(format!(" {name} ")).left_aligned());
 
             let meta = &meta[i];
-            let mod_area = block.inner(area);
+            // let mod_area = block.inner(area);
 
+            tracing::info!("Country: {:?}", meta.country);
             if meta.country == [0, 0] {
                 block.render(area, buf);
             } else {
@@ -253,15 +251,6 @@ impl WireguardMenu<'_> {
                     .right_aligned(),
                 );
                 block.render(area, buf);
-            }
-
-            let mod_line = Line::from(format!(" Modified: {}", meta.last_modified));
-            let access_area = mod_area.inner(Margin::new(mod_line.width() as u16, 2));
-            mod_line.render(mod_area, buf);
-
-            if meta.last_used != 0 {
-                let access_line = Line::from(format!(" Used: {}", meta.last_used));
-                access_line.render(access_area, buf);
             }
         }
     }
