@@ -10,7 +10,7 @@ use std::{fmt::Debug, usize};
 use crossterm::event::Event;
 use mannd::controller::WifiDaemonType;
 use mannd::error::ManndError;
-use mannd::state::messages::{Capability, NetworkAction, WifiAction};
+use mannd::state::messages::{Capability, NetworkAction, WifiAction, WireguardAction};
 
 use crate::app::{AppAction, NetworkContext};
 use crate::keys::{KeyAction, Keymap};
@@ -169,9 +169,9 @@ impl UiState {
                         View::Wifi(_) => actions.push(AppAction::Network(NetworkAction::Wifi(
                             WifiAction::GetNetworks,
                         ))),
-                        // View::Vpn(_) => {
-                        //     actions.push(AppAction::Network(NetworkAction::))
-                        // }
+                        View::Vpn(_) => actions.push(AppAction::Network(NetworkAction::Wireguard(
+                            WireguardAction::GetInfo,
+                        ))),
                         _ => {}
                     }
                 }

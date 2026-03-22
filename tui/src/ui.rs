@@ -1,4 +1,4 @@
-use mannd::{SETTINGS, error::ManndError};
+use mannd::{SETTINGS, error::ManndError, wireless::wpa_supplicant::WpaInterface};
 use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
@@ -10,7 +10,6 @@ use std::{borrow::Cow, path::PathBuf, sync::OnceLock};
 use tracing::instrument;
 
 use crate::{
-    app::InterfaceTypes,
     components::{
         main_menu::MainMenu, networkd_ui::NetdMenu, password_prompt::PasswordPrompt,
         popup_prompt::PopupPrompt, wifi_menu::Connection, wireguard_ui::WireguardMenu,
@@ -157,7 +156,7 @@ impl UiContext {
                     }
                 }
                 PromptState::WpaInterface(wpa_prompt) => {
-                    if let Some(InterfaceTypes::Wpa(wpa_ifaces)) = &net_ctx.interfaces
+                    if let Some(wpa_ifaces) = &net_ctx.wpa_interfaces
                         && let Some(prompt_instance) = WpaInterfaceUi::new(
                             wpa_prompt,
                             ctx.net_ctx.persist_wpa_changes,

@@ -68,7 +68,7 @@ impl Component for VpnState {
                 KeyAction::Enter => match selected {
                     VpnSelection::Toggle => {
                         return StateResult::Command(StateCommand::NetworkAction(
-                            NetworkAction::Wireguard(WireguardAction::ToggleWireguard),
+                            NetworkAction::Wireguard(WireguardAction::Toggle),
                         ));
                     }
                     VpnSelection::Files => {
@@ -76,9 +76,7 @@ impl Component for VpnState {
                         if let Some(data) = ctx.net_ctx.wg_ctx.get_index(self.file_cursor.index) {
                             wg_path.push(data.0);
                             return StateResult::Command(StateCommand::NetworkAction(
-                                NetworkAction::Wireguard(WireguardAction::ConnectWireguard(
-                                    wg_path,
-                                )),
+                                NetworkAction::Wireguard(WireguardAction::Connect(wg_path)),
                             ));
                         }
                     }

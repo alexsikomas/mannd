@@ -171,14 +171,14 @@ impl Default for WpaInterfacePrompt {
 
 impl Component for WpaInterfacePrompt {
     fn on_key(&mut self, key: &KeyAction, ctx: &AppContext) -> StateResult {
-        if let Some(ifaces) = &ctx.net_ctx.interfaces {
+        if let Some(ifaces) = &ctx.net_ctx.wpa_interfaces {
             match key {
                 KeyAction::Enter => {
                     if self.on_choice {
                         return StateResult::Command(StateCommand::NetworkAction(
                             NetworkAction::Wpa(WpaAction::TogglePersist),
                         ));
-                    } else if let Some(iface) = ifaces.get_wpa_index(self.interface_cursor.index) {
+                    } else if let Some(iface) = ifaces.get(self.interface_cursor.index) {
                         return StateResult::Command(StateCommand::NetworkAction(
                             NetworkAction::Wpa(WpaAction::CreateInterface(iface.into())),
                         ));
