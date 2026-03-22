@@ -59,10 +59,10 @@ impl Iwd {
     /// Since iwd doesn't allow connecting via BSSID the connection band is determined by signal
     /// strength internally by iwd, tweakable in iwd config
     #[instrument(err, skip(self))]
-    pub async fn connect_network_psk(&self, ssid: String, psk: String) -> Result<(), ManndError> {
+    pub async fn connect_network_psk(&self, ssid: &str, psk: &str) -> Result<(), ManndError> {
         match self.agent_state.try_write() {
             Ok(mut writer) => {
-                writer.password = Some(psk.clone());
+                writer.password = Some(psk.to_string());
             }
             Err(e) => {
                 tracing::error!("Error trying to get lock on writer. {e}");
@@ -98,7 +98,7 @@ impl Iwd {
     }
 
     #[instrument(err, skip(self))]
-    pub async fn connect_known(&self, ssid: String, security: Security) -> Result<(), ManndError> {
+    pub async fn connect_known(&self, ssid: &str, security: &Security) -> Result<(), ManndError> {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -132,7 +132,7 @@ impl Iwd {
 
     /// Removes a network from the configured networks
     #[instrument(err, skip(self))]
-    pub async fn remove_network(&self, ssid: String, security: Security) -> Result<(), ManndError> {
+    pub async fn remove_network(&self, ssid: &str, security: &Security) -> Result<(), ManndError> {
         info!("/net/connman/iwd/{}_{}", ssid_to_hex(&ssid), security,);
 
         let proxy = Proxy::new(

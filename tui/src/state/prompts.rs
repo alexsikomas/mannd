@@ -1,5 +1,5 @@
 use mannd::{
-    state::network::{ApConnectInfoBuilder, NetworkAction},
+    state::messages::{ApConnectInfoBuilder, Credentials, NetworkAction, WifiAction, WpaAction},
     wireless::common::Security,
 };
 
@@ -19,15 +19,9 @@ pub enum PromptState {
 impl Component for PromptState {
     fn on_key(&mut self, key: &KeyAction, ctx: &AppContext) -> StateResult {
         match self {
-            PromptState::PskConnect(prompt) => {
-                return prompt.on_key(key, ctx);
-            }
-            PromptState::Info(prompt) => {
-                return prompt.on_key(key, ctx);
-            }
-            PromptState::WpaInterface(prompt) => {
-                return prompt.on_key(key, ctx);
-            }
+            PromptState::PskConnect(prompt) => prompt.on_key(key, ctx),
+            PromptState::Info(prompt) => prompt.on_key(key, ctx),
+            PromptState::WpaInterface(prompt) => prompt.on_key(key, ctx),
         }
     }
 }
@@ -103,15 +97,13 @@ impl Component for PskConnectionPrompt {
                 PskPromptSelect::Connect => {
                     let ap_info = ApConnectInfoBuilder::default()
                         .ssid(self.ssid.clone())
-                        .credentials(mannd::state::network::Credentials::Password(
-                            self.password.clone(),
-                        ))
+                        .credentials(Credentials::Password(self.password.clone()))
                         .security(Security::Psk)
                         .build()
                         .unwrap();
-                    return StateResult::Command(StateCommand::NetworkAction(
-                        NetworkAction::Connect(ap_info),
-                    ));
+                    return StateResult::Command(StateCommand::NetworkAction(NetworkAction::Wifi(
+                        WifiAction::Connect(ap_info),
+                    )));
                 }
                 PskPromptSelect::Back => {
                     self.password.pop();
@@ -184,11 +176,11 @@ impl Component for WpaInterfacePrompt {
                 KeyAction::Enter => {
                     if self.on_choice {
                         return StateResult::Command(StateCommand::NetworkAction(
-                            NetworkAction::ToggleWpaPersist,
+                            NetworkAction::Wpa(WpaAction::TogglePersist),
                         ));
                     } else if let Some(iface) = ifaces.get_wpa_index(self.interface_cursor.index) {
                         return StateResult::Command(StateCommand::NetworkAction(
-                            NetworkAction::CreateWpaInterface(iface.into()),
+                            NetworkAction::Wpa(WpaAction::CreateInterface(iface.into())),
                         ));
                     }
                 }

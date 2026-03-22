@@ -9,7 +9,7 @@ use ratatui::{
 
 use crate::{
     state::{WifiState, wifi::ConnectionFocus},
-    ui::{THEME, Theme, theme},
+    ui::{Theme, theme},
 };
 
 pub struct Connection<'a> {

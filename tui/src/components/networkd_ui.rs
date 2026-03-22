@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Flex, Layout, Rect},
-    style::{Style, Stylize},
+    layout::Rect,
+    style::Stylize,
     text::Line,
     widgets::{Block, Borders, Widget},
 };
@@ -11,7 +11,7 @@ use ratatui::{
 use crate::{
     components::layout::panel_with_toolbar,
     state::NetdState,
-    ui::{THEME, Theme, theme},
+    ui::theme,
 };
 
 pub struct NetdMenu<'a> {

@@ -24,17 +24,14 @@ use mannd::{
     error::ManndError,
     init_home_path,
     state::{
-        network::{NetworkAction, NetworkActor, NetworkState},
+        actor::NetworkActor,
+        messages::{NetworkAction, NetworkState},
         signals::SignalUpdate,
     },
     utils::setup_logging,
 };
 use postcard::to_stdvec_cobs;
-use tokio::{
-    net::UnixListener,
-    sync::mpsc,
-    time::{Instant, timeout},
-};
+use tokio::{net::UnixListener, sync::mpsc, time::timeout};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{Level, info, instrument};
 
@@ -63,7 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let max_log_level = Level::from_str(&SETTINGS.get("debug", "max_log_level")?)?;
-    let mut socket_log = PathBuf::from(SETTINGS.get("storage", "state")?.clone());
+    let mut socket_log = PathBuf::from(SETTINGS.get("storage", "state")?);
     socket_log.push("mannd/logs/socket.log");
     setup_logging(socket_log, max_log_level, args.target_uid)?;
 

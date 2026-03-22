@@ -31,26 +31,25 @@ impl IniConfig {
 
     #[instrument(err, skip(self))]
     fn parse_file(&mut self) -> Result<(), ManndError> {
-        let file = read_to_string(self.file_path.clone())
+        let file = read_to_string(&self.file_path)
             .map_err(|_| ManndError::FileNotFound("File not found".to_string()))?;
-        let lines = file.lines();
 
         let mut current_section: String = String::new();
-        for line in lines {
-            let line = line.trim().to_string();
+
+        for line in file.lines() {
+            let line = line.trim();
             // skip whitespace, incorrect indentation and empty lines
             if line.starts_with(['#']) || line.is_empty() {
                 continue;
             }
 
             if line.starts_with('[') && line.ends_with(']') {
-                current_section = line[1..line.len() - 1].to_string();
-                self.sections
-                    .entry(current_section.to_string())
-                    .or_default();
+                current_section.clear();
+                current_section.push_str(&line[1..line.len() - 1]);
+                self.sections.entry(current_section.clone()).or_default();
             } else if let Some((k, v)) = line.split_once('=') {
                 self.sections
-                    .entry(current_section.to_string())
+                    .entry(current_section.clone())
                     .or_default()
                     .insert(
                         k.trim().to_string(),
@@ -97,9 +96,9 @@ impl IniConfig {
                             "Non-HOME variable used".to_string(),
                         ));
                     }
-                    let tmp = HOME.get().unwrap().clone();
-                    let home_str = tmp.as_os_str().to_str().ok_or_else(|| {
-                        ManndError::OperationFailed("Converting HOME path to &str".to_string())
+                    let home_path = HOME.get().unwrap();
+                    let home_str = home_path.as_os_str().to_str().ok_or_else(|| {
+                        ManndError::OperationFailed("Converting HOME path to &str".into())
                     })?;
                     res.push_str(home_str);
                     current = &var_start[end_idx + 1..];
@@ -119,24 +118,22 @@ impl IniConfig {
     }
 
     #[instrument(err, skip(self))]
-    pub fn get<T: ToString + Debug>(&self, section: T, field: T) -> Result<String, ManndError> {
-        if let Some(found_section) = self.sections.get(&section.to_string()) {
-            if let Some(found_field) = found_section.get(&field.to_string()) {
-                Ok(found_field.to_string())
-            } else {
-                Err(ManndError::PropertyNotFound(field.to_string()))
-            }
-        } else {
-            Err(ManndError::SectionNotFound(section.to_string()))
-        }
+    pub fn get<T: AsRef<str> + Debug>(&self, section: T, field: T) -> Result<&str, ManndError> {
+        let s = self
+            .sections
+            .get(section.as_ref())
+            .ok_or_else(|| ManndError::SectionNotFound(section.as_ref().into()))?;
+
+        s.get(field.as_ref())
+            .map(String::as_str)
+            .ok_or_else(|| ManndError::PropertyNotFound(field.as_ref().into()))
     }
 
     /// Returns an IniConfig with only the provided sections and fields
-    /// TODO: Performance
     #[instrument(err, skip(self))]
     pub fn get_partial(&self, filter: BTreeMap<String, Vec<String>>) -> Result<Self, ManndError> {
         let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
-        for section in filter.keys() {
+        for (section, fields) in &filter {
             let section_fields = self
                 .sections
                 .get(section)
@@ -144,7 +141,7 @@ impl IniConfig {
 
             let mut put_fields: BTreeMap<String, String> = BTreeMap::new();
 
-            for filter_field in filter.get(section).unwrap() {
+            for filter_field in fields {
                 let field_val = section_fields
                     .get(filter_field)
                     .ok_or_else(|| ManndError::SectionNotFound(format!("{section}")))?;
@@ -169,7 +166,7 @@ impl IniConfig {
         let mut temp = NamedTempFile::new_in(dir)?;
         self.write_to(&mut temp)?;
         temp.as_file().sync_all()?;
-        temp.persist(self.file_path.clone())
+        temp.persist(&self.file_path)
             .map_err(|_| ManndError::OperationFailed("Persist Failed".to_string()))?;
 
         File::open(dir)?.sync_all()?;

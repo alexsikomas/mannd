@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use tokio_stream::{StreamExt, StreamMap};
 use zbus::{Message, proxy::SignalStream, zvariant::OwnedValue};
 
-use crate::state::network::{NetCtxFlags, NetworkAction};
+use crate::state::messages::{NetworkAction, WifiAction};
 
 #[derive(Debug)]
 pub struct SignalManager<'a> {
@@ -66,7 +66,7 @@ impl<'a> SignalManager<'a> {
             .is_some_and(|val| val.eq(&OwnedValue::from(false)))
         {
             SignalUpdate::Remove(msg.0);
-            return Some(NetworkAction::GetNetworkContext(NetCtxFlags::Network));
+            return Some(NetworkAction::Wifi(WifiAction::GetNetworks));
         }
         None
     }
@@ -77,7 +77,7 @@ impl<'a> SignalManager<'a> {
             match method.as_str() {
                 "ScanDone" => {
                     self.handle_update(SignalUpdate::Remove(msg.0));
-                    return Some(NetworkAction::GetNetworkContext(NetCtxFlags::Network));
+                    return Some(NetworkAction::Wifi(WifiAction::GetNetworks));
                 }
                 _ => return None,
             }

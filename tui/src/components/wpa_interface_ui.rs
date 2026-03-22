@@ -9,7 +9,7 @@ use ratatui::{
 use crate::{
     components::layout::centered_overlay,
     state::prompts::WpaInterfacePrompt,
-    ui::{THEME, Theme, theme},
+    ui::theme,
 };
 
 pub struct WpaInterfaceUi<'a> {
