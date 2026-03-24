@@ -13,6 +13,7 @@ pub enum KeyAction {
     Escape,
     Backspace,
     Char(char),
+    Paste(String),
     None,
 }
 

@@ -119,6 +119,11 @@ impl Component for PskConnectionPrompt {
                     self.password.push(*c);
                 }
             }
+            KeyAction::Paste(s) => {
+                if selected == &PskPromptSelect::Password {
+                    self.password.push_str(s);
+                }
+            }
             _ => {}
         }
         StateResult::Consumed
