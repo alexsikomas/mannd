@@ -58,5 +58,7 @@ cd mannd
 - `systemd-networkd` management
 - Consistent design
 - Missing popups
+- Popups reworked as non-intrusive notifications
+    - Possibly animated
 
 <hr style="visibility: hidden"/>

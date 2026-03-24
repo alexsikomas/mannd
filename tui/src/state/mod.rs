@@ -111,6 +111,7 @@ impl UiState {
         let keymap = KEYMAP.get().unwrap();
 
         let key_action = match event {
+            Event::Paste(s) => &KeyAction::Paste(s),
             Event::Key(key) => match keymap.bindings.get(&key) {
                 Some(key) => key,
                 None => {

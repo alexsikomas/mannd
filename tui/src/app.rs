@@ -1,7 +1,7 @@
 use std::{cmp::min, process::id, time::Duration};
 
 use postcard::{from_bytes_cobs, to_stdvec_cobs};
-use ratatui::layout::Rect;
+use ratatui::{TerminalOptions, layout::Rect};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::instrument;
 
@@ -10,7 +10,10 @@ use crate::{
     state::{AppContext, PopupType, PromptState, StateCommand, UiState, View, prompts::InfoPrompt},
     ui::UiContext,
 };
-use crossterm::event::EventStream;
+use crossterm::{
+    cursor::DisableBlinking,
+    event::{DisableBracketedPaste, EnableBracketedPaste, EventStream},
+};
 use futures::{SinkExt, StreamExt};
 use mannd::{
     error::ManndError,
@@ -68,6 +71,7 @@ impl App {
         let (sock_tx, mut sock_rx) = mpsc::channel::<Vec<u8>>(32);
 
         let mut terminal = ratatui::init();
+        crossterm::execute!(std::io::stdout(), EnableBracketedPaste)?;
         let mut events = EventStream::new();
 
         let caps = init_request(&mut writer, &mut reader).await?;
@@ -121,6 +125,7 @@ impl App {
             .await
             .map_err(|_| ManndError::SocketWrite)?;
 
+        crossterm::execute!(std::io::stdout(), DisableBracketedPaste)?;
         ratatui::restore();
         Ok(())
     }
