@@ -24,11 +24,8 @@ use zbus::{
 };
 
 use crate::{
-    SETTINGS,
     error::ManndError,
-    ini_parse::IniConfig,
     state::signals::SignalUpdate,
-    systemd::systemctl::get_service_path,
     utils::list_interfaces,
     wireless::common::{
         AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy,
@@ -312,45 +309,44 @@ impl WpaSupplicant {
     /// Modifies the wpa_supplicant systemd service as needed
     /// to allow for changes to persist through an env file
     #[instrument(err, skip(self))]
-    async fn prepare_wpa_persist(&mut self) -> Result<(), ManndError> {
-        let service_path = PathBuf::from(get_service_path(&self.conn, "wpa_supplicant").await);
-        let Ok(mut conf) = IniConfig::new(service_path) else {
-            return Err(ManndError::OperationFailed(
-                "Could not find wpa_supplicant file or parse as INI".into(),
-            ));
-        };
-
-        let Some(service_sect) = conf.sections.get_mut("Service") else {
-            return Err(ManndError::SectionNotFound(
-                "In wpa_supplicant service file, [Service] could not be located".into(),
-            ));
-        };
-
-        let env_file = Self::get_env_file();
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&env_file)?;
-
-        let env_as_str = env_file.into_os_string().into_string().unwrap();
-
-        match service_sect.entry("EnvironmentFile".into()) {
-            Entry::Occupied(mut entry) => {
-                if !entry.get().to_lowercase().contains(&env_as_str) {
-                    entry.insert(env_as_str);
-                    conf.overwrite()?;
-                }
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(env_as_str);
-                conf.overwrite()?;
-            }
-        }
-
-        self.persist_files_prepared = true;
-        Ok(())
-    }
-
+    // async fn prepare_wpa_persist(&mut self) -> Result<(), ManndError> {
+    //     let service_path = PathBuf::from(get_service_path(&self.conn, "wpa_supplicant").await);
+    //     let Ok(mut conf) = IniConfig::new(service_path) else {
+    //         return Err(ManndError::OperationFailed(
+    //             "Could not find wpa_supplicant file or parse as INI".into(),
+    //         ));
+    //     };
+    //
+    //     let Some(service_sect) = conf.sections.get_mut("Service") else {
+    //         return Err(ManndError::SectionNotFound(
+    //             "In wpa_supplicant service file, [Service] could not be located".into(),
+    //         ));
+    //     };
+    //
+    //     let env_file = Self::get_env_file();
+    //     OpenOptions::new()
+    //         .write(true)
+    //         .create_new(true)
+    //         .open(&env_file)?;
+    //
+    //     let env_as_str = env_file.into_os_string().into_string().unwrap();
+    //
+    //     match service_sect.entry("EnvironmentFile".into()) {
+    //         Entry::Occupied(mut entry) => {
+    //             if !entry.get().to_lowercase().contains(&env_as_str) {
+    //                 entry.insert(env_as_str);
+    //                 conf.overwrite()?;
+    //             }
+    //         }
+    //         Entry::Vacant(entry) => {
+    //             entry.insert(env_as_str);
+    //             conf.overwrite()?;
+    //         }
+    //     }
+    //
+    //     self.persist_files_prepared = true;
+    //     Ok(())
+    // }
     #[instrument(err, skip(self))]
     pub async fn create_interface(&mut self, ifname: &str) -> Result<(), ManndError> {
         let mut body: HashMap<String, OwnedValue> = HashMap::new();
@@ -367,7 +363,7 @@ impl WpaSupplicant {
 
         if self.persist {
             if !self.persist_files_prepared {
-                self.prepare_wpa_persist().await?;
+                // self.prepare_wpa_persist().await?;
             }
         } else {
             let interface_path: OwnedObjectPath = proxy.call("CreateInterface", &body).await?;
@@ -547,58 +543,6 @@ impl WpaSupplicant {
 
         let stream = proxy.receive_signal(signal_name).await?;
         Ok(stream)
-    }
-
-    fn get_env_file() -> PathBuf {
-        PathBuf::from(SETTINGS.get("storage", "state").unwrap()).join("ManndWpaEnv")
-    }
-
-    // check if the wpa_supplicant service file
-    // has EnvironmentFile='...' set to the mannd
-    // environment file
-    async fn check_service_for_env(&self) -> bool {
-        let service_path = PathBuf::from(get_service_path(&self.conn, "wpa_supplicant").await);
-        let Ok(mut conf) = IniConfig::new(service_path) else {
-            return false;
-        };
-        let Some(service_sect) = conf.sections.get_mut("Service") else {
-            return false;
-        };
-        let env_file = Self::get_env_file();
-        if let Some(val) = service_sect.get("EnvironmentFile") {
-            // file already has env file
-            if val.to_lowercase().contains("mannd") && File::open(&env_file).is_ok() {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    async fn should_edit_service(&self) -> bool {
-        let service_path = PathBuf::from(get_service_path(&self.conn, "wpa_supplicant").await);
-        let Ok(mut conf) = IniConfig::new(service_path) else {
-            return false;
-        };
-
-        let Some(service_sect) = conf.sections.get_mut("Service") else {
-            return false;
-        };
-
-        let env_file = Self::get_env_file();
-        if let Some(val) = service_sect.get("EnvironmentFile")
-            && val == &env_file
-        {
-            return true;
-        }
-
-        // write env file
-        service_sect.insert(
-            "EnvironmentFile".to_string(),
-            env_file.into_os_string().into_string().unwrap(),
-        );
-        let _ = conf.write_file(None);
-        true
     }
 
     /// Used for networks which are nearby by may

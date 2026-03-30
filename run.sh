@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BIN_DIR="/usr/local/bin"
-SOCK_DIR="/usr/libexec/"
+SOCK_DIR="/usr/libexec"
 
 display_help() {
     cat <<-EOF

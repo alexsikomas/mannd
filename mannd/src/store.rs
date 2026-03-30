@@ -3,13 +3,13 @@
 //! State persistence for mannd.
 //!
 //! ## Tables
-//! The store currently has the following tables:
+//! The store currently has the one table:
 //! [`APPLICATION_TABLE`] and [`WG_TABLE`]
 //!
-//! [`APPLICATION_TABLE`] is used for storing... application state.
-//! It ensures continity between sessions. For example, if the last
+//! [`APPLICATION_TABLE`] is used for storing... application s last
 //! time `mannd` was run the VPN, this table can be used to restore
-//! that state without relying on inconsistent netlink queries.
+//! that state without relying on inconsistent netlink queries.tate.
+//! It ensures continity between sessions. For example, if the
 //!
 //! [`WG_TABLE`] stores metadata for wireguard configuration files.
 //! It caches data found in [`WG_DIR`], i.e. files ending in .conf
@@ -34,10 +34,10 @@ use redb::{
     Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition, TableError,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, os::unix::fs::PermissionsExt, path::PathBuf};
+use std::{collections::HashMap, fs, os::unix::fs::chown, path::PathBuf};
 use tracing::instrument;
 
-use crate::{SETTINGS, error::ManndError, utils::is_path_root};
+use crate::{context, error::ManndError};
 
 #[derive(Debug)]
 pub struct ManndStore {
@@ -46,18 +46,15 @@ pub struct ManndStore {
 
 impl ManndStore {
     #[instrument(err)]
-    pub fn init() -> Result<Self, ManndError> {
-        let mut home = PathBuf::from(SETTINGS.get("storage", "state")?);
-        let in_root = is_path_root(&home);
+    pub fn init(uid: Option<u32>) -> Result<Self, ManndError> {
+        let settings = &context().settings;
+        let mut home = PathBuf::from(settings.get("storage", "state")?);
         fs::create_dir_all(&home)?;
-        if !in_root {
-            fs::set_permissions(&home, fs::Permissions::from_mode(0o777))?;
-        }
-
         home.push("mannd.redb");
         let database = Database::create(&home)?;
-        if !in_root {
-            fs::set_permissions(&home, fs::Permissions::from_mode(0o777))?;
+
+        if uid.is_some() {
+            chown(&home, uid, None)?;
         }
 
         Ok(ManndStore { database })
@@ -70,40 +67,6 @@ impl ManndStore {
 
 const APPLICATION_TABLE: TableDefinition<String, &[u8]> = TableDefinition::new("app_state_table");
 const APP_STATE_KEY: &str = "application_state";
-
-/// Application State
-impl ManndStore {
-    // Returns Ok(None) if app state has not yet been initialised, i.e. table not found.
-    #[instrument(err, skip(self))]
-    pub fn read_app_state(&self) -> Result<Option<ApplicationState>, ManndError> {
-        let read = self.database.begin_read()?;
-        match read.open_table(APPLICATION_TABLE) {
-            Ok(table) => {
-                // count is inclusive
-                if let Some(data) = table.get(APP_STATE_KEY.to_string())? {
-                    let app_state: ApplicationState = from_bytes(data.value())?;
-                    Ok(Some(app_state))
-                } else {
-                    Ok(None)
-                }
-            }
-            Err(TableError::TableDoesNotExist(_)) => Ok(None),
-            Err(e) => Err(ManndError::RedbTable(e)),
-        }
-    }
-
-    #[instrument(err, skip(self))]
-    pub fn write_app_state(&self, state: &ApplicationState) -> Result<(), ManndError> {
-        let write = self.database.begin_write()?;
-        {
-            let mut table = write.open_table(APPLICATION_TABLE)?;
-            let data = to_allocvec(&state)?;
-            table.insert(APP_STATE_KEY.to_string(), data.as_slice())?;
-        }
-        write.commit()?;
-        Ok(())
-    }
-}
 
 /// All state here is taken from the last
 /// time the app was run
@@ -135,13 +98,47 @@ pub struct WgMeta {
     pub country: [u8; 2],
 }
 
+/// Application State
+impl ManndStore {
+    // returns default app state if table hasn't been made
+    #[instrument(err, skip(self))]
+    pub fn read_app_state(&self) -> Result<ApplicationState, ManndError> {
+        let read = self.database.begin_read()?;
+        match read.open_table(APPLICATION_TABLE) {
+            Ok(table) => {
+                // count is inclusive
+                if let Some(data) = table.get(APP_STATE_KEY.to_string())? {
+                    let app_state: ApplicationState = from_bytes(data.value())?;
+                    Ok(app_state)
+                } else {
+                    Ok(ApplicationState::default())
+                }
+            }
+            Err(TableError::TableDoesNotExist(_)) => Ok(ApplicationState::default()),
+            Err(e) => Err(ManndError::RedbTable(e)),
+        }
+    }
+
+    #[instrument(err, skip(self))]
+    pub fn write_app_state(&self, state: &ApplicationState) -> Result<(), ManndError> {
+        let write = self.database.begin_write()?;
+        {
+            let mut table = write.open_table(APPLICATION_TABLE)?;
+            let data = to_allocvec(&state)?;
+            table.insert(APP_STATE_KEY.to_string(), data.as_slice())?;
+        }
+        write.commit()?;
+        Ok(())
+    }
+}
+
 /// Wiregard store
 impl ManndStore {
     /// Searches WG_DIR for .conf file, returning a hashmap of the filename
     /// and metadata information in the form of WgMeta, country field is
     /// uninitialised
     #[instrument(err, skip(self))]
-    pub fn update_wg_files(&self) -> Result<(), ManndError> {
+    pub fn write_wg_files(&self) -> Result<(), ManndError> {
         let mut files: HashMap<String, WgMeta, RandomState> = HashMap::default();
         let dir = fs::read_dir(WG_DIR)?;
         for entry in dir {
@@ -232,7 +229,7 @@ impl ManndStore {
     }
 
     #[instrument(err, skip(self))]
-    pub fn get_ordered_wg_files(&self) -> Result<(Vec<String>, Vec<WgMeta>), ManndError> {
+    pub fn ordered_wg_files(&self) -> Result<(Vec<String>, Vec<WgMeta>), ManndError> {
         let mut names: Vec<String> = vec![];
         let mut meta: Vec<WgMeta> = vec![];
 

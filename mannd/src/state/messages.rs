@@ -135,21 +135,17 @@ impl Default for Capability {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WireguardCapability {
     pub installed: bool,
-    pub active: bool,
 }
 
 impl Default for WireguardCapability {
     fn default() -> Self {
-        Self {
-            installed: false,
-            active: false,
-        }
+        Self { installed: false }
     }
 }
 
 impl WireguardCapability {
-    pub fn new(installed: bool, active: bool) -> Self {
-        Self { installed, active }
+    pub fn new(installed: bool) -> Self {
+        Self { installed }
     }
 }
 

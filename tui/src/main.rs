@@ -1,5 +1,5 @@
 use mannd::{
-    SETTINGS, UNIX_SOCK_PATH, error::ManndError, init_home_path, state::messages::NetworkAction,
+    GlobalStateGuard, UNIX_SOCK_PATH, context, error::ManndError, state::messages::NetworkAction,
     utils::setup_logging,
 };
 use postcard::to_stdvec_cobs;
@@ -18,8 +18,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let uid = unsafe { libc::geteuid() };
     let stream = get_unix_socket(uid).await?;
 
-    let max_log_level = Level::from_str(&SETTINGS.get("debug", "max_log_level")?)?;
-    let mut tui_log = PathBuf::from(SETTINGS.get("storage", "state")?.clone());
+    GlobalStateGuard::init(Some(uid))?;
+    let settings = &context().settings;
+
+    let max_log_level = Level::from_str(&settings.get("debug", "max_log_level")?)?;
+    let mut tui_log = PathBuf::from(settings.get("storage", "state")?);
     tui_log.push("mannd/logs/tui.log");
 
     setup_logging(tui_log, max_log_level, Some(uid))?;
@@ -34,8 +37,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// if no connection requests password to start either debug or
 /// release service.
 async fn get_unix_socket(uid: u32) -> Result<UnixStream, ManndError> {
-    init_home_path(Some(uid))?;
-
     if let Ok(stream) = UnixStream::connect(UNIX_SOCK_PATH).await {
         // stale backend may still be bound to socket path deadlocked
         if is_backend_healthy(stream).await {

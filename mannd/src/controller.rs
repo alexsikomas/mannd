@@ -19,6 +19,7 @@ use tokio::sync::{RwLock, mpsc::Sender};
 use crate::{
     error::ManndError,
     netlink::NlRouterWrapper,
+    read_global,
     state::{
         messages::{ApConnectInfo, Credentials},
         signals::SignalUpdate,
@@ -53,9 +54,8 @@ pub enum WirelessAdapter {
 #[derive(Debug)]
 pub struct Controller {
     pub wifi: Option<WirelessAdapter>,
-    connection: Connection,
     wg: Option<Wireguard<NlRouterWrapper>>,
-    store: ManndStore,
+    connection: Connection,
 }
 
 // Initialisations
@@ -65,9 +65,8 @@ impl Controller {
         let connection = Connection::system().await?;
         Ok(Self {
             wifi: None,
-            connection,
             wg: None,
-            store: ManndStore::init()?,
+            connection,
         })
     }
 
@@ -135,8 +134,10 @@ impl Controller {
     #[instrument(err, skip(self))]
     /// Updates the wireguad files in the state database
     pub fn update_wireguard_state(&self) -> Result<(Vec<String>, Vec<WgMeta>), ManndError> {
-        self.store.update_wg_files()?;
-        Ok(self.store.get_ordered_wg_files()?)
+        read_global(|state| state.db.write_wg_files());
+        read_global(|state| state.db.ordered_wg_files()).ok_or(ManndError::OperationFailed(
+            "[Controller::db]: Ordered WireGuard files read".into(),
+        ))?
     }
 
     #[instrument(err, skip(self))]
@@ -155,14 +156,6 @@ impl Controller {
             Some(res) => res,
             None => false,
         }
-    }
-
-    pub fn persist_app_state(&self, state: &ApplicationState) -> Result<(), ManndError> {
-        self.store.write_app_state(state)
-    }
-
-    pub fn load_app_state(&self) -> Result<Option<ApplicationState>, ManndError> {
-        self.store.read_app_state()
     }
 }
 
@@ -372,7 +365,7 @@ mod tests {
 
     #[cfg(iwd_installed)]
     #[tokio::test]
-    async fn test_connect_iwd() -> Result<(), ComError> {
+    async fn test_connect_iwd() -> Result<(), ManndError> {
         let controller = Controller::new().await;
         match controller {
             Ok(mut cont) => match cont.connect_iwd().await {
@@ -382,7 +375,7 @@ mod tests {
                     Ok(())
                 }
             },
-            Err(_) => Err(ComError::OperationFailed(
+            Err(_) => Err(ManndError::OperationFailed(
                 "Controller could not be initalised".to_string(),
             )),
         }

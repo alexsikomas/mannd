@@ -193,7 +193,7 @@ impl Component for WpaInterfacePrompt {
                     }
                 }
                 KeyAction::Up => {
-                    if self.on_choice {
+                    if self.on_choice && !ifaces.is_empty() {
                         self.interface_cursor.index = ifaces.len() - 1;
                         self.on_choice = false;
                     } else if self.interface_cursor.index == 0 {
@@ -203,9 +203,9 @@ impl Component for WpaInterfacePrompt {
                     }
                 }
                 KeyAction::Down => {
-                    if self.on_choice {
+                    if self.on_choice && !ifaces.is_empty() {
+                        self.interface_cursor.index = 0;
                         self.on_choice = false;
-                        self.interface_cursor.index = 1;
                     } else {
                         self.interface_cursor.next(ifaces.len());
                     }

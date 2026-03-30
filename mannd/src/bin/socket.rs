@@ -10,7 +10,7 @@
 use std::{
     error::Error,
     fs::{self, Permissions},
-    os::unix::fs::PermissionsExt,
+    os::unix::fs::{PermissionsExt, chown},
     path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
@@ -19,10 +19,10 @@ use std::{
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use mannd::{
-    SETTINGS, UNIX_SOCK_PATH,
+    GlobalStateGuard, UNIX_SOCK_PATH, context,
     controller::WifiDaemonType,
     error::ManndError,
-    init_home_path,
+    read_global,
     state::{
         actor::NetworkActor,
         messages::{NetworkAction, NetworkState},
@@ -51,16 +51,17 @@ struct Args {
 #[instrument(err)]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    init_home_path(args.target_uid)?;
+    GlobalStateGuard::init(args.target_uid)?;
 
     // root check
     let euid = unsafe { libc::getuid() };
     if euid != 0 {
         Err(ManndError::NotRoot)?;
     }
+    let settings = &context().settings;
 
-    let max_log_level = Level::from_str(&SETTINGS.get("debug", "max_log_level")?)?;
-    let mut socket_log = PathBuf::from(SETTINGS.get("storage", "state")?);
+    let max_log_level = Level::from_str(&settings.get("debug", "max_log_level")?)?;
+    let mut socket_log = PathBuf::from(settings.get("storage", "state")?);
     socket_log.push("mannd/logs/socket.log");
     setup_logging(socket_log, max_log_level, args.target_uid)?;
 
@@ -161,8 +162,13 @@ impl UnixSocketGuard {
         let _ = tokio::fs::remove_file(&path).await;
 
         let listener = UnixListener::bind(&path)?;
-        let perms = Permissions::from_mode(0o777);
-        tokio::fs::set_permissions(&path, perms).await?;
+        let uid = context().uid;
+        if uid.is_some() {
+            chown(&path, uid, None)?;
+        } else {
+            fs::set_permissions(&path, Permissions::from_mode(660))?;
+        }
+
         Ok(Self { path, listener })
     }
 }

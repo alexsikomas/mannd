@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use mannd::{SETTINGS, error::ManndError};
+use mannd::{context, error::ManndError};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum KeyAction {
@@ -39,7 +39,7 @@ pub struct Keymap {
 
 impl Keymap {
     pub fn load_keys() -> Result<Self, ManndError> {
-        let conf = &SETTINGS;
+        let conf = &context().settings;
         let mut bindings: HashMap<KeyEvent, KeyAction> = HashMap::default();
 
         if let Some(keybinds) = conf.sections.get("keybinds") {
