@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{HOME, error::ManndError};
+use crate::{APP_CTX, context, error::ManndError, read_global};
 use tempfile::NamedTempFile;
 use tracing::instrument;
 
@@ -19,18 +19,20 @@ pub struct IniConfig {
 
 impl IniConfig {
     #[instrument(err)]
-    pub fn new(file_path: PathBuf) -> Result<Self, ManndError> {
+    pub fn new(file_path: PathBuf, home: Option<&Path>) -> Result<Self, ManndError> {
         let sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
         let mut conf = Self {
-            file_path,
+            file_path: file_path,
             sections,
         };
-        Self::parse_file(&mut conf)?;
+        Self::parse_file(&mut conf, home)?;
         Ok(conf)
     }
 
     #[instrument(err, skip(self))]
-    fn parse_file(&mut self) -> Result<(), ManndError> {
+    /// Pass home as None if in initialisation phase where the global
+    /// is either not set or has a lock on it
+    fn parse_file(&mut self, home: Option<&Path>) -> Result<(), ManndError> {
         let file = read_to_string(&self.file_path)
             .map_err(|_| ManndError::FileNotFound("File not found".to_string()))?;
 
@@ -53,7 +55,7 @@ impl IniConfig {
                     .or_default()
                     .insert(
                         k.trim().to_string(),
-                        Self::parse_field(v)?.trim().to_string(),
+                        Self::parse_field(v, home)?.trim().to_string(),
                     );
             }
         }
@@ -78,7 +80,7 @@ impl IniConfig {
     }
 
     #[instrument(err)]
-    fn parse_field<'a>(input: &'a str) -> Result<String, ManndError> {
+    fn parse_field<'a>(input: &'a str, home: Option<&Path>) -> Result<String, ManndError> {
         let mut res = String::new();
 
         if let (Some(start), Some(end)) = (input.find('"'), input.rfind('"')) {
@@ -96,7 +98,9 @@ impl IniConfig {
                             "Non-HOME variable used".to_string(),
                         ));
                     }
-                    let home_path = HOME.get().unwrap();
+
+                    let home_path = home.unwrap_or_else(|| &context().home);
+
                     let home_str = home_path.as_os_str().to_str().ok_or_else(|| {
                         ManndError::OperationFailed("Converting HOME path to &str".into())
                     })?;

@@ -1,4 +1,4 @@
-use mannd::{SETTINGS, error::ManndError, wireless::wpa_supplicant::WpaInterface};
+use mannd::{context, error::ManndError, wireless::wpa_supplicant::WpaInterface};
 use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
@@ -34,9 +34,9 @@ impl Theme {
     /// global value of `THEME`
     #[instrument(err)]
     pub fn new() -> Result<(), ManndError> {
-        let conf = &SETTINGS;
+        let config = &context().settings;
 
-        let theme = conf
+        let theme = config
             .sections
             .get("theme")
             .ok_or_else(|| ManndError::SectionNotFound("theme".to_string()))?;
@@ -47,7 +47,7 @@ impl Theme {
 
         let theme_name = format!("theme.{selected_theme}");
 
-        let selected_theme_section = conf
+        let selected_theme_section = config
             .sections
             .get(theme_name.as_str())
             .ok_or_else(|| ManndError::SectionNotFound(theme_name))?;
@@ -118,8 +118,10 @@ impl UiContext {
                 }
             }
             View::Vpn(vpn_state) => {
+                // unnecessary
                 let mut cols: usize = 0;
                 let vpn_areas = VpnMenu::build_layout_no_render(inner_area, &mut cols);
+
                 let wg_meta = if net_ctx.wg_ctx.active {
                     Some(net_ctx.wg_ctx.meta.as_slice())
                 } else {

@@ -44,10 +44,14 @@
 use std::{
     ffi::CStr,
     path::PathBuf,
-    sync::{LazyLock, OnceLock},
+    sync::{LazyLock, Mutex, OnceLock, RwLock},
 };
 
-use crate::{error::ManndError, ini_parse::IniConfig};
+use crate::{
+    error::ManndError,
+    ini_parse::IniConfig,
+    store::{ApplicationState, ManndStore},
+};
 
 pub mod controller;
 pub mod error;
@@ -61,10 +65,97 @@ pub mod wireguard;
 pub mod wireless;
 
 pub const UNIX_SOCK_PATH: &str = "/tmp/mannd.sock";
-pub static HOME: OnceLock<PathBuf> = OnceLock::new();
 
-pub fn init_home_path(uid: Option<u32>) -> Result<(), ManndError> {
-    let home: PathBuf;
+pub struct GlobalContext {
+    pub uid: Option<u32>,
+    pub home: PathBuf,
+    pub config_home: PathBuf,
+    pub settings: IniConfig,
+}
+
+pub struct GlobalState {
+    pub db: ManndStore,
+    pub app: ApplicationState,
+}
+
+pub static APP_CTX: OnceLock<GlobalContext> = OnceLock::new();
+static APP_STATE: RwLock<Option<GlobalState>> = RwLock::new(None);
+
+pub struct GlobalStateGuard;
+
+impl GlobalStateGuard {
+    // As well as GlobalState inits a few oncelocks
+    pub fn init(uid: Option<u32>) -> Result<Self, ManndError> {
+        let home = home_path(uid)?;
+        let config_home = home.join(".config/mannd");
+        let settings_path = config_home.join("settings.conf");
+        let settings = IniConfig::new(settings_path, Some(&home))?;
+
+        let ctx = GlobalContext {
+            uid,
+            home,
+            config_home,
+            settings,
+        };
+        APP_CTX.set(ctx).map_err(|_| {
+            ManndError::OperationFailed("Application context already initialized".into())
+        })?;
+
+        let db = ManndStore::init(uid)?;
+        let app = db.read_app_state()?;
+
+        *APP_STATE.write().unwrap() = Some(GlobalState { db, app });
+
+        Ok(GlobalStateGuard)
+    }
+}
+
+impl Drop for GlobalStateGuard {
+    fn drop(&mut self) {
+        let mut state_lock = APP_STATE.write().unwrap();
+        if let Some(ref mut state) = *state_lock {
+            if let Err(e) = state.db.write_app_state(&state.app) {
+                tracing::warn!("Failed to save during drop: {}", e.to_string());
+            }
+        }
+        state_lock.take();
+    }
+}
+
+// false on None state
+pub fn modify_global<F>(modifier: F) -> bool
+where
+    F: FnOnce(&mut GlobalState),
+{
+    let mut state_lock = APP_STATE.write().unwrap();
+    if let Some(ref mut state) = *state_lock {
+        modifier(state);
+        true
+    } else {
+        false
+    }
+}
+
+pub fn read_global<F, R>(reader: F) -> Option<R>
+where
+    F: FnOnce(&GlobalState) -> R,
+{
+    let state_lock = APP_STATE.read().unwrap();
+
+    if let Some(state) = &*state_lock {
+        Some(reader(state))
+    } else {
+        None
+    }
+}
+
+pub fn context() -> &'static GlobalContext {
+    APP_CTX
+        .get()
+        .expect("Global Context has yet to be initialised")
+}
+
+fn home_path(uid: Option<u32>) -> Result<PathBuf, ManndError> {
     match uid {
         Some(id) => {
             let pwd = unsafe { libc::getpwuid(id) };
@@ -75,7 +166,7 @@ pub fn init_home_path(uid: Option<u32>) -> Result<(), ManndError> {
             let home_str = unsafe { CStr::from_ptr((*pwd).pw_dir) };
 
             let home_str = home_str.to_string_lossy();
-            home = PathBuf::from(home_str.into_owned());
+            Ok(PathBuf::from(home_str.into_owned()))
         }
         None => {
             if let Ok(uid_str) = std::env::var("SUDO_UID") {
@@ -88,34 +179,11 @@ pub fn init_home_path(uid: Option<u32>) -> Result<(), ManndError> {
                 let home_str = unsafe { CStr::from_ptr((*pwd).pw_dir) };
 
                 let home_str = home_str.to_string_lossy();
-                home = PathBuf::from(home_str.into_owned());
+                Ok(PathBuf::from(home_str.into_owned()))
             } else {
                 println!("Cannot get the UID of the user who called sudo... using /root/ as home.");
-                home = std::path::PathBuf::from("/root");
+                Ok(std::path::PathBuf::from("/root"))
             }
         }
     }
-
-    if HOME.set(home).is_err() {
-        Err(ManndError::HomeInitialised)
-    } else {
-        Ok(())
-    }
 }
-
-pub static CONFIG_HOME: LazyLock<PathBuf> = LazyLock::new(|| {
-    HOME.get().map_or_else(
-        || panic!("Home has not been initialised yet!"),
-        |home| {
-            let mut home_path = home.clone();
-            home_path.push(".config/mannd");
-            home_path
-        },
-    )
-});
-
-pub static SETTINGS: LazyLock<IniConfig> = LazyLock::new(|| {
-    let mut config_path = CONFIG_HOME.clone();
-    config_path.push("settings.conf");
-    IniConfig::new(config_path).unwrap()
-});

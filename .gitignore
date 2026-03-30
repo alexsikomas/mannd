@@ -1,3 +1,4 @@
+*.org
 .DS_Store
 /.styles
 /target

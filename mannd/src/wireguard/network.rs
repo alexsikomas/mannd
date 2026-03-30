@@ -49,7 +49,7 @@ impl Wireguard<NlRouterWrapper> {
     #[instrument(err)]
     /// Attempts to connect to a wireguard configuration
     pub fn connect_conf(&self, path: &Path) -> Result<(), ManndError> {
-        let conf = IniConfig::new(path.into())?;
+        let conf = IniConfig::new(path.into(), None)?;
 
         // get ips, possibly multiple split on ,
         let mut ips: Vec<IpAddr> = vec![];
@@ -83,7 +83,7 @@ impl Wireguard<NlRouterWrapper> {
             vec!["PublicKey".into(), "Endpoint".into(), "AllowedIPs".into()],
         );
 
-        let conf = IniConfig::new(path.into())?;
+        let conf = IniConfig::new(path.into(), None)?;
         let conf = conf.get_partial(filter)?;
 
         let write_path = format!("{path}.mannd.tmp");
