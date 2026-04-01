@@ -238,7 +238,6 @@ impl VpnMenu<'_> {
             let meta = &meta[i];
             // let mod_area = block.inner(area);
 
-            tracing::info!("Country: {:?}", meta.country);
             if meta.country == [0, 0] {
                 block.render(area, buf);
             } else {

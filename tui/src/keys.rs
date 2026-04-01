@@ -42,13 +42,11 @@ impl Keymap {
         let conf = &context().settings;
         let mut bindings: HashMap<KeyEvent, KeyAction> = HashMap::default();
 
-        if let Some(keybinds) = conf.sections.get("keybinds") {
-            let keys = keybinds.keys();
-            for key in keys {
-                let event = key_str_to_event(key);
-                let action: KeyAction = keybinds.get(key).unwrap().clone().into();
-                bindings.insert(event?, action);
-            }
+        let keys = conf.keybinds.keys();
+        for key in keys {
+            let event = key_str_to_event(key);
+            let action: KeyAction = conf.keybinds.get(key).unwrap().clone().into();
+            bindings.insert(event?, action);
         }
         Ok(Self { bindings })
     }
@@ -58,7 +56,7 @@ impl Keymap {
 /// there is a direct match to a keycode, keypad unimplemented
 fn key_str_to_event(key: &str) -> Result<KeyEvent, ManndError> {
     // remove "<>"
-    let key = &key[2..key.len() - 2];
+    let key = &key[1..key.len() - 1];
     let mut modifier: KeyModifiers = KeyModifiers::NONE;
 
     // removes all the modifiers from keys

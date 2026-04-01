@@ -5,13 +5,13 @@
 
 use crate::{
     error::ManndError,
-    ini_parse::IniConfig,
     netlink::{NetlinkHandle, NlRouterWrapper},
     utils::{get_index, str_to_ip},
+    wireguard::wg_ini::WgConfig,
 };
 use neli::{consts::socket::NlFamily, router::asynchronous::NlRouter, utils::Groups};
 use std::{
-    collections::BTreeMap,
+    collections::HashMap,
     fmt::Debug,
     net::IpAddr,
     path::{Path, PathBuf},
@@ -49,7 +49,7 @@ impl Wireguard<NlRouterWrapper> {
     #[instrument(err)]
     /// Attempts to connect to a wireguard configuration
     pub fn connect_conf(&self, path: &Path) -> Result<(), ManndError> {
-        let conf = IniConfig::new(path.into(), None)?;
+        let conf = WgConfig::parse(path.into())?;
 
         // get ips, possibly multiple split on ,
         let mut ips: Vec<IpAddr> = vec![];
@@ -73,7 +73,7 @@ impl Wireguard<NlRouterWrapper> {
     /// `wg` util can't understand full .conf file so needs pruning
     #[instrument(err)]
     fn prune_write_conf(path: &str) -> Result<String, ManndError> {
-        let mut filter: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut filter: HashMap<String, Vec<String>> = HashMap::new();
         filter.insert(
             "Interface".into(),
             vec!["PrivateKey".into(), "ListenPort".into()],
@@ -83,11 +83,11 @@ impl Wireguard<NlRouterWrapper> {
             vec!["PublicKey".into(), "Endpoint".into(), "AllowedIPs".into()],
         );
 
-        let conf = IniConfig::new(path.into(), None)?;
-        let conf = conf.get_partial(filter)?;
+        let conf = WgConfig::parse(&Path::new(path))?;
+        let conf = conf.get_partial(&filter)?;
 
         let write_path = format!("{path}.mannd.tmp");
-        conf.write_file(Some(write_path.clone().into()))?;
+        conf.write_file(&Path::new(&write_path))?;
         Ok(write_path)
     }
 

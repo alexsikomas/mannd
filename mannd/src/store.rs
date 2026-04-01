@@ -48,7 +48,7 @@ impl ManndStore {
     #[instrument(err)]
     pub fn init(uid: Option<u32>) -> Result<Self, ManndError> {
         let settings = &context().settings;
-        let mut home = PathBuf::from(settings.get("storage", "state")?);
+        let mut home = PathBuf::from(&settings.storage.state);
         fs::create_dir_all(&home)?;
         home.push("mannd.redb");
         let database = Database::create(&home)?;
