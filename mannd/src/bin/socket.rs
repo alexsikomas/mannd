@@ -60,8 +60,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     let settings = &context().settings;
 
-    let max_log_level = Level::from_str(&settings.get("debug", "max_log_level")?)?;
-    let mut socket_log = PathBuf::from(settings.get("storage", "state")?);
+    let max_log_level = Level::from_str(&settings.debug.max_log_level)?;
+    let mut socket_log = PathBuf::from(&settings.storage.state);
     socket_log.push("mannd/logs/socket.log");
     setup_logging(socket_log, max_log_level, args.target_uid)?;
 

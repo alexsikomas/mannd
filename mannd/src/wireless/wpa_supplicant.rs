@@ -7,8 +7,9 @@
 use std::{
     collections::{HashMap, HashSet, btree_map::Entry},
     fmt::Debug,
-    fs::{File, OpenOptions},
-    path::PathBuf,
+    fs::{self, File, OpenOptions},
+    os::unix::fs::chown,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
@@ -24,6 +25,7 @@ use zbus::{
 };
 
 use crate::{
+    APP_CTX, context,
     error::ManndError,
     state::signals::SignalUpdate,
     utils::list_interfaces,
@@ -45,8 +47,6 @@ pub struct WpaSupplicant {
     // places (here and app_ctx), should be
     // in sync but find better way to do this
     persist: bool,
-    // has prepare_wpa_persist been called?
-    persist_files_prepared: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -97,7 +97,6 @@ impl WpaSupplicant {
             path,
             active_interface,
             persist: false,
-            persist_files_prepared: false,
         })
     }
 
@@ -306,51 +305,10 @@ impl WpaSupplicant {
 
 // functions which need to read/write data
 impl WpaSupplicant {
-    /// Modifies the wpa_supplicant systemd service as needed
-    /// to allow for changes to persist through an env file
-    #[instrument(err, skip(self))]
-    // async fn prepare_wpa_persist(&mut self) -> Result<(), ManndError> {
-    //     let service_path = PathBuf::from(get_service_path(&self.conn, "wpa_supplicant").await);
-    //     let Ok(mut conf) = IniConfig::new(service_path) else {
-    //         return Err(ManndError::OperationFailed(
-    //             "Could not find wpa_supplicant file or parse as INI".into(),
-    //         ));
-    //     };
-    //
-    //     let Some(service_sect) = conf.sections.get_mut("Service") else {
-    //         return Err(ManndError::SectionNotFound(
-    //             "In wpa_supplicant service file, [Service] could not be located".into(),
-    //         ));
-    //     };
-    //
-    //     let env_file = Self::get_env_file();
-    //     OpenOptions::new()
-    //         .write(true)
-    //         .create_new(true)
-    //         .open(&env_file)?;
-    //
-    //     let env_as_str = env_file.into_os_string().into_string().unwrap();
-    //
-    //     match service_sect.entry("EnvironmentFile".into()) {
-    //         Entry::Occupied(mut entry) => {
-    //             if !entry.get().to_lowercase().contains(&env_as_str) {
-    //                 entry.insert(env_as_str);
-    //                 conf.overwrite()?;
-    //             }
-    //         }
-    //         Entry::Vacant(entry) => {
-    //             entry.insert(env_as_str);
-    //             conf.overwrite()?;
-    //         }
-    //     }
-    //
-    //     self.persist_files_prepared = true;
-    //     Ok(())
-    // }
     #[instrument(err, skip(self))]
     pub async fn create_interface(&mut self, ifname: &str) -> Result<(), ManndError> {
         let mut body: HashMap<String, OwnedValue> = HashMap::new();
-        body.insert("Ifname".to_string(), Value::new(ifname).try_to_owned()?);
+        body.insert("Ifname".into(), Value::new(ifname).try_to_owned()?);
 
         // call create interface
         let proxy = Proxy::new(
@@ -362,13 +320,28 @@ impl WpaSupplicant {
         .await?;
 
         if self.persist {
-            if !self.persist_files_prepared {
-                // self.prepare_wpa_persist().await?;
-            }
-        } else {
-            let interface_path: OwnedObjectPath = proxy.call("CreateInterface", &body).await?;
-            self.active_interface = interface_path;
+            // let config_location = WpaSupplicant::interface_config_file(ifname)?;
+            // if let Some(parent) = config_location.parent() {
+            //     fs::create_dir_all(parent)?;
+            //     chown(parent, context().uid, None)?;
+            // }
+            //
+            // OpenOptions::new()
+            //     .write(true)
+            //     .create(true)
+            //     .truncate(false)
+            //     .open(&config_location)?;
+            // chown(&config_location, context().uid, None)?;
+            // let conf_str = config_location
+            //     .into_os_string()
+            //     .into_string()
+            //     .map_err(|_| ManndError::OperationFailed("Converting to string".into()))?;
+            //
+            // body.insert("ConfigFile".into(), Value::new(conf_str).try_to_owned()?);
         }
+
+        let interface_path: OwnedObjectPath = proxy.call("CreateInterface", &body).await?;
+        self.active_interface = interface_path;
 
         Ok(())
     }
@@ -628,6 +601,14 @@ impl WpaSupplicant {
             freq: None,
             rates: None,
         })
+    }
+
+    /// Returns a Path to where the interface config file should be made/found
+    fn interface_config_file(ifname: &str) -> Result<PathBuf, ManndError> {
+        let settings = &context().settings;
+        let mut home = PathBuf::from(&settings.storage.state);
+        home.push(format!("mannd/wpa/{ifname}.conf"));
+        Ok(home)
     }
 }
 

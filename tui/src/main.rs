@@ -21,8 +21,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     GlobalStateGuard::init(Some(uid))?;
     let settings = &context().settings;
 
-    let max_log_level = Level::from_str(&settings.get("debug", "max_log_level")?)?;
-    let mut tui_log = PathBuf::from(settings.get("storage", "state")?);
+    let max_log_level = Level::from_str(&settings.debug.max_log_level)?;
+    let mut tui_log = PathBuf::from(&settings.storage.state);
     tui_log.push("mannd/logs/tui.log");
 
     setup_logging(tui_log, max_log_level, Some(uid))?;

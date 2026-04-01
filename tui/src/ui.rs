@@ -1,12 +1,11 @@
-use mannd::{context, error::ManndError, wireless::wpa_supplicant::WpaInterface};
+use mannd::{config::ThemePalette, context, error::ManndError};
 use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, BorderType, Borders},
 };
-use serde::{Deserialize, de::IntoDeserializer};
-use std::{borrow::Cow, path::PathBuf, sync::OnceLock};
+use std::{path::PathBuf, sync::OnceLock};
 use tracing::instrument;
 
 use crate::{
@@ -15,7 +14,7 @@ use crate::{
         popup_prompt::PopupPrompt, wifi_menu::Connection, wireguard_ui::VpnMenu,
         wpa_interface_ui::WpaInterfaceUi,
     },
-    state::{AppContext, PromptState, UiState, View, networkd::NetworkdState},
+    state::{AppContext, PromptState, UiState, View},
 };
 
 /// Theme global state, used to bypass needing to
@@ -35,34 +34,39 @@ impl Theme {
     #[instrument(err)]
     pub fn new() -> Result<(), ManndError> {
         let config = &context().settings;
+        let selected = &config.theme.selected;
 
-        let theme = config
-            .sections
-            .get("theme")
-            .ok_or_else(|| ManndError::SectionNotFound("theme".to_string()))?;
+        let palette = config
+            .theme
+            .palettes
+            .get(selected.as_str())
+            .ok_or_else(|| ManndError::SectionNotFound(selected.clone()))?;
 
-        let selected_theme = theme
-            .get("selected")
-            .ok_or_else(|| ManndError::PropertyNotFound("selected".to_string()))?;
+        let theme = Theme::try_from(palette)?;
 
-        let theme_name = format!("theme.{selected_theme}");
-
-        let selected_theme_section = config
-            .sections
-            .get(theme_name.as_str())
-            .ok_or_else(|| ManndError::SectionNotFound(theme_name))?;
-
-        let hash = IntoDeserializer::<serde::de::value::Error>::into_deserializer(
-            selected_theme_section.clone(),
-        );
-        let theme = Theme::deserialize(hash)?;
-
-        if let Ok(()) = THEME.set(theme) {
-            Ok(())
-        } else {
-            tracing::info!("Theme has already been initalised.");
-            Ok(())
+        if THEME.set(theme).is_err() {
+            tracing::info!("Theme has already been initialised");
         }
+        Ok(())
+    }
+}
+
+impl TryFrom<&ThemePalette> for Theme {
+    type Error = ManndError;
+    fn try_from(value: &ThemePalette) -> Result<Self, Self::Error> {
+        Ok(Theme {
+            background: ThemeRgb::try_from(value.background.as_str())?,
+            foreground: ThemeRgb::try_from(value.foreground.as_str())?,
+            muted: ThemeRgb::try_from(value.muted.as_str())?,
+            error: ThemeRgb::try_from(value.error.as_str())?,
+            warning: ThemeRgb::try_from(value.warning.as_str())?,
+            success: ThemeRgb::try_from(value.success.as_str())?,
+            info: ThemeRgb::try_from(value.info.as_str())?,
+            primary: ThemeRgb::try_from(value.primary.as_str())?,
+            secondary: ThemeRgb::try_from(value.secondary.as_str())?,
+            tertiary: ThemeRgb::try_from(value.tertiary.as_str())?,
+            accent: ThemeRgb::try_from(value.accent.as_str())?,
+        })
     }
 }
 
@@ -177,15 +181,14 @@ impl UiContext {
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(try_from = "Cow<'_, str>")]
+#[derive(Debug)]
 pub struct ThemeRgb {
     red: u8,
     green: u8,
     blue: u8,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 pub struct Theme {
     pub background: ThemeRgb,
     pub foreground: ThemeRgb,
@@ -210,14 +213,13 @@ impl<'a> From<&'a ThemeRgb> for Color {
 /// part of the conversion encounters an error it will return 0
 /// for that part.
 // ignore # in theme color
-impl<'a> TryFrom<Cow<'_, str>> for ThemeRgb {
+impl TryFrom<&str> for ThemeRgb {
     type Error = ManndError;
-
-    fn try_from(value: Cow<'_, str>) -> Result<Self, Self::Error> {
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
         Ok(ThemeRgb {
-            red: u8::from_str_radix(&value[1..=2], 16).map_err(ManndError::ParseInt)?,
-            green: u8::from_str_radix(&value[3..=4], 16).map_err(ManndError::ParseInt)?,
-            blue: u8::from_str_radix(&value[5..=6], 16).map_err(ManndError::ParseInt)?,
+            red: u8::from_str_radix(&value[1..=2], 16)?,
+            green: u8::from_str_radix(&value[3..=4], 16)?,
+            blue: u8::from_str_radix(&value[5..=6], 16)?,
         })
     }
 }

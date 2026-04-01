@@ -48,14 +48,14 @@ use std::{
 };
 
 use crate::{
+    config::AppConfig,
     error::ManndError,
-    ini_parse::IniConfig,
     store::{ApplicationState, ManndStore},
 };
 
+pub mod config;
 pub mod controller;
 pub mod error;
-pub mod ini_parse;
 pub mod netlink;
 pub mod state;
 pub mod store;
@@ -70,7 +70,7 @@ pub struct GlobalContext {
     pub uid: Option<u32>,
     pub home: PathBuf,
     pub config_home: PathBuf,
-    pub settings: IniConfig,
+    pub settings: AppConfig,
 }
 
 pub struct GlobalState {
@@ -89,7 +89,7 @@ impl GlobalStateGuard {
         let home = home_path(uid)?;
         let config_home = home.join(".config/mannd");
         let settings_path = config_home.join("settings.conf");
-        let settings = IniConfig::new(settings_path, Some(&home))?;
+        let settings = AppConfig::load(settings_path, Some(&home))?;
 
         let ctx = GlobalContext {
             uid,
@@ -97,6 +97,7 @@ impl GlobalStateGuard {
             config_home,
             settings,
         };
+
         APP_CTX.set(ctx).map_err(|_| {
             ManndError::OperationFailed("Application context already initialized".into())
         })?;
