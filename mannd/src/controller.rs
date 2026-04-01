@@ -134,9 +134,9 @@ impl Controller {
     #[instrument(err, skip(self))]
     /// Updates the wireguad files in the state database
     pub fn update_wireguard_state(&self) -> Result<(Vec<String>, Vec<WgMeta>), ManndError> {
-        read_global(|state| state.db.write_wg_files());
+        read_global(|state| state.db.write_wg_files()).transpose()?;
         read_global(|state| state.db.ordered_wg_files()).ok_or(ManndError::OperationFailed(
-            "[Controller::db]: Ordered WireGuard files read".into(),
+            "Failed to get ordered WireGuard files".into(),
         ))?
     }
 

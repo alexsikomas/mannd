@@ -66,6 +66,7 @@ pub mod wireless;
 
 pub const UNIX_SOCK_PATH: &str = "/tmp/mannd.sock";
 
+#[derive(Debug)]
 pub struct GlobalContext {
     pub uid: Option<u32>,
     pub home: PathBuf,
@@ -73,36 +74,41 @@ pub struct GlobalContext {
     pub settings: AppConfig,
 }
 
+#[derive(Debug)]
 pub struct GlobalState {
     pub db: ManndStore,
     pub app: ApplicationState,
 }
 
 pub static APP_CTX: OnceLock<GlobalContext> = OnceLock::new();
+
+pub fn init_ctx(uid: Option<u32>) -> Result<(), ManndError> {
+    let home = home_path(uid)?;
+    let config_home = home.join(".config/mannd");
+    let settings_path = config_home.join("settings.conf");
+    let settings = AppConfig::load(settings_path, Some(&home))?;
+
+    let ctx = GlobalContext {
+        uid,
+        home,
+        config_home,
+        settings,
+    };
+
+    APP_CTX.set(ctx).map_err(|_| {
+        ManndError::OperationFailed("Application context already initialized".into())
+    })?;
+    Ok(())
+}
+
 static APP_STATE: RwLock<Option<GlobalState>> = RwLock::new(None);
 
 pub struct GlobalStateGuard;
 
 impl GlobalStateGuard {
     // As well as GlobalState inits a few oncelocks
-    pub fn init(uid: Option<u32>) -> Result<Self, ManndError> {
-        let home = home_path(uid)?;
-        let config_home = home.join(".config/mannd");
-        let settings_path = config_home.join("settings.conf");
-        let settings = AppConfig::load(settings_path, Some(&home))?;
-
-        let ctx = GlobalContext {
-            uid,
-            home,
-            config_home,
-            settings,
-        };
-
-        APP_CTX.set(ctx).map_err(|_| {
-            ManndError::OperationFailed("Application context already initialized".into())
-        })?;
-
-        let db = ManndStore::init(uid)?;
+    pub fn init() -> Result<Self, ManndError> {
+        let db = ManndStore::init()?;
         let app = db.read_app_state()?;
 
         *APP_STATE.write().unwrap() = Some(GlobalState { db, app });
