@@ -33,7 +33,7 @@ impl WgConfig {
                 continue;
             }
 
-            if line.starts_with('[') && line.starts_with(']') {
+            if line.starts_with('[') && line.ends_with(']') {
                 current = line[1..line.len() - 1].to_string();
                 sections.entry(current.clone()).or_default();
             } else if let Some((k, v)) = line.split_once('=') {

@@ -22,7 +22,7 @@ use mannd::{
     GlobalStateGuard, UNIX_SOCK_PATH, context,
     controller::WifiDaemonType,
     error::ManndError,
-    read_global,
+    init_ctx, read_global,
     state::{
         actor::NetworkActor,
         messages::{NetworkAction, NetworkState},
@@ -51,7 +51,8 @@ struct Args {
 #[instrument(err)]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    GlobalStateGuard::init(args.target_uid)?;
+    init_ctx(args.target_uid)?;
+    let _guard = GlobalStateGuard::init()?;
 
     // root check
     let euid = unsafe { libc::getuid() };
@@ -62,7 +63,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let max_log_level = Level::from_str(&settings.debug.max_log_level)?;
     let mut socket_log = PathBuf::from(&settings.storage.state);
-    socket_log.push("mannd/logs/socket.log");
+    socket_log.push("logs/socket.log");
     setup_logging(socket_log, max_log_level, args.target_uid)?;
 
     let guard = UnixSocketGuard::new(UNIX_SOCK_PATH).await?;

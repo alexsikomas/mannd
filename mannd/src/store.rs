@@ -46,16 +46,14 @@ pub struct ManndStore {
 
 impl ManndStore {
     #[instrument(err)]
-    pub fn init(uid: Option<u32>) -> Result<Self, ManndError> {
+    pub fn init() -> Result<Self, ManndError> {
         let settings = &context().settings;
         let mut home = PathBuf::from(&settings.storage.state);
         fs::create_dir_all(&home)?;
+        chown(&home, context().uid, None)?;
         home.push("mannd.redb");
         let database = Database::create(&home)?;
-
-        if uid.is_some() {
-            chown(&home, uid, None)?;
-        }
+        chown(&home, context().uid, None)?;
 
         Ok(ManndStore { database })
     }
@@ -139,8 +137,14 @@ impl ManndStore {
     /// uninitialised
     #[instrument(err, skip(self))]
     pub fn write_wg_files(&self) -> Result<(), ManndError> {
+        tracing::info!("INSIDE OF WRITE!");
         let mut files: HashMap<String, WgMeta, RandomState> = HashMap::default();
-        let dir = fs::read_dir(WG_DIR)?;
+        let dir = match fs::read_dir(WG_DIR) {
+            Ok(d) => d,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(ManndError::IoError(e)),
+        };
+
         for entry in dir {
             let entry = entry?;
             if entry.path().extension().is_some_and(|ext| ext == "conf") {
@@ -234,7 +238,11 @@ impl ManndStore {
         let mut meta: Vec<WgMeta> = vec![];
 
         let read = self.database.begin_read()?;
-        let table = read.open_table(WG_TABLE)?;
+        let table = match read.open_table(WG_TABLE) {
+            Ok(t) => t,
+            Err(TableError::TableDoesNotExist(_)) => return Ok((vec![], vec![])),
+            Err(e) => return Err(ManndError::RedbTable(e)),
+        };
 
         for item in table.iter()? {
             let (k, v) = item?;

@@ -68,6 +68,9 @@ pub fn setup_logging(
     if uid.is_some() {
         chown(parent, uid, None)?;
     }
+    if uid.is_some() {
+        chown(&path, uid, None)?;
+    }
     // else if in_root.is_some_and(|r| r) {
     //     fs::set_permissions(parent, fs::Permissions::from_mode(0o644))?;
     //     fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;

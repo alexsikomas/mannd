@@ -54,6 +54,8 @@ impl AppConfig {
             .map_err(|e| ManndError::InvalidPropertyFormat(e.to_string()))?;
         config.expand_vars(home)?;
 
+        config.storage.state.push_str("/mannd");
+
         Ok(config)
     }
 
