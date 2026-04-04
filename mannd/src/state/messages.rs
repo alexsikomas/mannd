@@ -43,6 +43,7 @@ pub enum WireguardAction {
 pub enum WpaAction {
     GetInterfaces,
     CreateInterface(String),
+    RemoveInterface(String),
     TogglePersist,
 }
 

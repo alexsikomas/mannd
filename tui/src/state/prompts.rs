@@ -164,6 +164,7 @@ pub struct WpaInterfacePrompt {
     pub interface_cursor: Cursor,
     pub on_choice: bool,
     pub persist: bool,
+    pub pending_remove: Option<String>,
 }
 
 impl Default for WpaInterfacePrompt {
@@ -172,50 +173,115 @@ impl Default for WpaInterfacePrompt {
             interface_cursor: Cursor::default(),
             on_choice: true,
             persist: false,
+            pending_remove: None,
         }
     }
 }
 
 impl Component for WpaInterfacePrompt {
     fn on_key(&mut self, key: &KeyAction, ctx: &AppContext) -> StateResult {
-        if let Some(ifaces) = &ctx.net_ctx.wpa_interfaces {
-            match key {
-                KeyAction::Enter => {
-                    if self.on_choice {
-                        self.persist = !self.persist;
-                        return StateResult::Command(StateCommand::NetworkAction(
-                            NetworkAction::Wpa(WpaAction::TogglePersist),
-                        ));
-                    } else if let Some(WpaInterface::Unmanaged(iface)) =
-                        ifaces.get(self.interface_cursor.index)
-                    {
-                        return StateResult::Command(StateCommand::NetworkAction(
-                            NetworkAction::Wpa(WpaAction::CreateInterface(iface.into())),
-                        ));
+        let Some(ifaces) = &ctx.net_ctx.wpa_interfaces else {
+            return StateResult::Consumed;
+        };
+
+        let ordered = WpaInterfacePrompt::ordered_iface_indicies(ifaces);
+
+        if ordered.is_empty() {
+            self.on_choice = true;
+            self.interface_cursor.index = 0;
+            self.pending_remove = None;
+        } else if self.interface_cursor.index >= ordered.len() {
+            self.interface_cursor.index = ordered.len() - 1;
+        }
+
+        match key {
+            KeyAction::Enter => {
+                if self.on_choice {
+                    self.pending_remove = None;
+                    self.persist = !self.persist;
+                    return StateResult::Command(StateCommand::NetworkAction(NetworkAction::Wpa(
+                        WpaAction::TogglePersist,
+                    )));
+                }
+
+                let Some(&real_idx) = ordered.get(self.interface_cursor.index) else {
+                    return StateResult::Consumed;
+                };
+
+                let Some(selected) = ifaces.get(real_idx) else {
+                    return StateResult::Consumed;
+                };
+
+                match selected {
+                    WpaInterface::Unmanaged(iface) => {
+                        self.pending_remove = None;
+                        StateResult::Command(StateCommand::NetworkAction(NetworkAction::Wpa(
+                            WpaAction::CreateInterface(iface.clone()),
+                        )))
+                    }
+                    WpaInterface::Managed(_) => {
+                        let name = selected.name().to_string();
+
+                        if self.pending_remove.as_deref() == Some(name.as_str()) {
+                            self.pending_remove = None;
+                            StateResult::Command(StateCommand::NetworkAction(NetworkAction::Wpa(
+                                WpaAction::RemoveInterface(name),
+                            )))
+                        } else {
+                            self.pending_remove = Some(name);
+                            StateResult::Consumed
+                        }
                     }
                 }
-                KeyAction::Up => {
-                    if self.on_choice && !ifaces.is_empty() {
-                        self.interface_cursor.index = ifaces.len() - 1;
+            }
+            // can't use generic cursor up down implmentation
+            KeyAction::Up => {
+                self.pending_remove = None;
+                if self.on_choice {
+                    if !ordered.is_empty() {
+                        self.interface_cursor.index = ordered.len() - 1;
                         self.on_choice = false;
-                    } else if self.interface_cursor.index == 0 {
-                        self.on_choice = true;
-                    } else {
-                        self.interface_cursor.prev(ifaces.len());
                     }
+                } else if self.interface_cursor.index == 0 {
+                    self.on_choice = true;
+                } else {
+                    self.interface_cursor.index -= 1;
                 }
-                KeyAction::Down => {
-                    if self.on_choice && !ifaces.is_empty() {
+                StateResult::Consumed
+            }
+            KeyAction::Down => {
+                self.pending_remove = None;
+                if self.on_choice {
+                    if !ordered.is_empty() {
                         self.interface_cursor.index = 0;
                         self.on_choice = false;
-                    } else {
-                        self.interface_cursor.next(ifaces.len());
                     }
+                } else if self.interface_cursor.index + 1 >= ordered.len() {
+                    self.on_choice = true;
+                } else {
+                    self.interface_cursor.index += 1;
                 }
-                _ => {}
+                StateResult::Consumed
+            }
+            _ => StateResult::Consumed,
+        }
+    }
+}
+
+impl WpaInterfacePrompt {
+    pub fn ordered_iface_indicies(ifaces: &[WpaInterface]) -> Vec<usize> {
+        let mut unmanaged = vec![];
+        let mut managed = vec![];
+
+        for (idx, iface) in ifaces.iter().enumerate() {
+            if iface.is_managed() {
+                managed.push(idx);
+            } else {
+                unmanaged.push(idx);
             }
         }
 
-        StateResult::Consumed
+        unmanaged.extend(managed);
+        unmanaged
     }
 }

@@ -761,6 +761,54 @@ impl WpaSupplicant {
         Ok(())
     }
 
+    #[instrument(err, skip(self))]
+    pub async fn remove_interface(&mut self, ifname: &str) -> Result<(), ManndError> {
+        if self.state.managed_interfaces.is_empty() {
+            return Err(ManndError::WpaRemoveEmpty);
+        }
+
+        let Some(interface) = self
+            .state
+            .managed_interfaces
+            .iter()
+            .find(|iface| iface.name == ifname)
+            .cloned()
+        else {
+            return Err(ManndError::WpaRemoveNotFound);
+        };
+
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            self.service.clone(),
+        )
+        .await?;
+
+        proxy
+            .call_noreply("RemoveInterface", &(interface.path.clone()))
+            .await?;
+
+        self.state
+            .managed_interfaces
+            .retain(|iface| iface.name != ifname);
+
+        let removed_active = self
+            .state
+            .active_interface
+            .as_ref()
+            .is_some_and(|iface| iface.name == ifname);
+
+        if removed_active {
+            let pref_name = self.config.interfaces.preferred_interface.clone();
+            self.state.active_interface = self.choose_active_interface(pref_name.as_deref(), None);
+        }
+
+        self.write_state()?;
+        Ok(())
+    }
+
+    #[instrument(err, skip(self))]
     fn write_state(&self) -> Result<(), ManndError> {
         read_global(|state| state.db.write_wpa_state(&self.state)).transpose()?;
         Ok(())
@@ -783,4 +831,17 @@ impl ManagedInterface {
 pub enum WpaInterface {
     Managed(ManagedInterface),
     Unmanaged(String),
+}
+
+impl WpaInterface {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Managed(interface) => &interface.name,
+            Self::Unmanaged(name) => name,
+        }
+    }
+
+    pub const fn is_managed(&self) -> bool {
+        matches!(self, Self::Managed(_))
+    }
 }
