@@ -19,25 +19,28 @@ use zbus::{
     Connection, Proxy,
     names::MemberName,
     proxy::SignalStream,
-    zvariant::{self, NoneValue, OwnedObjectPath, OwnedValue, Value},
+    zvariant::{self, OwnedObjectPath, OwnedValue, Value},
 };
 
 use crate::{
     context,
     error::ManndError,
+    read_global,
     state::signals::SignalUpdate,
     store::WpaState,
     utils::list_interfaces,
     wireless::{
         common::{AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy},
-        wpa_config::WpaConfig,
+        wpa_config::{ApplyScope, WpaAutoscan, WpaConfig},
     },
 };
 
 #[derive(Debug)]
 pub struct WpaSupplicant {
+    // persistant state
     config: WpaConfig,
     state: WpaState,
+
     service: String,
     path: String,
     conn: Connection,
@@ -67,10 +70,8 @@ impl WpaSupplicant {
     ) -> Result<Self, ManndError> {
         let service = String::from("fi.w1.wpa_supplicant1");
         let path = String::from("/fi/w1/wpa_supplicant1");
-        let proxy = Proxy::new(&conn, service.clone(), path.clone(), service.clone()).await?;
 
-        let config = WpaConfig::load_or_default()?;
-        let wpa = Self {
+        let mut wpa = Self {
             config,
             state,
             conn,
@@ -79,9 +80,8 @@ impl WpaSupplicant {
             persist: false,
         };
 
-        if let Some(iface) = &wpa.config.interfaces.preferred_interface {
-            let cur_ifaces = wpa.get_interfaces().await?;
-        }
+        wpa.sync_interface_state().await?;
+        wpa.apply_global_policy().await?;
 
         Ok(wpa)
     }
@@ -90,7 +90,7 @@ impl WpaSupplicant {
     pub async fn get_interfaces(&self) -> Result<Vec<WpaInterface>, ManndError> {
         let mut wpa_interfaces: Vec<WpaInterface> = vec![];
         // likely not needed
-        let mut phys_interfaces = list_interfaces();
+        let phys_interfaces = list_interfaces();
 
         let proxy = Proxy::new(
             &self.conn,
@@ -296,59 +296,149 @@ impl WpaSupplicant {
     }
 }
 
-// functions which need to read/write data
+// Helper functions
 impl WpaSupplicant {
-    #[instrument(err, skip(self))]
-    pub async fn create_interface(&mut self, ifname: &str) -> Result<(), ManndError> {
-        let mut body: HashMap<String, OwnedValue> = HashMap::new();
-        body.insert("Ifname".into(), Value::new(ifname).try_to_owned()?);
+    /// Initialises what it can from the last recorded state
+    async fn sync_interface_state(&mut self) -> Result<(), ManndError> {
+        let cur_ifaces = self.get_interfaces().await?;
+        let mut runtime_managed: Vec<ManagedInterface> = Vec::new();
+        let mut managed_now: HashMap<String, ManagedInterface> = HashMap::new();
+        let mut unmanaged_now: HashSet<String> = HashSet::new();
 
-        // call create interface
+        for iface in cur_ifaces {
+            match iface {
+                WpaInterface::Managed(mi) => {
+                    managed_now.insert(mi.name.clone(), mi);
+                }
+                WpaInterface::Unmanaged(name) => {
+                    unmanaged_now.insert(name);
+                }
+            }
+        }
+
+        for ifname in self.state.desidred_interfaces.clone() {
+            if let Some(mi) = managed_now.get(&ifname) {
+                runtime_managed.push(mi.clone());
+                continue;
+            }
+
+            if unmanaged_now.contains(&ifname) {
+                let created = self.create_interface_runtime(&ifname).await?;
+                runtime_managed.push(created);
+            }
+        }
+
+        for (_name, mi) in managed_now {
+            if !runtime_managed.iter().any(|x| x.name == mi.name) {
+                runtime_managed.push(mi);
+            }
+        }
+
+        self.state.managed_interfaces = runtime_managed;
+
+        let pref_name = self.config.interfaces.preferred_interface.clone();
+        let active_name = self.state.active_interface.as_ref().map(|m| m.name.clone());
+
+        self.state.active_interface =
+            self.choose_active_interface(pref_name.as_deref(), active_name.as_deref());
+
+        self.write_state()?;
+        Ok(())
+    }
+
+    /// Chooses pref if available, if not then prev if available if not
+    /// then first managed interface nearby.
+    fn choose_active_interface(
+        &self,
+        pref: Option<&str>,
+        prev: Option<&str>,
+    ) -> Option<ManagedInterface> {
+        if let Some(name) = pref {
+            if let Some(mi) = self
+                .state
+                .managed_interfaces
+                .iter()
+                .find(|m| m.name == name)
+            {
+                return Some(mi.clone());
+            }
+        }
+
+        if let Some(name) = prev {
+            if let Some(mi) = self
+                .state
+                .managed_interfaces
+                .iter()
+                .find(|m| m.name == name)
+            {
+                return Some(mi.clone());
+            }
+        }
+
+        self.state.managed_interfaces.first().cloned()
+    }
+
+    #[instrument(err, skip(self))]
+    async fn apply_global_policy(&self) -> Result<(), ManndError> {
+        let policy = &self.config.policy;
+
+        let managed: Vec<ManagedInterface> = self
+            .get_interfaces()
+            .await?
+            .into_iter()
+            .filter_map(|iface| match iface {
+                WpaInterface::Managed(m) => Some(m),
+                WpaInterface::Unmanaged(_) => None,
+            })
+            .collect();
+
+        let targets: Vec<ManagedInterface> = match &policy.apply_scope {
+            ApplyScope::AllInterfaces => managed,
+            ApplyScope::Interfaces(names) => managed
+                .into_iter()
+                .filter(|m| names.iter().any(|n| n == &m.name))
+                .collect(),
+        };
+
+        for iface in targets {
+            self.apply_global_policy_interface(&iface).await?;
+        }
+        Ok(())
+    }
+
+    async fn apply_global_policy_interface(
+        &self,
+        iface: &ManagedInterface,
+    ) -> Result<(), ManndError> {
+        let policy = &self.config.policy;
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            self.path.clone(),
-            self.service.clone(),
+            iface.path.clone(),
+            "fi.w1.wpa_supplicant1.Interface",
         )
         .await?;
 
-        if self.persist {
-            // let config_location = WpaSupplicant::interface_config_file(ifname)?;
-            // if let Some(parent) = config_location.parent() {
-            //     fs::create_dir_all(parent)?;
-            //     chown(parent, context().uid, None)?;
-            // }
-            //
-            // OpenOptions::new()
-            //     .write(true)
-            //     .create(true)
-            //     .truncate(false)
-            //     .open(&config_location)?;
-            // chown(&config_location, context().uid, None)?;
-            // let conf_str = config_location
-            //     .into_os_string()
-            //     .into_string()
-            //     .map_err(|_| ManndError::OperationFailed("Converting to string".into()))?;
-            //
-            // body.insert("ConfigFile".into(), Value::new(conf_str).try_to_owned()?);
+        if let Some(country) = &policy.country {
+            proxy.set_property("Country", country.clone()).await?
         }
 
-        let interface_path: OwnedObjectPath = proxy.call("CreateInterface", &body).await?;
-        self.state.active_interface = Some(ManagedInterface::new(ifname.into(), interface_path));
+        proxy.set_property("FastReauth", policy.fast_reauth).await?;
 
-        Ok(())
-    }
-}
+        if let Some(scan_interval) = policy.scan_interval_sec {
+            let interval_i32 = i32::try_from(scan_interval)?;
+            proxy.set_property("ScanInterval", interval_i32).await?;
+        }
 
-// Helper functions
-impl WpaSupplicant {
-    #[instrument(err, skip(self))]
-    async fn apply_global_policy(&self) -> Result<(), ManndError> {
-        if let Some(interface) = &self.state.active_interface {
-            if interface.path == OwnedObjectPath::null_value() {
-                return Ok(());
+        let autoscan_type = match &policy.autoscan {
+            WpaAutoscan::Disabled => String::new(),
+            WpaAutoscan::Exponential { base, limit } => {
+                format!("exponential:{base}:{limit}")
             }
-        }
+            WpaAutoscan::Periodic { interval } => format!("periodic:{interval}"),
+        };
+        proxy.call_noreply("AutoScan", &autoscan_type).await?;
+
         Ok(())
     }
 
@@ -629,9 +719,55 @@ impl WpaSupplicant {
         home.push(format!("mannd/wpa/{ifname}.conf"));
         Ok(home)
     }
+
+    async fn create_interface_runtime(&self, ifname: &str) -> Result<ManagedInterface, ManndError> {
+        let mut body: HashMap<String, OwnedValue> = HashMap::new();
+        body.insert("Ifname".into(), Value::from(ifname).try_to_owned()?);
+
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            self.service.clone(),
+        )
+        .await?;
+
+        let interface_path: OwnedObjectPath = proxy.call("CreateInterface", &body).await?;
+        Ok(ManagedInterface::new(ifname.into(), interface_path))
+    }
+
+    #[instrument(err, skip(self))]
+    pub async fn create_interface(&mut self, ifname: &str) -> Result<(), ManndError> {
+        let interface = self.create_interface_runtime(ifname).await?;
+        // find matching existing interface and reassign
+        if let Some(existing) = self
+            .state
+            .managed_interfaces
+            .iter_mut()
+            .find(|m| m.name == interface.name)
+        {
+            *existing = interface.clone();
+        } else {
+            self.state.managed_interfaces.push(interface.clone());
+        }
+
+        if self.persist && !self.state.desidred_interfaces.iter().any(|n| n == ifname) {
+            self.state.desidred_interfaces.push(ifname.to_string());
+        }
+
+        self.state.active_interface = Some(interface);
+        self.write_state()?;
+
+        Ok(())
+    }
+
+    fn write_state(&self) -> Result<(), ManndError> {
+        read_global(|state| state.db.write_wpa_state(&self.state)).transpose()?;
+        Ok(())
+    }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ManagedInterface {
     name: String,
     path: OwnedObjectPath,

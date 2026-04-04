@@ -76,15 +76,19 @@ impl Controller {
     pub async fn connect_wifi_adapter(&mut self) {
         let mut opt = is_service_active(&self.connection, "iwd").await;
         if opt.is_some_and(|v| v) {
-            let _ = self.connect_iwd().await;
-            info!("Wi-Fi Daemon Connected: iwd");
+            match self.connect_iwd().await {
+                Ok(()) => info!("Wi-Fi Daemon Connected: iwd"),
+                Err(e) => tracing::error!("Failed to init iwd: {e}"),
+            }
             return;
         }
 
         opt = is_service_active(&self.connection, "wpa_supplicant").await;
         if opt.is_some_and(|v| v) {
-            let _ = self.connect_wpa().await;
-            info!("Wi-Fi Daemon Connected: wpa_supplicant");
+            match self.connect_wpa().await {
+                Ok(()) => info!("Wi-Fi Daemon Connected: wpa_supplicant"),
+                Err(e) => tracing::error!("Failed to init wpa_supplicant: {e}"),
+            }
             return;
         }
 

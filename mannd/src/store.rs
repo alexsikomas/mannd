@@ -92,24 +92,20 @@ impl Default for ApplicationState {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct WpaState {
-    // while running this is the active
-    // from startup this is the last used
-    pub active_interface: Option<ManagedInterface>,
+    /// Interfaces that were historically connected to but may
+    /// not be present anymore
+    #[serde(default)]
+    pub desidred_interfaces: Vec<String>,
+    /// Interfaces that you can trust to be present
+    #[serde(default)]
     pub managed_interfaces: Vec<ManagedInterface>,
+    #[serde(default)]
+    pub active_interface: Option<ManagedInterface>,
     // for per-interface configurations
+    #[serde(default)]
     pub interface_configurations: HashMap<String, WpaPolicy, RandomState>,
-}
-
-impl Default for WpaState {
-    fn default() -> Self {
-        Self {
-            active_interface: None,
-            managed_interfaces: vec![],
-            interface_configurations: HashMap::default(),
-        }
-    }
 }
 
 /// Application State
