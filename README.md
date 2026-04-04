@@ -5,6 +5,16 @@
 <i>Human-written software</i>
 </div>
 
+<div align="center">
+  <video src="https://github.com/user-attachments/assets/2a8d3059-9cba-4b90-ab49-3ee5744f6e75" 
+         autoplay 
+         loop 
+         muted 
+         playsinline 
+         style="max-width: 100%; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+  </video>
+</div>
+
 ## Why mannd?
 `mannd` is an unopinionated manager for various networking daemons. This means if all you want is a cleaner interface for connecting to Wi-Fi networks with either `iwd` or `wpa_supplicant` you can do that.
 
