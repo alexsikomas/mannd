@@ -1,4 +1,9 @@
-use std::{fs, io::ErrorKind, path::PathBuf};
+use std::{
+    fs::{self, OpenOptions},
+    io::ErrorKind,
+    os::unix::fs::chown,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -29,17 +34,43 @@ impl Default for WpaConfig {
 impl WpaConfig {
     pub fn load_or_default() -> Result<Self, ManndError> {
         let path = WpaConfig::path();
-        let raw = match fs::read_to_string(path) {
+        let uid = context().uid;
+
+        let raw = match fs::read_to_string(&path) {
             Ok(s) => s,
-            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Self::default()),
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                // likely already initialised but doesn't hurt to add
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)?;
+                    chown(parent, uid, None)?;
+                }
+                Self::write_default(&path)?;
+                chown(&path, context().uid, None)?;
+                return Ok(Self::default());
+            }
             Err(e) => return Err(ManndError::IoError(e)),
         };
+
+        if raw.trim().is_empty() {
+            Self::write_default(&path)?;
+            chown(&path, uid, None)?;
+            return Ok(Self::default());
+        }
 
         let config: Self =
             ron::from_str(&raw).map_err(|e| ManndError::InvalidPropertyFormat(e.to_string()))?;
 
         config.validate()?;
         Ok(config)
+    }
+
+    fn write_default(path: &Path) -> Result<(), ManndError> {
+        let default_conf = Self::default();
+        let serial = ron::to_string(&default_conf)
+            .map_err(|e| ManndError::InvalidPropertyFormat(e.to_string()))?;
+
+        fs::write(path, serial)?;
+        Ok(())
     }
 
     fn path() -> PathBuf {
