@@ -1,3 +1,5 @@
+use std::fmt::format;
+
 use mannd::wireless::wpa_supplicant::WpaInterface;
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
@@ -52,13 +54,23 @@ impl Widget for WpaInterfaceUi<'_> {
         border_block.render(areas.outer, buf);
 
         // info
-        let info_text = "Selecting an interface either adds it to your wpa_supplicant configuration temporarily or permanently (will work after a reboot). For permanent changes enable persisting changes.";
-        let info = Paragraph::new(info_text)
-            .style(theme.accent.color())
-            .alignment(ratatui::layout::Alignment::Center)
-            .wrap(Wrap { trim: true });
+        let info_text = if let Some(iface) = &self.info.pending_remove {
+            format!(
+                "Warning: press Enter again to remove managed interface '{iface}'. Move selection to cancel."
+            )
+        } else {
+            "Select unmanaged interfaces to add them. Select managed interfaces and press Enter twice to remove them. Toggle persistant state above.".to_string()
+        };
 
-        info.render(areas.info, buf);
+        Paragraph::new(info_text)
+            .style(Style::new().fg(if self.info.pending_remove.is_some() {
+                theme.warning.color()
+            } else {
+                theme.accent.color()
+            }))
+            .alignment(ratatui::layout::Alignment::Center)
+            .wrap(Wrap { trim: true })
+            .render(areas.info, buf);
 
         // choice
         let choice_text = "Apply and persist changes?";
@@ -92,41 +104,92 @@ impl Widget for WpaInterfaceUi<'_> {
             }))
             .render(cols[2], buf);
 
-        let layouts = Layout::vertical(
-            self.ifaces
-                .iter()
-                .map(|_| Constraint::Length(1))
-                .collect::<Vec<_>>(),
-        )
-        .split(
-            Layout::horizontal([Constraint::Percentage(70)])
-                .flex(Flex::Center)
-                .split(areas.list)[0],
-        );
+        let mut unmanaged: Vec<(usize, &str)> = vec![];
+        let mut managed: Vec<(usize, &str)> = vec![];
 
-        // interfaces
-        for (i, iface) in self.ifaces.iter().enumerate() {
-            // for now skip later be able to manage it
-            match iface {
-                WpaInterface::Unmanaged(name) => {
-                    let mut iface_text = Line::from(name.clone());
-
-                    if i == self.info.interface_cursor.index && !self.info.on_choice {
-                        iface_text.style = Style::new()
-                            .bg(theme.secondary.color())
-                            .fg(theme.background.color())
-                            .bold();
-                    } else {
-                        iface_text.style = Style::new()
-                            .bg(theme.background.color())
-                            .fg(theme.foreground.color());
-                    }
-
-                    iface_text.render(layouts[i], buf);
-                }
-                WpaInterface::Managed(_) => {}
+        for (idx, iface) in self.ifaces.iter().enumerate() {
+            if iface.is_managed() {
+                managed.push((idx, iface.name()));
+            } else {
+                unmanaged.push((idx, iface.name()));
             }
         }
+
+        let ordered = WpaInterfacePrompt::ordered_iface_indicies(self.ifaces);
+        let selected_idx = if self.info.on_choice {
+            None
+        } else {
+            ordered.get(self.info.interface_cursor.index).copied()
+        };
+
+        let mut lines: Vec<Line> = vec![];
+
+        lines.push(
+            Line::from(" Unmanaged ").style(
+                Style::new()
+                    .fg(theme.info.color())
+                    .add_modifier(Modifier::BOLD),
+            ),
+        );
+
+        if unmanaged.is_empty() {
+            lines.push(Line::from(" (none) ").style(Style::new().fg(theme.muted.color())));
+        } else {
+            for (idx, name) in unmanaged {
+                let mut line = Line::from(format!(" {name} "));
+                if selected_idx == Some(idx) {
+                    line.style = Style::new()
+                        .bg(theme.secondary.color())
+                        .fg(theme.background.color())
+                        .add_modifier(Modifier::BOLD);
+                } else {
+                    line.style = Style::new().fg(theme.foreground.color());
+                }
+                lines.push(line);
+            }
+        }
+
+        lines.push(Line::from(""));
+
+        lines.push(
+            Line::from(" Managed ").style(
+                Style::new()
+                    .fg(theme.info.color())
+                    .add_modifier(Modifier::BOLD),
+            ),
+        );
+
+        if managed.is_empty() {
+            lines.push(Line::from(" (none) ").style(Style::new().fg(theme.muted.color())));
+        } else {
+            for (idx, name) in managed {
+                let mut label = format!(" {name} ");
+                if self.info.pending_remove.as_deref() == Some(name) {
+                    label.push_str(" [press Enter again to remove]");
+                }
+
+                let mut line = Line::from(label);
+                if selected_idx == Some(idx) {
+                    line.style = Style::new()
+                        .bg(theme.secondary.color())
+                        .fg(theme.background.color())
+                        .add_modifier(Modifier::BOLD);
+                } else if self.info.pending_remove.as_deref() == Some(name) {
+                    line.style = Style::new().fg(theme.warning.color());
+                } else {
+                    line.style = Style::new().fg(theme.foreground.color());
+                }
+
+                lines.push(line);
+            }
+        }
+
+        Paragraph::new(lines).wrap(Wrap { trim: false }).render(
+            Layout::horizontal([Constraint::Percentage(80)])
+                .flex(Flex::Center)
+                .split(areas.list)[0],
+            buf,
+        );
     }
 }
 

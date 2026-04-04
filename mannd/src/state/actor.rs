@@ -223,6 +223,7 @@ impl<'a> NetworkActor<'a> {
         action: &WpaAction,
         state_send: &mut Vec<NetworkState>,
     ) -> Result<(), ManndError> {
+        let mut should_refresh_ifaces = false;
         match action {
             WpaAction::GetInterfaces => {
                 if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
@@ -233,6 +234,13 @@ impl<'a> NetworkActor<'a> {
             WpaAction::CreateInterface(ifname) => {
                 if let Some(WirelessAdapter::Wpa(wpa)) = self.controller.wifi.as_mut() {
                     wpa.create_interface(ifname).await?;
+                    should_refresh_ifaces = true;
+                }
+            }
+            WpaAction::RemoveInterface(ifname) => {
+                if let Some(WirelessAdapter::Wpa(wpa)) = self.controller.wifi.as_mut() {
+                    wpa.remove_interface(ifname).await?;
+                    should_refresh_ifaces = true;
                 }
             }
             WpaAction::TogglePersist => {
@@ -240,6 +248,11 @@ impl<'a> NetworkActor<'a> {
                     wpa.toggle_persist();
                 }
             }
+        }
+
+        if should_refresh_ifaces && let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
+            let interfaces = wpa.get_interfaces().await?;
+            state_send.push(NetworkState::SetWpaInterfaces(interfaces));
         }
         Ok(())
     }
