@@ -3,13 +3,11 @@
 //! State persistence for mannd.
 //!
 //! ## Tables
-//! The store currently has the one table:
-//! [`APPLICATION_TABLE`] and [`WG_TABLE`]
+//! The store currently has the following tables:
+//! [`APPLICATION_TABLE`], [`WG_TABLE`], [`WPA_TABLE`]
 //!
-//! [`APPLICATION_TABLE`] is used for storing... application s last
-//! time `mannd` was run the VPN, this table can be used to restore
-//! that state without relying on inconsistent netlink queries.tate.
-//! It ensures continity between sessions. For example, if the
+//! [`APPLICATION_TABLE`] is used for storing the application's
+//! last state, ensures continity between sessions.
 //!
 //! [`WG_TABLE`] stores metadata for wireguard configuration files.
 //! It caches data found in [`WG_DIR`], i.e. files ending in .conf
@@ -31,13 +29,25 @@
 use ahash::RandomState;
 use postcard::{from_bytes, to_allocvec};
 use redb::{
-    Database, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition, TableError,
+    Database, ReadOnlyTable, ReadTransaction, ReadableDatabase, ReadableTable,
+    ReadableTableMetadata, TableDefinition, TableError,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, os::unix::fs::chown, path::PathBuf};
 use tracing::instrument;
+use zbus::zvariant::OwnedObjectPath;
 
-use crate::{context, error::ManndError};
+use crate::{
+    context,
+    error::ManndError,
+    wireless::{
+        wpa_config::{MacRandomization, WpaPolicy},
+        wpa_supplicant::ManagedInterface,
+    },
+};
+
+const APP_STATE_KEY: &str = "app_state";
+const WPA_STATE_KEY: &str = "wpa_state";
 
 #[derive(Debug)]
 pub struct ManndStore {
@@ -64,7 +74,6 @@ impl ManndStore {
 }
 
 const APPLICATION_TABLE: TableDefinition<String, &[u8]> = TableDefinition::new("app_state_table");
-const APP_STATE_KEY: &str = "application_state";
 
 /// All state here is taken from the last
 /// time the app was run
@@ -83,37 +92,41 @@ impl Default for ApplicationState {
     }
 }
 
-const WG_TABLE: TableDefinition<String, &[u8]> = TableDefinition::new("wg_table");
-pub const WG_DIR: &str = "/etc/wireguard/";
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WpaState {
+    // while running this is the active
+    // from startup this is the last used
+    pub active_interface: Option<ManagedInterface>,
+    pub managed_interfaces: Vec<ManagedInterface>,
+    // for per-interface configurations
+    pub interface_configurations: HashMap<String, WpaPolicy, RandomState>,
+}
 
-// since last_used is the first item derive eq
-// to compare by time
-#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct WgMeta {
-    // unix timestamp if 0 not used
-    pub last_used: u64,
-    // ISO 3166-1 alpha-2
-    pub country: [u8; 2],
+impl Default for WpaState {
+    fn default() -> Self {
+        Self {
+            active_interface: None,
+            managed_interfaces: vec![],
+            interface_configurations: HashMap::default(),
+        }
+    }
 }
 
 /// Application State
 impl ManndStore {
     // returns default app state if table hasn't been made
     #[instrument(err, skip(self))]
-    pub fn read_app_state(&self) -> Result<ApplicationState, ManndError> {
+    pub fn get_app_state(&self) -> Result<ApplicationState, ManndError> {
         let read = self.database.begin_read()?;
-        match read.open_table(APPLICATION_TABLE) {
-            Ok(table) => {
-                // count is inclusive
-                if let Some(data) = table.get(APP_STATE_KEY.to_string())? {
-                    let app_state: ApplicationState = from_bytes(data.value())?;
-                    Ok(app_state)
-                } else {
-                    Ok(ApplicationState::default())
-                }
-            }
-            Err(TableError::TableDoesNotExist(_)) => Ok(ApplicationState::default()),
-            Err(e) => Err(ManndError::RedbTable(e)),
+        let Some(table) = read.open_table_opt(APPLICATION_TABLE)? else {
+            return Ok(ApplicationState::default());
+        };
+
+        if let Some(data) = table.get(APP_STATE_KEY.to_string())? {
+            let app_state: ApplicationState = from_bytes(data.value())?;
+            Ok(app_state)
+        } else {
+            Ok(ApplicationState::default())
         }
     }
 
@@ -128,6 +141,45 @@ impl ManndStore {
         write.commit()?;
         Ok(())
     }
+
+    pub fn get_wpa_state(&self) -> Result<WpaState, ManndError> {
+        let read = self.database.begin_read()?;
+
+        let Some(table) = read.open_table_opt(APPLICATION_TABLE)? else {
+            return Ok(WpaState::default());
+        };
+
+        if let Some(data) = table.get(WPA_STATE_KEY.to_string())? {
+            let wpa_state: WpaState = from_bytes(data.value())?;
+            Ok(wpa_state)
+        } else {
+            Ok(WpaState::default())
+        }
+    }
+
+    pub fn write_wpa_state(&self, state: &WpaState) -> Result<(), ManndError> {
+        let write = self.database.begin_write()?;
+        {
+            let mut table = write.open_table(APPLICATION_TABLE)?;
+            let data = to_allocvec(&state)?;
+            table.insert(WPA_STATE_KEY.to_string(), data.as_slice())?;
+        }
+        write.commit()?;
+        Ok(())
+    }
+}
+
+const WG_TABLE: TableDefinition<String, &[u8]> = TableDefinition::new("wg_table");
+pub const WG_DIR: &str = "/etc/wireguard/";
+
+// since last_used is the first item derive eq
+// to compare by time
+#[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct WgMeta {
+    // unix timestamp if 0 not used
+    pub last_used: u64,
+    // ISO 3166-1 alpha-2
+    pub country: [u8; 2],
 }
 
 /// Wiregard store
@@ -137,7 +189,6 @@ impl ManndStore {
     /// uninitialised
     #[instrument(err, skip(self))]
     pub fn write_wg_files(&self) -> Result<(), ManndError> {
-        tracing::info!("INSIDE OF WRITE!");
         let mut files: HashMap<String, WgMeta, RandomState> = HashMap::default();
         let dir = match fs::read_dir(WG_DIR) {
             Ok(d) => d,
@@ -168,19 +219,9 @@ impl ManndStore {
             }
         }
 
-        let db_data = match self.read_wg_data() {
-            Ok(data) => Some(data),
-            Err(ManndError::RedbTable(TableError::TableDoesNotExist(ref name))) => {
-                if name == "wg_table" {
-                    // if wg_table doesn't exist then
-                    // no data written which isn't an error
-                    None
-                } else {
-                    return Err(ManndError::RedbTable(TableError::TableDoesNotExist(
-                        name.clone(),
-                    )));
-                }
-            }
+        let db_data = match self.get_wg_data() {
+            Ok(Some(data)) => Some(data),
+            Ok(None) => None,
             Err(e) => {
                 return Err(e);
             }
@@ -218,10 +259,13 @@ impl ManndStore {
     }
 
     #[instrument(err, skip(self))]
-    fn read_wg_data(&self) -> Result<HashMap<String, WgMeta, RandomState>, ManndError> {
+    fn get_wg_data(&self) -> Result<Option<HashMap<String, WgMeta, RandomState>>, ManndError> {
         let read = self.database.begin_read()?;
 
-        let table = read.open_table(WG_TABLE)?;
+        let Some(table) = read.open_table_opt(WG_TABLE)? else {
+            return Ok(None);
+        };
+
         let mut data: HashMap<String, WgMeta, RandomState> =
             HashMap::with_capacity_and_hasher(usize::try_from(table.len()?)?, RandomState::new());
 
@@ -229,7 +273,7 @@ impl ManndStore {
             let (k, v) = item?;
             data.insert(k.value(), from_bytes(v.value())?);
         }
-        Ok(data)
+        Ok(Some(data))
     }
 
     #[instrument(err, skip(self))]
@@ -255,5 +299,126 @@ impl ManndStore {
         zipped.sort_by(|(n1, m1), (n2, m2)| n1.cmp(n2).then(m2.cmp(m1)));
 
         Ok(zipped.into_iter().unzip())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SavedNetwork {
+    pub ssid: String,
+    pub hidden: bool,
+    pub bssid: Option<String>,
+    pub bssid_blacklist: Vec<String>,
+
+    pub security: WpaSecurity,
+    pub priority: u32,
+    pub autoconnect: bool,
+
+    pub mac_randomization: Option<MacRandomization>,
+    pub pmf: Option<PmfMode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PmfMode {
+    Disabled, // pmf=0
+    Optional, // pmf=1 (WPA2)
+    Required, // pmf=2 (WPA3)
+}
+
+// Eap later
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WpaSecurity {
+    Open,
+    Owe,
+    Wpa2 {
+        passphrase: String,
+    },
+    Wpa2Hex {
+        psk_hex: String,
+    },
+    Wpa3Sae {
+        password: String,
+        pwe: Option<SaePwe>,
+    },
+    Wpa3Transition {
+        password: String,
+    },
+}
+
+impl WpaSecurity {
+    pub fn key_string(&self) -> &'static str {
+        match self {
+            WpaSecurity::Open => "open",
+            WpaSecurity::Owe => "owe",
+            WpaSecurity::Wpa2 { .. } | WpaSecurity::Wpa2Hex { .. } => "wpa2",
+            WpaSecurity::Wpa3Sae { .. } | WpaSecurity::Wpa3Transition { .. } => "wpa3",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SaePwe {
+    HuntAndPeck,   // sae_pwe=0    older
+    HashToElement, // sae_pwe=1
+    Both,          // sae_pwe=2    wpa_supplicant default
+}
+
+const WPA_TABLE: TableDefinition<(&str, &str), &[u8]> = TableDefinition::new("wpa_table");
+
+// wpa table
+impl ManndStore {
+    pub fn get_all_wpa_networks(&self) -> Result<Vec<SavedNetwork>, ManndError> {
+        let read = self.database.begin_read()?;
+
+        let Some(table) = read.open_table_opt(WPA_TABLE)? else {
+            return Ok(vec![]);
+        };
+
+        let mut networks = Vec::new();
+        for result in table.iter()? {
+            let (_key_guard, val_guard) = result?;
+            let network: SavedNetwork = from_bytes(val_guard.value()).unwrap();
+            networks.push(network);
+        }
+
+        Ok(networks)
+    }
+
+    pub fn write_wpa_network(&self, network: SavedNetwork) -> Result<(), ManndError> {
+        let write = self.database.begin_write()?;
+        {
+            let mut table = write.open_table(WPA_TABLE)?;
+            let key = (network.ssid.as_str(), network.security.key_string());
+            let bytes = to_allocvec(&network)?;
+            table.insert(key, bytes.as_slice())?;
+        }
+        write.commit()?;
+        Ok(())
+    }
+}
+
+pub trait ReadTransactionExt {
+    fn open_table_opt<'a, K, V>(
+        &'a self,
+        table: TableDefinition<'_, K, V>,
+    ) -> Result<Option<ReadOnlyTable<K, V>>, TableError>
+    where
+        K: redb::Key + 'static,
+        V: redb::Value + 'static;
+}
+
+impl ReadTransactionExt for ReadTransaction {
+    fn open_table_opt<'a, K, V>(
+        &'a self,
+        table: TableDefinition<'_, K, V>,
+    ) -> Result<Option<ReadOnlyTable<K, V>>, TableError>
+    where
+        K: redb::Key + 'static,
+        V: redb::Value + 'static,
+    {
+        match self.open_table(table) {
+            Ok(table) => Ok(Some(table)),
+            Err(TableError::TableDoesNotExist(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }

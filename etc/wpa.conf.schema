@@ -1,0 +1,78 @@
+// ============================
+// wpa_supplicant configuration
+// ============================
+//
+// This file is for reference only! Do not copy it into your wpa configuration, it will not work.
+//
+// However, feel free to copy sections, this file shows how WPA state is managed and what settings
+// can be applied to the .conf file. This is typically managed through the configuration section
+// within the mannd TUI however in case anything goes wrong you can edit the file yourself. Just make
+// a copy first.
+(
+    ui: {
+        show_hidden_networks: false,
+        sort_networks_by: SignalStrength                // SignalStrength, NameAsc, NameDesc
+    },
+    policy: {
+        apply_scope: AllInterfaces,                     // AllInterfaces, Interfaces(["wlan0", "wlan1"])
+        country: Some("GB"),
+        band_type: Some(Restrict5GHz),                  // OFF | Some(Prefer5GHz | Restrict5GHz | Prefer2GHz | Restrict2GHz)
+        allow_freq_mhz: [5180, 5200, ...],              // If populated band_type ignored
+        scan_interval_sec: Some(5),
+        autoscan: Exponential(base: 5, limit: 300),     // Exponential(base: x, limit: y), Periodic(interval: x), Disabled
+        fast_reauth: true,
+        mac_randomization: Always                       // Always, Never, PeerNetwork
+    },
+    interfaces: {
+        preferred_interface: Some("interface"),         // Each startup we try to connect to this interface first, if present
+    },
+)
+
+// ----------------------------------------------------------------------------------------------------------------------------
+// ========
+// Networks
+// ========
+//
+// Networks aren't actually stored in the configuration file or in RON this is just demonstration
+// for what the internal state looks like inside of the database (mannd.redb).
+//
+// =================================================
+// DO NOT COPY THIS INTO THE WPA CONFIGURATION FILE!
+// =================================================
+(
+    networks: [
+        {
+            ssid: "YOUR-SSID",
+            hidden: false,
+            bssid: None,
+            priority: 10,                                   // Higher number = higher priority
+            autoconnect: true,
+            security: Wpa2(passphrase: "..."),              // Credential options: Open, Wpa2(passphrase: "..."), Wpa2Hex(psk_hex: "..."),
+                                                            // Wpa3Sae(password: "...", pwe: Some(Both)), Wpa3Transition(password: "...")
+                                                            // SaePwe: HuntAndPeck, HashToElement, Both
+
+            mac_randomization: default                      // Use policy
+            pmf: Optional,                                  // Disabled, Optional, Required
+        },
+        // Future EAP scheme
+        {
+            ssid: "eduroam",
+            hidden: false,
+            bssid: None,
+            priority: 15,
+            autoconnect: true,
+            security: Enterprise(
+                eap_method: Peap,
+                identity: "me@uni.edu",
+                anonymous_identity: Some("anon@uni.edu")
+                password: Some("secure_enough"),
+                phase2: Some("auth=MSCHAPV2"),
+                ca_cert: Some("/etc/ssl/certs/..."),
+                client_cert: None,                          // For EAP-TLS
+                domain_suffix_match: Some("radius.uni.edu")
+            ),
+            mac_randomization: default,
+            pmf: Required,
+        }
+    ]
+)

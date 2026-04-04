@@ -5,11 +5,9 @@
 //! When getting networks after a scan there can be duplicate SSIDs because `wpa_supplicant` shows the different possible freqs.
 
 use std::{
-    collections::{HashMap, HashSet, btree_map::Entry},
+    collections::{HashMap, HashSet},
     fmt::Debug,
-    fs::{self, File, OpenOptions},
-    os::unix::fs::chown,
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -25,42 +23,26 @@ use zbus::{
 };
 
 use crate::{
-    APP_CTX, context,
+    context,
     error::ManndError,
     state::signals::SignalUpdate,
+    store::WpaState,
     utils::list_interfaces,
-    wireless::common::{
-        AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy,
+    wireless::{
+        common::{AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy},
+        wpa_config::WpaConfig,
     },
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct WpaSupplicant {
+    config: WpaConfig,
+    state: WpaState,
     service: String,
     path: String,
     conn: Connection,
-    // only one interface dealing with Wi-Fi
-    // at a time
-    active_interface: OwnedObjectPath,
-    // if false won't edit .service files
-    // BUG: persist is defined in two
-    // places (here and app_ctx), should be
-    // in sync but find better way to do this
+    // this resets each time
     persist: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum WpaInterface {
-    Managed(String),
-    Unmanaged(String),
-}
-
-impl<'a> From<&'a WpaInterface> for String {
-    fn from(value: &'a WpaInterface) -> Self {
-        match value {
-            WpaInterface::Managed(v) | WpaInterface::Unmanaged(v) => v.clone(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -78,34 +60,37 @@ pub struct WpaBss {
 // Public functions
 impl WpaSupplicant {
     #[instrument(err, skip(conn))]
-    pub async fn new(conn: Connection) -> Result<Self, ManndError> {
+    pub async fn new(
+        config: WpaConfig,
+        state: WpaState,
+        conn: Connection,
+    ) -> Result<Self, ManndError> {
         let service = String::from("fi.w1.wpa_supplicant1");
         let path = String::from("/fi/w1/wpa_supplicant1");
         let proxy = Proxy::new(&conn, service.clone(), path.clone(), service.clone()).await?;
 
-        let mut active_interfaces =
-            get_prop_from_proxy::<Vec<OwnedObjectPath>>(&proxy, "Interfaces").await?;
-        let active_interface: OwnedObjectPath = if active_interfaces.is_empty() {
-            OwnedObjectPath::null_value()
-        } else {
-            active_interfaces.swap_remove(0)
-        };
-
-        Ok(Self {
+        let config = WpaConfig::load_or_default()?;
+        let wpa = Self {
+            config,
+            state,
             conn,
             service,
             path,
-            active_interface,
             persist: false,
-        })
+        };
+
+        if let Some(iface) = &wpa.config.interfaces.preferred_interface {
+            let cur_ifaces = wpa.get_interfaces().await?;
+        }
+
+        Ok(wpa)
     }
 
     #[instrument(err, skip(self))]
     pub async fn get_interfaces(&self) -> Result<Vec<WpaInterface>, ManndError> {
-        let mut res: Vec<WpaInterface> = vec![];
-        let mut wpa_interfaces: Vec<String> = vec![];
-        let mut interfaces = list_interfaces();
-        // read list from wpa ifaces and see if ifnames match
+        let mut wpa_interfaces: Vec<WpaInterface> = vec![];
+        // likely not needed
+        let mut phys_interfaces = list_interfaces();
 
         let proxy = Proxy::new(
             &self.conn,
@@ -115,26 +100,30 @@ impl WpaSupplicant {
         )
         .await?;
 
-        let iface_paths: Vec<OwnedObjectPath> = get_prop_from_proxy(&proxy, "Interfaces").await?;
-        for path in iface_paths {
-            let path_proxy = Proxy::new(
-                &self.conn,
-                self.service.clone(),
-                path,
-                "fi.w1.wpa_supplicant1.Interface",
-            )
-            .await?;
-            let ifname: String = get_prop_from_proxy(&path_proxy, "Ifname").await?;
-            res.push(WpaInterface::Managed(ifname.clone()));
-            wpa_interfaces.push(ifname);
+        let mut iface_paths: Vec<OwnedObjectPath> =
+            get_prop_from_proxy(&proxy, "Interfaces").await?;
+        for phy in phys_interfaces {
+            if iface_paths.is_empty() {
+                wpa_interfaces.push(WpaInterface::Unmanaged(phy));
+            } else {
+                if let Some(path) = &iface_paths.pop() {
+                    let path_proxy = Proxy::new(
+                        &self.conn,
+                        self.service.clone(),
+                        path,
+                        "fi.w1.wpa_supplicant1.Interface",
+                    )
+                    .await?;
+                    let ifname: String = get_prop_from_proxy(&path_proxy, "Ifname").await?;
+                    wpa_interfaces.push(WpaInterface::Managed(ManagedInterface::new(
+                        ifname,
+                        path.clone(),
+                    )));
+                }
+            }
         }
-        interfaces.retain(|v| !wpa_interfaces.contains(v));
 
-        for v in &interfaces {
-            res.push(WpaInterface::Unmanaged(v.clone()));
-        }
-
-        Ok(res)
+        Ok(wpa_interfaces)
     }
 
     #[instrument(err, skip(self))]
@@ -143,12 +132,15 @@ impl WpaSupplicant {
         if !(8..=63).contains(&psk_len) && psk_len != 0 {
             return Err(ManndError::PasswordLength);
         }
-        // let networks = self.networks.get(&ssid).unwrap();
+
+        let Some(interface) = &self.state.active_interface else {
+            return Err(ManndError::WpaNoInterfaces);
+        };
 
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            self.active_interface.clone(),
+            interface.path.clone(),
             "fi.w1.wpa_supplicant1.Interface",
         )
         .await?;
@@ -161,6 +153,7 @@ impl WpaSupplicant {
             body.insert("psk".into(), Value::new(psk).try_to_owned()?);
         }
 
+        body.insert("freq_list".into(), Value::new("5180 5200 5220 5240 5260 5280 5300 5320 5500 5520 5540 5560 5580 5600 5620 5640 5660 5680 5700 5720 5745 5765 5785 5805 5825").try_to_owned()?);
         let network_path = self
             .call_interface_method::<_, OwnedObjectPath>("AddNetwork", body)
             .await?;
@@ -341,7 +334,7 @@ impl WpaSupplicant {
         }
 
         let interface_path: OwnedObjectPath = proxy.call("CreateInterface", &body).await?;
-        self.active_interface = interface_path;
+        self.state.active_interface = Some(ManagedInterface::new(ifname.into(), interface_path));
 
         Ok(())
     }
@@ -349,6 +342,16 @@ impl WpaSupplicant {
 
 // Helper functions
 impl WpaSupplicant {
+    #[instrument(err, skip(self))]
+    async fn apply_global_policy(&self) -> Result<(), ManndError> {
+        if let Some(interface) = &self.state.active_interface {
+            if interface.path == OwnedObjectPath::null_value() {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
     #[instrument(err, skip(self))]
     async fn call_interface_method<T, U>(
         &self,
@@ -359,10 +362,14 @@ impl WpaSupplicant {
         T: serde::ser::Serialize + zvariant::DynamicType + Debug + Send + Sync,
         U: for<'a> zvariant::DynamicDeserialize<'a>,
     {
+        let Some(interface) = &self.state.active_interface else {
+            return Err(ManndError::WpaNoInterfaces);
+        };
+
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            self.active_interface.clone(),
+            interface.path.clone(),
             "fi.w1.wpa_supplicant1.Interface",
         )
         .await?;
@@ -379,10 +386,14 @@ impl WpaSupplicant {
     where
         T: serde::ser::Serialize + zvariant::DynamicType + Debug + Send + Sync,
     {
+        let Some(interface) = &self.state.active_interface else {
+            return Err(ManndError::WpaNoInterfaces);
+        };
+
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            self.active_interface.clone(),
+            interface.path.clone(),
             "fi.w1.wpa_supplicant1.Interface",
         )
         .await?;
@@ -487,10 +498,14 @@ impl WpaSupplicant {
         T: TryFrom<Value<'a>>,
         <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
     {
+        let Some(interface) = &self.state.active_interface else {
+            return Err(ManndError::WpaNoInterfaces);
+        };
+
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            self.active_interface.clone(),
+            interface.path.clone(),
             "fi.w1.wpa_supplicant1.Interface",
         )
         .await?;
@@ -506,10 +521,14 @@ impl WpaSupplicant {
         M: TryInto<MemberName<'a>> + Debug,
         M::Error: Into<zbus::Error>,
     {
+        let Some(interface) = &self.state.active_interface else {
+            return Err(ManndError::WpaNoInterfaces);
+        };
+
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            self.active_interface.clone(),
+            interface.path.clone(),
             "fi.w1.wpa_supplicant1.Interface",
         )
         .await?;
@@ -612,18 +631,20 @@ impl WpaSupplicant {
     }
 }
 
-#[cfg(wpa_installed)]
-mod tests {
-    use super::*;
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ManagedInterface {
+    name: String,
+    path: OwnedObjectPath,
+}
 
-    #[tokio::test]
-    #[instrument(err)]
-    async fn test_wpa_scan() -> Result<(), ManndError> {
-        let conn = Connection::system().await.unwrap();
-        let mut wpa = WpaSupplicant::new(conn).await?;
-        let _ = wpa.get_interface_prop::<Vec<u8>>("MACAddress").await?;
-        wpa.get_all_networks().await?;
-
-        Ok(())
+impl ManagedInterface {
+    fn new(name: String, path: OwnedObjectPath) -> Self {
+        Self { name, path }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum WpaInterface {
+    Managed(ManagedInterface),
+    Unmanaged(String),
 }

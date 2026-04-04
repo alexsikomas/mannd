@@ -107,25 +107,25 @@ impl Widget for WpaInterfaceUi<'_> {
         // interfaces
         for (i, iface) in self.ifaces.iter().enumerate() {
             // for now skip later be able to manage it
-            if let WpaInterface::Managed(_) = iface {
-                continue;
+            match iface {
+                WpaInterface::Unmanaged(name) => {
+                    let mut iface_text = Line::from(name.clone());
+
+                    if i == self.info.interface_cursor.index && !self.info.on_choice {
+                        iface_text.style = Style::new()
+                            .bg(theme.secondary.color())
+                            .fg(theme.background.color())
+                            .bold();
+                    } else {
+                        iface_text.style = Style::new()
+                            .bg(theme.background.color())
+                            .fg(theme.foreground.color());
+                    }
+
+                    iface_text.render(layouts[i], buf);
+                }
+                WpaInterface::Managed(_) => {}
             }
-
-            let iface_string: String = iface.into();
-            let mut iface_text = Line::from(iface_string);
-
-            if i == self.info.interface_cursor.index && !self.info.on_choice {
-                iface_text.style = Style::new()
-                    .bg(theme.secondary.color())
-                    .fg(theme.background.color())
-                    .bold();
-            } else {
-                iface_text.style = Style::new()
-                    .bg(theme.background.color())
-                    .fg(theme.foreground.color());
-            }
-
-            iface_text.render(layouts[i], buf);
         }
     }
 }
