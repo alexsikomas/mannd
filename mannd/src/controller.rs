@@ -24,13 +24,14 @@ use crate::{
         messages::{ApConnectInfo, Credentials},
         signals::SignalUpdate,
     },
-    store::{ApplicationState, ManndStore, WgMeta},
+    store::{ApplicationState, ManndStore, WgMeta, WpaState},
     systemd::systemctl::is_service_active,
     wireguard::network::Wireguard,
     wireless::{
         agent::{AgentState, IwdAgent},
         common::{AccessPoint, Security},
         iwd::Iwd,
+        wpa_config::WpaConfig,
         wpa_supplicant::WpaSupplicant,
     },
 };
@@ -113,7 +114,12 @@ impl Controller {
 
     #[instrument(err, skip(self))]
     async fn connect_wpa(&mut self) -> Result<(), ManndError> {
-        let wpa = WpaSupplicant::new(self.connection.clone()).await?;
+        let wpa_state = read_global(|state| state.db.get_wpa_state())
+            .transpose()?
+            .unwrap_or(WpaState::default());
+
+        let config = WpaConfig::load_or_default()?;
+        let wpa = WpaSupplicant::new(config, wpa_state, self.connection.clone()).await?;
         self.wifi = Some(WirelessAdapter::Wpa(wpa));
         Ok(())
     }

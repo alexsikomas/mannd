@@ -44,7 +44,7 @@
 use std::{
     ffi::CStr,
     path::PathBuf,
-    sync::{LazyLock, Mutex, OnceLock, RwLock},
+    sync::{OnceLock, RwLock},
 };
 
 use crate::{
@@ -109,7 +109,7 @@ impl GlobalStateGuard {
     // As well as GlobalState inits a few oncelocks
     pub fn init() -> Result<Self, ManndError> {
         let db = ManndStore::init()?;
-        let app = db.read_app_state()?;
+        let app = db.get_app_state()?;
 
         *APP_STATE.write().unwrap() = Some(GlobalState { db, app });
 

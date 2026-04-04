@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
+use zbus::zvariant::OwnedObjectPath;
 
 use crate::{
     controller::WifiDaemonType,

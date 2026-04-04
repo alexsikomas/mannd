@@ -1,6 +1,6 @@
 use mannd::{
     state::messages::{ApConnectInfoBuilder, Credentials, NetworkAction, WifiAction, WpaAction},
-    wireless::common::Security,
+    wireless::{common::Security, wpa_supplicant::WpaInterface},
 };
 
 use crate::{
@@ -186,7 +186,9 @@ impl Component for WpaInterfacePrompt {
                         return StateResult::Command(StateCommand::NetworkAction(
                             NetworkAction::Wpa(WpaAction::TogglePersist),
                         ));
-                    } else if let Some(iface) = ifaces.get(self.interface_cursor.index) {
+                    } else if let Some(WpaInterface::Unmanaged(iface)) =
+                        ifaces.get(self.interface_cursor.index)
+                    {
                         return StateResult::Command(StateCommand::NetworkAction(
                             NetworkAction::Wpa(WpaAction::CreateInterface(iface.into())),
                         ));
