@@ -1,15 +1,11 @@
+use crate::{context, error::ManndError};
+use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, OpenOptions},
+    fs::{self},
     io::ErrorKind,
     os::unix::fs::chown,
     path::{Path, PathBuf},
 };
-
-use serde::{Deserialize, Serialize};
-
-use crate::{context, error::ManndError};
-
-const WPA_CONFIG_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WpaConfig {
@@ -101,8 +97,8 @@ impl WpaConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WpaUi {
-    show_hidden_networks: bool,
-    sort_networks_by: WpaUiSort,
+    pub show_hidden_networks: bool,
+    pub sort_networks_by: WpaUiSort,
 }
 
 impl Default for WpaUi {

@@ -20,8 +20,8 @@ use mannd::{
     state::messages::{
         Capability, Failure, NetworkAction, NetworkState, Process, Started, Success,
     },
-    store::WgMeta,
-    wireless::{common::AccessPoint, wpa_supplicant::WpaInterface},
+    store::{NetworkInfo, WgMeta},
+    wireless::wpa_supplicant::WpaInterface,
 };
 use tokio::{
     net::{
@@ -96,7 +96,10 @@ impl App {
 
             tokio::select! {
                 Some(msg) = sock_rx.recv() => {
-                    writer.send(msg.into()).await.map_err(|_| ManndError::SocketWrite)?;
+                    if writer.send(msg.into()).await.is_err() {
+                        state.should_quit = true;
+                        let _ = ui.process_commands([StateCommand::Prompt(PromptState::Info(InfoPrompt::new("Lost connection to backend socket.".to_string(), PopupType::Error)))], &state.caps);
+                    }
                 }
                 Some(frame_res) = reader.next() => {
                     let mut frame = frame_res?;
@@ -120,10 +123,7 @@ impl App {
         }
 
         let exit_msg = to_stdvec_cobs(&NetworkAction::Exit)?;
-        writer
-            .send(exit_msg.into())
-            .await
-            .map_err(|_| ManndError::SocketWrite)?;
+        let _ = writer.send(exit_msg.into()).await;
 
         crossterm::execute!(std::io::stdout(), DisableBracketedPaste)?;
         ratatui::restore();
@@ -217,6 +217,7 @@ fn handle_start(_state: &mut AppState, ui: &mut UiState, started: Started) -> Op
         Started(Process::WifiScan) => Some(StateCommand::Prompt(PromptState::Info(
             InfoPrompt::new("Scanning...".to_string(), PopupType::General),
         ))),
+        _ => None,
     }
 }
 
@@ -231,7 +232,6 @@ fn handle_success(
             return Some(StateCommand::ClearPrompts);
         }
     }
-    None
 }
 
 fn handle_failure(
@@ -251,6 +251,13 @@ fn handle_failure(
             failed.reason,
             PopupType::Error,
         )))),
+        Process::Generic => {
+            ui.should_block = false;
+            Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
+                failed.reason,
+                PopupType::Error,
+            ))))
+        }
     }
 }
 
@@ -282,7 +289,7 @@ pub enum AppAction {
 }
 
 pub struct NetworkContext {
-    pub networks: Vec<AccessPoint>,
+    pub networks: Vec<NetworkInfo>,
     pub wpa_interfaces: Option<Vec<WpaInterface>>,
     pub wg_ctx: WireguardContext,
     pub netd_files: Vec<String>,

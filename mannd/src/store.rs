@@ -27,6 +27,7 @@
 //! to impact the TUI and how long it takes to display the entires.
 
 use ahash::RandomState;
+use derive_builder::Builder;
 use postcard::{from_bytes, to_allocvec};
 use redb::{
     Database, ReadOnlyTable, ReadTransaction, ReadableDatabase, ReadableTable,
@@ -35,13 +36,13 @@ use redb::{
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, os::unix::fs::chown, path::PathBuf};
 use tracing::instrument;
-use zbus::zvariant::OwnedObjectPath;
 
 use crate::{
     context,
     error::ManndError,
     wireless::{
-        wpa_config::{MacRandomization, WpaPolicy},
+        common::NetworkFlags,
+        wpa_config::{BandType, MacRandomization, WpaPolicy},
         wpa_supplicant::ManagedInterface,
     },
 };
@@ -80,14 +81,15 @@ const APPLICATION_TABLE: TableDefinition<String, &[u8]> = TableDefinition::new("
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApplicationState {
     pub wg_running: bool,
-    pub managed_interfaces: Vec<String>,
+    #[serde(default)]
+    pub networks: Vec<NetworkInfo>,
 }
 
 impl Default for ApplicationState {
     fn default() -> Self {
         Self {
             wg_running: false,
-            managed_interfaces: vec![],
+            networks: vec![],
         }
     }
 }
@@ -97,15 +99,17 @@ pub struct WpaState {
     /// Interfaces that were historically connected to but may
     /// not be present anymore
     #[serde(default)]
-    pub desidred_interfaces: Vec<String>,
+    pub desired_interfaces: Vec<String>,
     /// Interfaces that you can trust to be present
     #[serde(default)]
     pub managed_interfaces: Vec<ManagedInterface>,
     #[serde(default)]
     pub active_interface: Option<ManagedInterface>,
-    // for per-interface configurations
-    #[serde(default)]
-    pub interface_configurations: HashMap<String, WpaPolicy, RandomState>,
+    // I've decided against having per-interface, possibly
+    // if I find myself needing it or it's requested it may
+    // be added
+    // #[serde(default)]
+    // pub interface_configurations: HashMap<String, WpaPolicy, RandomState>,
 }
 
 /// Application State
@@ -119,8 +123,7 @@ impl ManndStore {
         };
 
         if let Some(data) = table.get(APP_STATE_KEY.to_string())? {
-            let app_state: ApplicationState = from_bytes(data.value())?;
-            Ok(app_state)
+            Ok(from_bytes(data.value())?)
         } else {
             Ok(ApplicationState::default())
         }
@@ -146,8 +149,7 @@ impl ManndStore {
         };
 
         if let Some(data) = table.get(WPA_STATE_KEY.to_string())? {
-            let wpa_state: WpaState = from_bytes(data.value())?;
-            Ok(wpa_state)
+            Ok(from_bytes(data.value())?)
         } else {
             Ok(WpaState::default())
         }
@@ -298,19 +300,50 @@ impl ManndStore {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SavedNetwork {
+#[derive(Builder, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NetworkInfo {
     pub ssid: String,
+    #[builder(default = "false")]
     pub hidden: bool,
-    pub bssid: Option<String>,
-    pub bssid_blacklist: Vec<String>,
+    pub security: NetworkSecurity,
 
-    pub security: WpaSecurity,
-    pub priority: u32,
+    #[builder(default = "true")]
     pub autoconnect: bool,
+    #[builder(default = "0")]
+    pub priority: i32,
+    #[builder(default = "None")]
+    pub bssid: Option<String>,
+    #[builder(default = "vec![]")]
+    pub bssid_blacklist: Vec<String>,
+    #[builder(default = "None")]
+    pub signal_dbm: Option<i16>,
 
+    #[builder(default = "None")]
     pub mac_randomization: Option<MacRandomization>,
+    #[builder(default = "None")]
     pub pmf: Option<PmfMode>,
+    #[builder(default = "None")]
+    pub wpa_policy_override: Option<WpaNetworkPolicyOverride>,
+    #[builder(default = "NetworkFlags::empty()")]
+    pub flags: NetworkFlags,
+}
+
+#[derive(Builder, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WpaNetworkPolicyOverride {
+    #[builder(default = "vec![]")]
+    pub allow_freq_mhz: Vec<u32>,
+    #[builder(default = "vec![]")]
+    pub scan_freq_mhz: Vec<u32>,
+    #[builder(default = "None")]
+    pub band_type: Option<BandType>,
+
+    #[builder(default = "None")]
+    pub pmf: Option<PmfMode>,
+    #[builder(default = "None")]
+    pub sae_pwe: Option<SaePwe>,
+
+    #[builder(default = "None")]
+    pub mac_randomization: Option<MacRandomization>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -322,7 +355,7 @@ pub enum PmfMode {
 
 // Eap later
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum WpaSecurity {
+pub enum NetworkSecurity {
     Open,
     Owe,
     Wpa2 {
@@ -340,13 +373,13 @@ pub enum WpaSecurity {
     },
 }
 
-impl WpaSecurity {
+impl NetworkSecurity {
     pub fn key_string(&self) -> &'static str {
         match self {
-            WpaSecurity::Open => "open",
-            WpaSecurity::Owe => "owe",
-            WpaSecurity::Wpa2 { .. } | WpaSecurity::Wpa2Hex { .. } => "wpa2",
-            WpaSecurity::Wpa3Sae { .. } | WpaSecurity::Wpa3Transition { .. } => "wpa3",
+            Self::Open => "open",
+            Self::Owe => "owe",
+            Self::Wpa2 { .. } | Self::Wpa2Hex { .. } => "wpa2",
+            Self::Wpa3Sae { .. } | Self::Wpa3Transition { .. } => "wpa3",
         }
     }
 }
@@ -356,40 +389,6 @@ pub enum SaePwe {
     HuntAndPeck,   // sae_pwe=0    older
     HashToElement, // sae_pwe=1
     Both,          // sae_pwe=2    wpa_supplicant default
-}
-
-const WPA_TABLE: TableDefinition<(&str, &str), &[u8]> = TableDefinition::new("wpa_table");
-
-// wpa table
-impl ManndStore {
-    pub fn get_all_wpa_networks(&self) -> Result<Vec<SavedNetwork>, ManndError> {
-        let read = self.database.begin_read()?;
-
-        let Some(table) = read.open_table_opt(WPA_TABLE)? else {
-            return Ok(vec![]);
-        };
-
-        let mut networks = Vec::new();
-        for result in table.iter()? {
-            let (_key_guard, val_guard) = result?;
-            let network: SavedNetwork = from_bytes(val_guard.value()).unwrap();
-            networks.push(network);
-        }
-
-        Ok(networks)
-    }
-
-    pub fn write_wpa_network(&self, network: SavedNetwork) -> Result<(), ManndError> {
-        let write = self.database.begin_write()?;
-        {
-            let mut table = write.open_table(WPA_TABLE)?;
-            let key = (network.ssid.as_str(), network.security.key_string());
-            let bytes = to_allocvec(&network)?;
-            table.insert(key, bytes.as_slice())?;
-        }
-        write.commit()?;
-        Ok(())
-    }
 }
 
 pub trait ReadTransactionExt {

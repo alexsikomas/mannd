@@ -1,6 +1,7 @@
 use mannd::{
-    state::messages::{ApConnectInfoBuilder, Credentials, NetworkAction, WifiAction, WpaAction},
-    wireless::{common::Security, wpa_supplicant::WpaInterface},
+    state::messages::{NetworkAction, WifiAction, WpaAction},
+    store::{NetworkInfo, NetworkSecurity},
+    wireless::wpa_supplicant::WpaInterface,
 };
 
 use crate::{
@@ -42,16 +43,16 @@ impl PskPromptSelect {
 
 #[derive(Debug)]
 pub struct PskConnectionPrompt {
-    pub ssid: String,
+    pub network: NetworkInfo,
     pub password: String,
     pub select: SelectableList<PskPromptSelect>,
     pub show_password: bool,
 }
 
 impl PskConnectionPrompt {
-    pub fn new(ssid: String) -> Self {
+    pub fn new(network: NetworkInfo) -> Self {
         Self {
-            ssid,
+            network,
             password: String::new(),
             select: SelectableList::new(PskPromptSelect::as_vec()),
             show_password: false,
@@ -95,14 +96,25 @@ impl Component for PskConnectionPrompt {
             }
             KeyAction::Enter => match selected {
                 PskPromptSelect::Connect => {
-                    let ap_info = ApConnectInfoBuilder::default()
-                        .ssid(self.ssid.clone())
-                        .credentials(Credentials::Password(self.password.clone()))
-                        .security(Security::Psk)
-                        .build()
-                        .unwrap();
+                    let mut network = self.network.clone();
+                    match &mut network.security {
+                        NetworkSecurity::Wpa2 { passphrase } => {
+                            *passphrase = self.password.clone();
+                        }
+                        NetworkSecurity::Wpa2Hex { psk_hex } => {
+                            *psk_hex = self.password.clone();
+                        }
+                        NetworkSecurity::Wpa3Sae { password, .. } => {
+                            *password = self.password.clone();
+                        }
+                        NetworkSecurity::Wpa3Transition { password } => {
+                            *password = self.password.clone();
+                        }
+                        _ => {}
+                    }
+
                     return StateResult::Command(StateCommand::NetworkAction(NetworkAction::Wifi(
-                        WifiAction::Connect(ap_info),
+                        WifiAction::Connect(network),
                     )));
                 }
                 PskPromptSelect::Back => {

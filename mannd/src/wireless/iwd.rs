@@ -1,7 +1,5 @@
-use std::{
-    fmt::{Debug, Write},
-    sync::Arc,
-};
+// Dbus api: https://git.kernel.org/pub/scm/network/wireless/iwd.git/tree/doc
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use tokio::sync::{RwLock, mpsc::Sender};
 
 use tracing::{info, instrument};
@@ -13,11 +11,13 @@ use zbus::{
 
 use crate::{
     error::ManndError,
+    modify_global, read_global,
     state::signals::SignalUpdate,
+    store::{NetworkInfo, NetworkInfoBuilder, NetworkSecurity},
     utils::ssid_to_hex,
     wireless::{
         agent::AgentState,
-        common::{AccessPoint, AccessPointBuilder, NetworkFlags, Security, get_prop_from_proxy},
+        common::{NetworkFlags, get_prop_from_proxy},
     },
 };
 
@@ -54,61 +54,98 @@ impl Iwd {
         }
     }
 
-    /// Connects to a network provided an SSID and passphrase.
-    ///
-    /// Since iwd doesn't allow connecting via BSSID the connection band is determined by signal
-    /// strength internally by iwd, tweakable in iwd config
-    #[instrument(err, skip(self))]
-    pub async fn connect_network_psk(&self, ssid: &str, psk: &str) -> Result<(), ManndError> {
-        match self.agent_state.try_write() {
-            Ok(mut writer) => {
-                writer.password = Some(psk.to_string());
-            }
-            Err(e) => {
-                tracing::error!("Error trying to get lock on writer. {e}");
+    pub async fn sync_networks(&mut self) -> Result<Vec<NetworkInfo>, ManndError> {
+        let stored = read_global(|state| state.app.networks.clone()).unwrap_or_default();
+        let mut by_ssid: HashMap<String, NetworkInfo> =
+            stored.into_iter().map(|n| (n.ssid.clone(), n)).collect();
+
+        for net in by_ssid.values_mut() {
+            net.flags
+                .remove(NetworkFlags::NEARBY | NetworkFlags::CONNECTED | NetworkFlags::KNOWN);
+            net.signal_dbm = None;
+        }
+
+        let station = self.get_interface_proxy("Station").await?;
+        let nearby: Vec<(OwnedObjectPath, i16)> = station.call("GetOrderedNetworks", &()).await?;
+
+        for (path, signal_strength) in nearby {
+            if let Ok(ap) = self.get_ap_info(path, Some(signal_strength)).await {
+                by_ssid
+                    .entry(ap.ssid.clone())
+                    .and_modify(|n| {
+                        n.flags.insert(ap.flags);
+                        n.security = ap.security.clone();
+                        n.signal_dbm = match (n.signal_dbm, ap.signal_dbm) {
+                            (Some(cur), Some(new)) => Some(cur.max(new)),
+                            (Some(cur), None) => Some(cur),
+                            (None, Some(new)) => Some(new),
+                            (None, None) => None,
+                        };
+                    })
+                    .or_insert(ap);
+            };
+        }
+
+        let obj_proxy = ObjectManagerProxy::new(&self.conn, self.service.clone(), "/").await?;
+        for (_path, interfaces) in obj_proxy.get_managed_objects().await? {
+            let Some(props) = interfaces.get("net.connman.iwd.KnownNetwork") else {
+                continue;
+            };
+
+            let ssid = props
+                .get("Name")
+                .and_then(|v| v.downcast_ref::<&str>().ok())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+
+            let sec_str = props
+                .get("Type")
+                .and_then(|v| v.downcast_ref::<&str>().ok())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+
+            if !ssid.is_empty() {
+                by_ssid
+                    .entry(ssid.clone())
+                    .and_modify(|n| n.flags.insert(NetworkFlags::KNOWN))
+                    .or_insert_with(|| {
+                        NetworkInfoBuilder::default()
+                            .ssid(ssid)
+                            .security(Self::iwd_type_to_security(&sec_str))
+                            .flags(NetworkFlags::KNOWN)
+                            .build()
+                            .expect("NetworkInfo builder shouldn't fail")
+                    });
             }
         }
 
-        let security = if psk.is_empty() {
-            Security::Open
-        } else {
-            Security::Psk
-        };
-
-        let proxy = Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            format!("{}/{}_{}", self.path.clone(), ssid_to_hex(&ssid), security),
-            "net.connman.iwd.Network",
-        )
-        .await?;
-
-        info!("Attempting to connect.");
-        let resp: Result<(), zbus::Error> = proxy.call("Connect", &()).await;
-        match resp {
-            Ok(()) => {
-                info!("Connected to the network without recieving an error.");
-                Ok(())
-            }
-            Err(e) => {
-                tracing::error!("Error occured: {e}");
-                Err(ManndError::OperationFailed(format!("{e}")))
-            }
-        }
+        let networks: Vec<NetworkInfo> = by_ssid.into_values().collect();
+        modify_global(|state| state.app.networks = networks.clone());
+        Ok(networks)
     }
 
     #[instrument(err, skip(self))]
-    pub async fn connect_known(&self, ssid: &str, security: &Security) -> Result<(), ManndError> {
+    pub async fn connect_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
+        let password = match &network.security {
+            NetworkSecurity::Wpa2 { passphrase } => Some(passphrase.clone()),
+            NetworkSecurity::Wpa3Sae { password, .. } => Some(password.clone()),
+            NetworkSecurity::Wpa3Transition { password } => Some(password.clone()),
+            _ => None,
+        };
+
+        if let Some(pass) = password {
+            if let Ok(mut writer) = self.agent_state.try_write() {
+                writer.password = Some(pass);
+            }
+        }
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            format!("{}/{}_{}", self.path.clone(), ssid_to_hex(&ssid), security),
+            self.network_path(network),
             "net.connman.iwd.Network",
         )
         .await?;
-
-        let _: Result<(), zbus::Error> = proxy.call("Connect", &()).await;
-
+        proxy.call_noreply("Connect", &()).await?;
         Ok(())
     }
 
@@ -132,28 +169,29 @@ impl Iwd {
 
     /// Removes a network from the configured networks
     #[instrument(err, skip(self))]
-    pub async fn remove_network(&self, ssid: &str, security: &Security) -> Result<(), ManndError> {
-        info!("/net/connman/iwd/{}_{}", ssid_to_hex(&ssid), security,);
-
-        let proxy = Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            format!("/net/connman/iwd/{}_{}", ssid_to_hex(&ssid), security,),
-            "net.connman.iwd.KnownNetwork",
-        )
-        .await?;
-
-        let res: Result<(), zbus::Error> = proxy.call("Forget", &()).await;
-        match res {
-            Ok(()) => {
-                info!("Successfully forgot {ssid}");
-                Ok(())
-            }
-            Err(e) => {
-                tracing::error!("Error occured while trying to forget network: {e}");
-                Err(ManndError::OperationFailed("Remove Network".to_string()))
-            }
-        }
+    pub async fn remove_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
+        todo!()
+        // info!("/net/connman/iwd/{}_{}", ssid_to_hex(&ssid), security,);
+        //
+        // let proxy = Proxy::new(
+        //     &self.conn,
+        //     self.service.clone(),
+        //     format!("/net/connman/iwd/{}_{}", ssid_to_hex(&ssid), security,),
+        //     "net.connman.iwd.KnownNetwork",
+        // )
+        // .await?;
+        //
+        // let res: Result<(), zbus::Error> = proxy.call("Forget", &()).await;
+        // match res {
+        //     Ok(()) => {
+        //         info!("Successfully forgot {ssid}");
+        //         Ok(())
+        //     }
+        //     Err(e) => {
+        //         tracing::error!("Error occured while trying to forget network: {e}");
+        //         Err(ManndError::OperationFailed("Remove Network".to_string()))
+        //     }
+        // }
     }
 
     #[instrument(err, skip(self))]
@@ -199,63 +237,48 @@ impl Iwd {
         }
         Ok(())
     }
-
-    // Gets nearby and known networks
-    #[instrument(err, skip(self))]
-    pub async fn all_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
-        let proxy = self.get_interface_proxy("Station").await?;
-        let nearby_aps = proxy.call_method("GetOrderedNetworks", &()).await?.body();
-        let nearby_aps: Vec<(OwnedObjectPath, i16)> = nearby_aps.deserialize()?;
-
-        let mut access_points: Vec<AccessPoint> = vec![];
-        for ap in nearby_aps {
-            if let Some(ap_name) = ap.0.as_str().split('/').next_back() {
-                let ap_info = self.get_ap_info(ap_name).await?;
-                access_points.push(ap_info);
-            }
-        }
-
-        let known_aps = self.get_known_networks().await?;
-        let aps_to_add: Vec<AccessPoint> = known_aps
-            .into_iter()
-            .filter(|known_ap| !access_points.iter().any(|ap| ap.ssid == known_ap.ssid))
-            .collect();
-
-        access_points.extend(aps_to_add);
-        Ok(access_points)
-    }
-
-    #[instrument(err, skip(self))]
-    pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
-        let mut known_networks: Vec<AccessPoint> = vec![];
-        let proxy = ObjectManagerProxy::new(&self.conn, self.service.clone(), "/").await?;
-        for (_path, interface) in proxy.get_managed_objects().await? {
-            if let Some(known_network_props) = interface.get("net.connman.iwd.KnownNetwork") {
-                let ssid = known_network_props
-                    .get("Name")
-                    .map_or_else(String::new, |name| {
-                        name.downcast_ref::<String>().unwrap_or(String::new())
-                    });
-
-                let mut ap_builder = AccessPointBuilder::default()
-                    .ssid(ssid)
-                    .flags(NetworkFlags::KNOWN);
-
-                if let Some(net_security) = known_network_props.get("Type") {
-                    let security_str = net_security.downcast_ref::<&str>().unwrap_or("psk");
-                    let security: Security = security_str.into();
-                    ap_builder = ap_builder.security(security);
-                }
-
-                known_networks.push(ap_builder.build()?);
-            }
-        }
-        Ok(known_networks)
-    }
 }
 
 // Helper methods
 impl Iwd {
+    #[instrument(err, skip(self))]
+    async fn get_ap_info(
+        &self,
+        path: OwnedObjectPath,
+        signal_dbm: Option<i16>,
+    ) -> Result<NetworkInfo, ManndError> {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            path,
+            "net.connman.iwd.Network",
+        )
+        .await?;
+
+        let ssid = get_prop_from_proxy::<String>(&proxy, "Name").await?;
+        let sec_str = get_prop_from_proxy::<String>(&proxy, "Type").await?;
+        let mut flags = NetworkFlags::NEARBY;
+        if get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork")
+            .await
+            .is_ok()
+        {
+            flags |= NetworkFlags::KNOWN;
+        }
+        if get_prop_from_proxy::<bool>(&proxy, "Connected")
+            .await
+            .unwrap_or(false)
+        {
+            flags |= NetworkFlags::CONNECTED;
+        }
+
+        Ok(NetworkInfoBuilder::default()
+            .ssid(ssid)
+            .security(Self::iwd_type_to_security(&sec_str))
+            .signal_dbm(signal_dbm)
+            .flags(flags)
+            .build()?)
+    }
+
     /// Returns the object path of the iwd station, currently only returns the first station
     #[instrument(err, skip(conn))]
     async fn find_adapter_path(
@@ -297,62 +320,6 @@ impl Iwd {
     }
 
     #[instrument(err, skip(self))]
-    async fn get_interface_proxy(&self, interface: &'static str) -> Result<Proxy<'_>, ManndError> {
-        Ok(Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            self.path.clone(),
-            format!("net.connman.iwd.{interface}"),
-        )
-        .await?)
-    }
-
-    #[instrument(err, skip(self))]
-    async fn get_ap_info<T: Into<String> + Debug>(
-        &self,
-        network: T,
-    ) -> Result<AccessPoint, ManndError> {
-        let network: String = network.into();
-        let proxy = zbus::Proxy::new(
-            &self.conn,
-            self.service.clone(),
-            format!("{}/{}", self.path.clone(), network),
-            "net.connman.iwd.Network",
-        )
-        .await?;
-
-        info!("Getting ap info");
-        let ssid = get_prop_from_proxy::<String>(&proxy, "Name").await?;
-        info!("ssid: {}", ssid);
-
-        let security_str = get_prop_from_proxy::<String>(&proxy, "Type").await?;
-        info!("sec: {:?}", security_str);
-
-        let security: Security = security_str.as_str().into();
-        let mut flags = NetworkFlags::NEARBY;
-
-        if (get_prop_from_proxy::<OwnedObjectPath>(&proxy, "KnownNetwork").await).is_ok() {
-            flags |= NetworkFlags::KNOWN;
-        }
-
-        get_prop_from_proxy::<bool>(&proxy, "Connected")
-            .await
-            .inspect(|b| {
-                if *b {
-                    flags |= NetworkFlags::CONNECTED;
-                }
-            })?;
-
-        let ap = AccessPointBuilder::default()
-            .ssid(ssid)
-            .security(security)
-            .flags(flags)
-            .build()?;
-
-        Ok(ap)
-    }
-
-    #[instrument(err, skip(self))]
     pub async fn get_modes(&self) -> Result<Vec<String>, ManndError> {
         let proxy = Proxy::new(
             &self.conn,
@@ -364,5 +331,41 @@ impl Iwd {
 
         let modes = get_prop_from_proxy::<Vec<String>>(&proxy, "SupportedModes").await?;
         Ok(modes)
+    }
+
+    #[instrument(err, skip(self))]
+    async fn get_interface_proxy(&self, interface: &'static str) -> Result<Proxy<'_>, ManndError> {
+        Ok(Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            format!("net.connman.iwd.{interface}"),
+        )
+        .await?)
+    }
+
+    fn network_path(&self, network: &NetworkInfo) -> String {
+        format!(
+            "{}/{}_{}",
+            self.path,
+            ssid_to_hex(&network.ssid),
+            Self::iwd_security_type(&network.security)
+        )
+    }
+
+    fn iwd_security_type(security: &NetworkSecurity) -> &'static str {
+        match security {
+            NetworkSecurity::Open | NetworkSecurity::Owe => "open",
+            _ => "psk",
+        }
+    }
+
+    fn iwd_type_to_security(type_str: &str) -> NetworkSecurity {
+        match type_str {
+            "psk" => NetworkSecurity::Wpa2 {
+                passphrase: String::new(),
+            },
+            _ => NetworkSecurity::Open,
+        }
     }
 }
