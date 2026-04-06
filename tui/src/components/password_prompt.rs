@@ -1,7 +1,7 @@
-use mannd::wireless::common::AccessPoint;
+use mannd::store::NetworkInfo;
 use ratatui::{
     layout::{Constraint, Flex, Layout, Margin, Rect, Spacing},
-    style::{Style, Stylize},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
@@ -9,12 +9,12 @@ use ratatui::{
 use crate::{components::layout::centered_overlay, state::prompts::PskConnectionPrompt, ui::theme};
 
 pub struct PasswordPrompt<'a> {
-    network: &'a AccessPoint,
+    network: &'a NetworkInfo,
     info: &'a PskConnectionPrompt,
 }
 
 impl<'a> PasswordPrompt<'a> {
-    pub fn new(ap: &'a AccessPoint, info: &'a PskConnectionPrompt) -> Option<Self> {
+    pub fn new(ap: &'a NetworkInfo, info: &'a PskConnectionPrompt) -> Option<Self> {
         Some(Self { network: ap, info })
     }
 }

@@ -1,5 +1,4 @@
 use bitflags::bitflags;
-use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 use zbus::{Connection, zvariant::Value};
@@ -7,14 +6,14 @@ use zbus::{Connection, zvariant::Value};
 use crate::error::ManndError;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum Security {
+pub enum AuthType {
     Open,
     Psk,
     Ieee8021x,
     Unknown,
 }
 
-impl std::fmt::Display for Security {
+impl std::fmt::Display for AuthType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Open => write!(f, "open"),
@@ -25,7 +24,7 @@ impl std::fmt::Display for Security {
     }
 }
 
-impl From<&str> for Security {
+impl From<&str> for AuthType {
     fn from(value: &str) -> Self {
         match value {
             "open" => Self::Open,
@@ -74,9 +73,8 @@ where
 {
     match proxy.get_property(prop).await {
         Ok(val) => Ok(<zbus::zvariant::Value<'_> as Clone>::clone(&val).downcast::<T>()?),
-        Err(_e) => Err(ManndError::PropertyNotFound(format!(
-            "Could not find given property {} at {}",
-            prop,
+        Err(e) => Err(ManndError::OperationFailed(format!(
+            "Could not read property '{prop}' at {}: {e}",
             proxy.path()
         ))),
     }
@@ -91,13 +89,4 @@ bitflags! {
         const NEARBY = 0b0000_0100;
         const HIDDEN = 0b0000_1000;
     }
-}
-
-#[derive(Builder, Debug, Clone, Serialize, Deserialize)]
-#[builder(pattern = "owned")]
-pub struct AccessPoint {
-    pub ssid: String,
-    pub security: Security,
-    #[builder(default = NetworkFlags::empty())]
-    pub flags: NetworkFlags,
 }

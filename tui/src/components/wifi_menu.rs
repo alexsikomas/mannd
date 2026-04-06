@@ -1,4 +1,7 @@
-use mannd::wireless::common::{AccessPoint, NetworkFlags, Security};
+use mannd::{
+    store::{NetworkInfo, NetworkSecurity},
+    wireless::common::NetworkFlags,
+};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Flex, Layout, Rect},
@@ -13,12 +16,12 @@ use crate::{
 };
 
 pub struct Connection<'a> {
-    networks: &'a [AccessPoint],
+    networks: &'a [NetworkInfo],
     conn_state: &'a WifiState,
 }
 
 impl<'a> Connection<'a> {
-    pub fn new(networks: &'a [AccessPoint], conn_state: &'a WifiState) -> Option<Self> {
+    pub fn new(networks: &'a [NetworkInfo], conn_state: &'a WifiState) -> Option<Self> {
         Some(Self {
             networks,
             conn_state,
@@ -135,12 +138,12 @@ impl Widget for Connection<'_> {
 }
 
 impl<'a> Connection<'a> {
-    fn security_span(security: &Security, network_style: Style) -> Span<'a> {
+    fn security_span(security: &NetworkSecurity, network_style: Style) -> Span<'a> {
         match security {
-            Security::Psk => Span::styled("  ".to_string(), network_style.bold()),
-            Security::Open => Span::styled(" (Open)".to_string(), network_style),
-            Security::Ieee8021x => Span::styled(" (EAP)".to_string(), network_style),
-            Security::Unknown => Span::styled(String::new(), network_style),
+            NetworkSecurity::Open | NetworkSecurity::Owe => {
+                Span::styled(" (Open)".to_string(), network_style)
+            }
+            _ => Span::styled("  ".to_string(), network_style.bold()),
         }
     }
 
@@ -170,7 +173,7 @@ impl<'a> Connection<'a> {
         }
     }
 
-    fn network_style(&self, ap: &AccessPoint, is_focused: bool, theme: &Theme) -> Style {
+    fn network_style(&self, ap: &NetworkInfo, is_focused: bool, theme: &Theme) -> Style {
         let mut style = Style::new();
         if ap.flags.contains(NetworkFlags::CONNECTED) && is_focused {
             let fg_col = theme.success.color();

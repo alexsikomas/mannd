@@ -66,8 +66,8 @@ pub enum ManndError {
     #[error("Zbus zvariant Error: {0}")]
     Zvariant(#[from] zbus::zvariant::Error),
 
-    #[error("Error while builder access point struct: {0}")]
-    AccessPointBuilder(#[from] crate::wireless::common::AccessPointBuilderError),
+    #[error("Error while builder network info struct: {0}")]
+    NetworkInfoBuilder(#[from] crate::store::NetworkInfoBuilderError),
     #[error("Invalid password length")]
     PasswordLength,
     #[error("Connection timeout")]

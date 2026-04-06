@@ -99,27 +99,39 @@ impl<'a> NetworkActor<'a> {
         action: &WifiAction,
         state_send: &mut Vec<NetworkState>,
     ) -> Result<(), ManndError> {
-        // a lot of times we want to update network list
-        // after an action
-        let mut should_refresh = false;
+        let mut should_full_refresh = false;
 
         match action {
             WifiAction::Scan => {
                 state_send.push(NetworkState::Start(Started(Process::WifiScan)));
-                let _ = self.controller.scan(self.signal_tx.clone()).await;
+
+                if let Err(e) = self.controller.scan(self.signal_tx.clone()).await {
+                    tracing::error!("[Wi-Fi]: Scan failed. {e:?}");
+                    state_send.push(NetworkState::Failed(Failure::new(
+                        Process::WifiScan,
+                        e.to_string(),
+                    )));
+                }
             }
-            WifiAction::GetNetworks => {
-                if let Ok(aps) = self.controller.get_all_networks().await {
+            WifiAction::GetNetworks => match self.controller.get_all_networks().await {
+                Ok(aps) => {
                     state_send.push(NetworkState::SetNetworks(aps));
                     state_send.push(NetworkState::Success(Success::Generic));
                 }
-            }
+                Err(e) => {
+                    tracing::error!("[Wi-Fi]: Failed to get networks. {e:?}");
+                    state_send.push(NetworkState::Failed(Failure::new(
+                        Process::WifiScan,
+                        e.to_string(),
+                    )));
+                }
+            },
             WifiAction::Connect(info) => {
                 state_send.push(NetworkState::Start(Started(Process::WifiConnect)));
-
-                match self.controller.network_connect(info).await {
+                match self.controller.connect_network(info).await {
                     Ok(()) => {
                         info!("Connection to network was successful");
+                        should_full_refresh = true;
                         state_send.push(NetworkState::Success(Success::Generic));
                     }
                     Err(e) => {
@@ -131,44 +143,57 @@ impl<'a> NetworkActor<'a> {
                     }
                 }
             }
-            WifiAction::ConnectKnown(ssid, security) => {
-                match self.controller.connect_known(ssid, security).await {
-                    Ok(()) => {
-                        // state_send.push(NetworkState::CallAction(
-                        //     NetworkAction::GetNetworkContext(NetCtxFlags::Network),
-                        // ));
-                        should_refresh = true;
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "[Wi-Fi]: Could not connect to a known network. Error: {e:?}"
-                        );
-                        state_send.push(NetworkState::Failed(Failure::new(
-                            Process::WifiConnect,
-                            e.to_string(),
-                        )));
-                    }
+            WifiAction::ConnectKnown(network) => match self.controller.connect_known(network).await
+            {
+                Ok(()) => {
+                    should_full_refresh = true;
                 }
-            }
-
-            WifiAction::Disconnect => {
-                if let Ok(()) = self.controller.disconnect_network().await {
+                Err(e) => {
+                    tracing::warn!("[Wi-Fi]: Could not connect to a known network. Error: {e:?}");
+                    state_send.push(NetworkState::Failed(Failure::new(
+                        Process::WifiConnect,
+                        e.to_string(),
+                    )));
+                }
+            },
+            WifiAction::Disconnect => match self.controller.disconnect_network().await {
+                Ok(()) => {
                     info!("[Wi-Fi]: Disconnected from active network");
-                    should_refresh = true;
+                    should_full_refresh = true;
                 }
-            }
-            WifiAction::Forget(ssid, sec) => {
-                if let Ok(()) = self.controller.remove_network(ssid, sec).await {
-                    info!("[Wi-Fi]: Network {ssid} forgotten");
-                    should_refresh = true
+                Err(e) => {
+                    tracing::error!("[Wi-Fi]: Disconnect failed. {e:?}");
+                    state_send.push(NetworkState::Failed(Failure::new(
+                        Process::Generic,
+                        e.to_string(),
+                    )));
                 }
-            }
-            _ => {}
+            },
+            WifiAction::Forget(network) => match self.controller.remove_network(network).await {
+                Ok(()) => {
+                    info!("[Wi-Fi]: Network {} forgotten", network.ssid);
+                    should_full_refresh = true;
+                }
+                Err(e) => {
+                    tracing::error!("[Wi-Fi]: Failed to forget network {}. {e:?}", network.ssid);
+                    state_send.push(NetworkState::Failed(Failure::new(
+                        Process::Generic,
+                        e.to_string(),
+                    )));
+                }
+            },
         };
 
-        if should_refresh {
-            if let Ok(networks) = self.controller.get_all_networks().await {
-                state_send.push(NetworkState::SetNetworks(networks));
+        if should_full_refresh {
+            match self.controller.sync_all_networks().await {
+                Ok(networks) => state_send.push(NetworkState::SetNetworks(networks)),
+                Err(e) => {
+                    tracing::error!("[Wi-Fi]: Failed to refresh networks after action. {e:?}");
+                    state_send.push(NetworkState::Failed(Failure::new(
+                        Process::Generic,
+                        e.to_string(),
+                    )));
+                }
             }
         }
 
@@ -224,23 +249,50 @@ impl<'a> NetworkActor<'a> {
         state_send: &mut Vec<NetworkState>,
     ) -> Result<(), ManndError> {
         let mut should_refresh_ifaces = false;
+
         match action {
             WpaAction::GetInterfaces => {
                 if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
-                    let interfaces = wpa.get_interfaces().await?;
-                    state_send.push(NetworkState::SetWpaInterfaces(interfaces));
+                    match wpa.get_interfaces().await {
+                        Ok(interfaces) => {
+                            state_send.push(NetworkState::SetWpaInterfaces(interfaces))
+                        }
+                        Err(e) => {
+                            tracing::error!("[WPA]: Failed to get interfaces. {e:?}");
+                            state_send.push(NetworkState::Failed(Failure::new(
+                                Process::Generic,
+                                e.to_string(),
+                            )));
+                        }
+                    }
                 }
             }
             WpaAction::CreateInterface(ifname) => {
                 if let Some(WirelessAdapter::Wpa(wpa)) = self.controller.wifi.as_mut() {
-                    wpa.create_interface(ifname).await?;
-                    should_refresh_ifaces = true;
+                    match wpa.create_interface(ifname).await {
+                        Ok(()) => should_refresh_ifaces = true,
+                        Err(e) => {
+                            tracing::error!("[WPA]: Failed to create interface {ifname}. {e:?}");
+                            state_send.push(NetworkState::Failed(Failure::new(
+                                Process::Generic,
+                                e.to_string(),
+                            )));
+                        }
+                    }
                 }
             }
             WpaAction::RemoveInterface(ifname) => {
                 if let Some(WirelessAdapter::Wpa(wpa)) = self.controller.wifi.as_mut() {
-                    wpa.remove_interface(ifname).await?;
-                    should_refresh_ifaces = true;
+                    match wpa.remove_interface(ifname).await {
+                        Ok(()) => should_refresh_ifaces = true,
+                        Err(e) => {
+                            tracing::error!("[WPA]: Failed to remove interface {ifname}. {e:?}");
+                            state_send.push(NetworkState::Failed(Failure::new(
+                                Process::Generic,
+                                e.to_string(),
+                            )));
+                        }
+                    }
                 }
             }
             WpaAction::TogglePersist => {
@@ -250,9 +302,17 @@ impl<'a> NetworkActor<'a> {
             }
         }
 
-        if should_refresh_ifaces && let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
-            let interfaces = wpa.get_interfaces().await?;
-            state_send.push(NetworkState::SetWpaInterfaces(interfaces));
+        if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
+            match wpa.get_interfaces().await {
+                Ok(interfaces) => state_send.push(NetworkState::SetWpaInterfaces(interfaces)),
+                Err(e) => {
+                    tracing::error!("[WPA]: Failed to refresh interfaces. {e:?}");
+                    state_send.push(NetworkState::Failed(Failure::new(
+                        Process::Generic,
+                        e.to_string(),
+                    )));
+                }
+            }
         }
         Ok(())
     }

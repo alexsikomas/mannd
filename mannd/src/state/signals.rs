@@ -65,7 +65,7 @@ impl<'a> SignalManager<'a> {
             .get("Scanning")
             .is_some_and(|val| val.eq(&OwnedValue::from(false)))
         {
-            SignalUpdate::Remove(msg.0);
+            self.handle_update(SignalUpdate::Remove(msg.0));
             return Some(NetworkAction::Wifi(WifiAction::GetNetworks));
         }
         None

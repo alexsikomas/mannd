@@ -29,7 +29,10 @@ use tracing::{Level, instrument};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{FmtSubscriber, layer::SubscriberExt};
 
-use crate::error::ManndError;
+use crate::{
+    error::ManndError,
+    store::{NetworkInfo, NetworkSecurity},
+};
 
 const SYS_NET_PATH: &str = "/sys/class/net";
 const SYS_VIRT_PATH: &str = "/sys/devices/virtual";
@@ -228,7 +231,6 @@ pub fn list_interfaces() -> Vec<String> {
 
 #[instrument(err)]
 pub fn str_to_ip(inp: &str) -> Result<IpAddr, ManndError> {
-    // we expect ipv4
     if inp.contains('.') {
         Ipv4Addr::from_str(inp).map_or_else(|_| Err(ManndError::StrToIp), |ip| Ok(IpAddr::V4(ip)))
     } else if inp.contains(':') {
@@ -246,4 +248,94 @@ pub fn format_mac_address(mac: &[u8]) -> String {
         .map(|b| format!("{b:02X}"))
         .collect::<Vec<String>>()
         .join(":")
+}
+
+pub fn validate_network(network: &NetworkInfo) -> Result<(), ManndError> {
+    if network.ssid.trim().is_empty() {
+        return Err(ManndError::InvalidPropertyFormat(
+            "SSID cannot be empty".to_string(),
+        ));
+    }
+    if let Some(bssid) = &network.bssid {
+        validate_mac_addr(bssid, "bssid")?;
+    }
+    for entry in &network.bssid_blacklist {
+        validate_mac_addr(entry, "bssid_blacklist")?;
+    }
+    if let Some(bssid) = &network.bssid {
+        if network
+            .bssid_blacklist
+            .iter()
+            .any(|x| x.eq_ignore_ascii_case(bssid))
+        {
+            return Err(ManndError::InvalidPropertyFormat(
+                "bssid cannot also exist in bssid_blacklist".to_string(),
+            ));
+        }
+    }
+    // Security credentials
+    validate_security(&network.security)
+}
+
+pub fn validate_security(security: &NetworkSecurity) -> Result<(), ManndError> {
+    match security {
+        NetworkSecurity::Open | NetworkSecurity::Owe => Ok(()),
+        NetworkSecurity::Wpa2 { passphrase } => {
+            let len = passphrase.as_bytes().len();
+            if !(8..=63).contains(&len) {
+                return Err(ManndError::PasswordLength);
+            }
+            if !passphrase.is_ascii() {
+                return Err(ManndError::InvalidPropertyFormat(
+                    "WPA2 passphrase must be ASCII (8-63 chars)".to_string(),
+                ));
+            }
+            Ok(())
+        }
+        NetworkSecurity::Wpa2Hex { psk_hex } => {
+            let ok =
+                psk_hex.len() == 64 && psk_hex.as_bytes().iter().all(|b| b.is_ascii_hexdigit());
+            if !ok {
+                return Err(ManndError::InvalidPropertyFormat(
+                    "WPA2 hex PSK must be exactly 64 hex characters".to_string(),
+                ));
+            }
+            Ok(())
+        }
+        NetworkSecurity::Wpa3Sae { password, .. } => {
+            if password.is_empty() {
+                return Err(ManndError::InvalidPropertyFormat(
+                    "WPA3 SAE password cannot be empty".to_string(),
+                ));
+            }
+            Ok(())
+        }
+        NetworkSecurity::Wpa3Transition { password } => {
+            let len = password.as_bytes().len();
+            if !(8..=63).contains(&len) {
+                return Err(ManndError::PasswordLength);
+            }
+            if !password.is_ascii() {
+                return Err(ManndError::InvalidPropertyFormat(
+                    "WPA3 transition password must be ASCII (8-63 chars)".to_string(),
+                ));
+            }
+            Ok(())
+        }
+    }
+}
+
+pub fn validate_mac_addr(value: &str, field: &str) -> Result<(), ManndError> {
+    let parts: Vec<&str> = value.split(':').collect();
+    let ok = parts.len() == 6
+        && parts
+            .iter()
+            .all(|p| p.len() == 2 && p.as_bytes().iter().all(|b| b.is_ascii_hexdigit()));
+    if ok {
+        Ok(())
+    } else {
+        Err(ManndError::InvalidPropertyFormat(format!(
+            "{field} must be MAC format XX:XX:XX:XX:XX:XX"
+        )))
+    }
 }

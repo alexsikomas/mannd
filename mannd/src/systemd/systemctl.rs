@@ -28,35 +28,31 @@ pub async fn get_system_unit(
 }
 
 pub async fn is_service_active(conn: &Connection, service: impl Into<String>) -> Option<bool> {
-    let path = get_system_unit(conn, service.into()).await;
-    if path.is_err() {
+    let Ok(path) = get_system_unit(conn, service.into()).await else {
         return None;
-    }
-    let path = path.unwrap();
+    };
 
-    if let Ok(unit) = UnitProxy::new(conn, path).await {
-        if let Ok(status) = unit.active_state().await
-            && status == "active"
-        {
-            return Some(true);
-        }
-    }
-    None
+    let Ok(unit) = UnitProxy::new(conn, path).await else {
+        return None;
+    };
+
+    let Ok(status) = unit.active_state().await else {
+        return None;
+    };
+
+    Some(status == "active")
 }
 
 pub async fn get_service_path(conn: &Connection, service: impl Into<String>) -> String {
-    let path = get_system_unit(conn, service.into()).await;
-    if path.is_err() {
+    let Ok(path) = get_system_unit(conn, service.into()).await else {
         return String::new();
-    }
+    };
 
-    let path = path.unwrap();
-    if let Ok(unit) = UnitProxy::new(conn, path).await {
-        if let Ok(frag_path) = unit.fragment_path().await {
-            return frag_path;
-        }
-    }
-    String::new()
+    let Ok(unit) = UnitProxy::new(conn, path).await else {
+        return String::new();
+    };
+
+    unit.fragment_path().await.unwrap_or_default()
 }
 
 #[instrument(err)]

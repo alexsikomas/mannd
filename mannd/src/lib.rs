@@ -143,6 +143,8 @@ where
     }
 }
 
+// often actually used to invoke methods probably going to
+// make a new function to be explicit about usage
 pub fn read_global<F, R>(reader: F) -> Option<R>
 where
     F: FnOnce(&GlobalState) -> R,

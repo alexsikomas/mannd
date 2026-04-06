@@ -168,10 +168,8 @@ impl UiContext {
                     }
                 }
                 PromptState::PskConnect(psk_prompt) => {
-                    if let View::Wifi(connection_state) = &state.current_view
-                        && let Some(selected) =
-                            net_ctx.networks.get(connection_state.network_cursor.index)
-                        && let Some(prompt_instance) = PasswordPrompt::new(selected, psk_prompt)
+                    if let Some(prompt_instance) =
+                        PasswordPrompt::new(&psk_prompt.network, psk_prompt)
                     {
                         frame.render_widget(prompt_instance, inner_area);
                     }

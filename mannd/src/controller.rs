@@ -10,26 +10,19 @@
 //!     - [WireGuard](crate::wireguard)
 
 use serde::{Deserialize, Serialize};
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 use tokio::sync::{RwLock, mpsc::Sender};
 
 use crate::{
     error::ManndError,
     netlink::NlRouterWrapper,
     read_global,
-    state::{
-        messages::{ApConnectInfo, Credentials},
-        signals::SignalUpdate,
-    },
-    store::{ApplicationState, ManndStore, WgMeta, WpaState},
+    state::signals::SignalUpdate,
+    store::{NetworkInfo, WgMeta, WpaState},
     systemd::systemctl::is_service_active,
     wireguard::network::Wireguard,
     wireless::{
         agent::{AgentState, IwdAgent},
-        common::{AccessPoint, Security},
         iwd::Iwd,
         wpa_config::WpaConfig,
         wpa_supplicant::WpaSupplicant,
@@ -57,6 +50,16 @@ pub struct Controller {
     pub wifi: Option<WirelessAdapter>,
     wg: Option<Wireguard<NlRouterWrapper>>,
     connection: Connection,
+}
+
+macro_rules! dispatch_wifi {
+    ($wifi:expr, $iwd:ident => $iwd_expr:expr, $wpa:ident => $wpa_expr:expr, $none:expr) => {
+        match $wifi {
+            Some(WirelessAdapter::Iwd($iwd)) => $iwd_expr,
+            Some(WirelessAdapter::Wpa($wpa)) => $wpa_expr,
+            None => $none,
+        }
+    };
 }
 
 // Initialisations
@@ -105,15 +108,12 @@ impl Controller {
             .build()
             .await?;
 
-        match Iwd::new(conn.clone(), agent_state.clone()).await {
-            Ok(iwd) => {
-                self.connection = conn;
-                iwd.register_agent().await?;
-                self.wifi = Some(WirelessAdapter::Iwd(iwd));
-                Ok(())
-            }
-            Err(e) => Err(e),
-        }
+        let mut iwd = Iwd::new(conn.clone(), agent_state.clone()).await?;
+        self.connection = conn;
+        iwd.register_agent().await?;
+        iwd.sync_networks().await?;
+        self.wifi = Some(WirelessAdapter::Iwd(iwd));
+        Ok(())
     }
 
     #[instrument(err, skip(self))]
@@ -123,7 +123,12 @@ impl Controller {
             .unwrap_or(WpaState::default());
 
         let config = WpaConfig::load_or_default()?;
-        let wpa = WpaSupplicant::new(config, wpa_state, self.connection.clone()).await?;
+        let mut wpa = WpaSupplicant::new(config, wpa_state, self.connection.clone()).await?;
+
+        if let Err(e) = wpa.refresh_networks(true).await {
+            tracing::warn!("WPA initalised but network sync failed: {e}");
+        }
+
         self.wifi = Some(WirelessAdapter::Wpa(wpa));
         Ok(())
     }
@@ -132,13 +137,9 @@ impl Controller {
     /// Starts the wireguard netlink interface, sets the status
     /// down to not ruin internet connectivity
     pub async fn start_wireguard(&mut self) -> Result<(), ManndError> {
-        match Wireguard::new().await {
-            Ok(wg) => {
-                self.wg = Some(wg);
-                Ok(())
-            }
-            Err(e) => Err(e),
-        }
+        let wg = Wireguard::new().await?;
+        self.wg = Some(wg);
+        Ok(())
     }
 
     #[instrument(err, skip(self))]
@@ -162,10 +163,9 @@ impl Controller {
     }
 
     pub async fn networkd_status(&self) -> bool {
-        match is_service_active(&self.connection, "systemd-networkd".to_string()).await {
-            Some(res) => res,
-            None => false,
-        }
+        is_service_active(&self.connection, "systemd-networkd")
+            .await
+            .unwrap_or(false)
     }
 }
 
@@ -173,92 +173,64 @@ impl Controller {
 impl Controller {
     #[instrument(err, skip(self))]
     pub async fn scan<'a>(&mut self, sock_tx: Sender<SignalUpdate<'a>>) -> Result<(), ManndError> {
-        match &mut self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => {
-                match iwd.scan(sock_tx).await {
-                    Ok(_) => {
-                        info!("Scan succeeded.");
-                    }
-                    Err(com) => {
-                        tracing::error!("There was an error while scanning!\n{}", com);
-                    }
-                }
-                Ok(())
-            }
-            Some(WirelessAdapter::Wpa(wpa)) => {
-                wpa.scan(sock_tx).await?;
-                Ok(())
-            }
-            _ => Err(ManndError::NetworkNotFound),
+        let res = dispatch_wifi!(
+            &mut self.wifi,
+            iwd => iwd.scan(sock_tx).await,
+            wpa => wpa.scan(sock_tx).await,
+            Err(ManndError::OperationFailed("No wifi daemon found".into()))
+        );
+
+        match &res {
+            Ok(()) => info!("Scan succeeded"),
+            Err(e) => tracing::error!("Error occured while scanning\n{e}"),
         }
+
+        res
     }
 
     #[instrument(err, skip(self))]
-    pub async fn network_connect(&self, info: &ApConnectInfo) -> Result<(), ManndError> {
-        match &info.credentials {
-            Credentials::Password(psk) => {
-                match &self.wifi {
-                    Some(WirelessAdapter::Iwd(iwd)) => {
-                        iwd.connect_network_psk(&info.ssid, &psk).await?;
-                    }
-                    Some(WirelessAdapter::Wpa(wpa)) => {
-                        wpa.connect_network_psk(&info.ssid, &psk).await?;
-                    }
-                    None => {
-                        tracing::error!(
-                            "Tried to connect to network without an initalised adapter?"
-                        );
-                    }
-                };
-            }
-        }
-
-        Ok(())
+    pub async fn connect_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
+        dispatch_wifi!(&self.wifi,
+        iwd => iwd.connect_network(network).await,
+        wpa => wpa.connect_network(network).await,
+        {
+            tracing::error!("No wireless daemon found.");
+            Ok(())
+        })
     }
 
     /// security required for iwd due to the way it stores network names
     #[instrument(err, skip(self))]
-    pub async fn connect_known(&self, ssid: &str, security: &Security) -> Result<(), ManndError> {
-        match &self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => {
-                iwd.connect_known(ssid, security).await?;
-            }
-            Some(WirelessAdapter::Wpa(wpa)) => {
-                wpa.connect_known(ssid).await?;
-            }
-            None => {}
-        }
-        Ok(())
+    pub async fn connect_known(&self, network: &NetworkInfo) -> Result<(), ManndError> {
+        dispatch_wifi!(&self.wifi,
+        iwd => iwd.connect_network(network).await,
+        wpa => wpa.connect_network(network).await,
+        {
+            tracing::error!("No wireless daemon found");
+            Ok(())
+        })
     }
 
     #[instrument(err, skip(self))]
     pub async fn disconnect_network(&self) -> Result<(), ManndError> {
-        match &self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => {
-                iwd.disconnect().await?;
-            }
-            Some(WirelessAdapter::Wpa(wpa)) => {
-                wpa.disconnect().await?;
-            }
-            None => {
-                tracing::error!("Tried to disconnect but no wifi adapter was initalised.");
-                return Err(ManndError::OperationFailed(
-                    "No adapter to be able to disconnect from networks".to_string(),
-                ));
-            }
-        };
-        Ok(())
+        dispatch_wifi!(&self.wifi,
+        iwd => iwd.disconnect().await,
+        wpa => wpa.disconnect().await,
+        {
+            tracing::error!("Tried to disconnect but no wifi adapter was initalised.");
+            return Err(ManndError::OperationFailed(
+                "No adapter to be able to disconnect from networks".to_string(),
+            ));
+        })
     }
 
     #[instrument(err, skip(self))]
-    pub async fn remove_network(&self, ssid: &str, security: &Security) -> Result<(), ManndError> {
-        info!("Removing network");
-        match &self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => return iwd.remove_network(ssid, security).await,
-            Some(WirelessAdapter::Wpa(wpa)) => return wpa.remove_network(ssid, security).await,
-            None => {}
-        }
-        Ok(())
+    pub async fn remove_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
+        dispatch_wifi!(&self.wifi,
+            iwd => iwd.remove_network(network).await,
+            wpa => wpa.remove_network(network).await,
+            Ok(())
+        )
     }
 
     #[instrument(err, skip(self))]
@@ -290,41 +262,19 @@ impl Controller {
 // get information
 impl Controller {
     #[instrument(err, skip(self))]
-    pub async fn get_all_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
-        match &mut self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => match iwd.all_networks().await {
-                Ok(v) => Ok(v),
-                Err(_) => Err(ManndError::OperationFailed(
-                    "Error while getting scanned networks!".to_string(),
-                )),
-            },
-            Some(WirelessAdapter::Wpa(wpa)) => match wpa.get_all_networks().await {
-                Ok(v) => Ok(v),
-                Err(_) => Err(ManndError::OperationFailed(
-                    "Error while getting scanned networks!".to_string(),
-                )),
-            },
-            _ => Err(ManndError::NetworkNotFound),
-        }
+    pub async fn get_all_networks(&mut self) -> Result<Vec<NetworkInfo>, ManndError> {
+        dispatch_wifi!(&mut self.wifi,
+            iwd => iwd.sync_networks().await,
+            wpa => wpa.refresh_networks(false).await,
+            Err(ManndError::NetworkNotFound))
     }
 
     #[instrument(err, skip(self))]
-    pub async fn get_known_networks(&mut self) -> Result<Vec<AccessPoint>, ManndError> {
-        match &mut self.wifi {
-            Some(WirelessAdapter::Iwd(iwd)) => match iwd.get_known_networks().await {
-                Ok(aps) => {
-                    return Ok(aps);
-                }
-                Err(e) => {
-                    return Err(e);
-                }
-            },
-            Some(WirelessAdapter::Wpa(_wpa)) => {}
-            None => {}
-        }
-
-        // temp while wpa not implemented
-        Ok(vec![])
+    pub async fn sync_all_networks(&mut self) -> Result<Vec<NetworkInfo>, ManndError> {
+        dispatch_wifi!(&mut self.wifi,
+            iwd => iwd.sync_networks().await,
+            wpa => wpa.refresh_networks(true).await,
+            Err(ManndError::NetworkNotFound))
     }
 
     pub fn get_wifi_daemon_type(&self) -> Option<WifiDaemonType> {
@@ -336,10 +286,7 @@ impl Controller {
     }
 
     pub fn is_wireguard_connected(&self) -> bool {
-        match self.wg {
-            Some(_) => true,
-            None => false,
-        }
+        self.wg.is_some()
     }
 }
 
@@ -370,24 +317,6 @@ mod tests {
         match controller {
             Ok(_) => Ok(()),
             Err(e) => Err(e),
-        }
-    }
-
-    #[cfg(iwd_installed)]
-    #[tokio::test]
-    async fn test_connect_iwd() -> Result<(), ManndError> {
-        let controller = Controller::new().await;
-        match controller {
-            Ok(mut cont) => match cont.connect_iwd().await {
-                Ok(_) => Ok(()),
-                Err(_) => {
-                    println!("iwd is not found");
-                    Ok(())
-                }
-            },
-            Err(_) => Err(ManndError::OperationFailed(
-                "Controller could not be initalised".to_string(),
-            )),
         }
     }
 }

@@ -1,17 +1,10 @@
-use std::path::PathBuf;
-
-use derive_builder::Builder;
-use serde::{Deserialize, Serialize};
-use zbus::zvariant::OwnedObjectPath;
-
 use crate::{
     controller::WifiDaemonType,
-    store::WgMeta,
-    wireless::{
-        common::{AccessPoint, Security},
-        wpa_supplicant::WpaInterface,
-    },
+    store::{NetworkInfo, WgMeta},
+    wireless::wpa_supplicant::WpaInterface,
 };
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum NetworkAction {
@@ -26,10 +19,10 @@ pub enum NetworkAction {
 pub enum WifiAction {
     Scan,
     GetNetworks,
-    Connect(ApConnectInfo),
-    ConnectKnown(String, Security),
+    Connect(NetworkInfo),
+    ConnectKnown(NetworkInfo),
     Disconnect,
-    Forget(String, Security),
+    Forget(NetworkInfo),
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -52,7 +45,7 @@ pub enum NetworkState {
     SetCapabilities(Capability),
 
     // wifi
-    SetNetworks(Vec<AccessPoint>),
+    SetNetworks(Vec<NetworkInfo>),
     SetInterfaces(Vec<String>),
 
     // wpa
@@ -84,6 +77,7 @@ pub enum Success {
 pub enum Process {
     WifiConnect,
     WifiScan,
+    Generic,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -151,16 +145,16 @@ impl WireguardCapability {
     }
 }
 
-/// For connecting to APs used by wpa and iwd
-#[derive(Builder, Debug, Serialize, Deserialize, Clone)]
-pub struct ApConnectInfo {
-    pub ssid: String,
-    pub security: Security,
-    pub credentials: Credentials,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Credentials {
-    Password(String),
-    // Eap(EapInfo),
-}
+// /// For connecting to APs used by wpa and iwd
+// #[derive(Builder, Debug, Serialize, Deserialize, Clone)]
+// pub struct ApConnectInfo {
+//     pub ssid: String,
+//     pub security: Security,
+//     pub credentials: Credentials,
+// }
+//
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub enum Credentials {
+//     Password(String),
+//     // Eap(EapInfo),
+// }

@@ -16,16 +16,16 @@ use std::{
     time::Duration,
 };
 
-use clap::Parser;
+use clap::{Parser, error::ErrorKind};
 use futures::{SinkExt, StreamExt};
 use mannd::{
     GlobalStateGuard, UNIX_SOCK_PATH, context,
     controller::WifiDaemonType,
     error::ManndError,
-    init_ctx, read_global,
+    init_ctx,
     state::{
         actor::NetworkActor,
-        messages::{NetworkAction, NetworkState},
+        messages::{Failure, NetworkAction, NetworkState, Process},
         signals::SignalUpdate,
     },
     utils::setup_logging,
@@ -108,13 +108,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                     let mut frame = frame_res?;
                     let action = postcard::from_bytes_cobs::<NetworkAction>(&mut frame)?;
-                    let res = actor.handle_action(action).await?;
-                    if res {
-                        if args.spawned {
-                            info!("TUI requested shutdown");
-                            return Ok(());
+                    match actor.handle_action(action).await {
+                        Ok(true) => {
+                            if args.spawned {
+                                info!("TUI requested shutdown");
+                                return Ok(());
+                            }
+                            break;
                         }
-                        break;
+                        Ok(false) => {}
+                        Err(e) => {
+                            if let Ok(res) = to_stdvec_cobs(&NetworkState::Failed(Failure::new(Process::Generic, e.to_string()))) {
+                                if writer.send(res.into()).await.is_err() {
+                                    info!("Couldn't write failure to socket, disconnecting");
+                                    return Ok(());
+                                }
+                            }
+                        }
                     }
                 }
                 Some(update) = signal_rx.recv() => {
@@ -134,7 +144,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     };
 
                     if let Some(act) = action {
-                        actor.handle_action(act).await?;
+                        match actor.handle_action(act).await {
+                            Ok(true) => {
+                                if args.spawned {
+                                    info!("TUI requested shutdown");
+                                    return Ok(());
+                                }
+                                break;
+                            }
+                            Ok(false) => {}
+                            Err(e) => {
+                                tracing::error!("Failed to handle signal action: {e}");
+                                if let Ok(res) = to_stdvec_cobs(&NetworkState::Failed(Failure::new(Process::Generic, e.to_string()))) {
+                                    if writer.send(res.into()).await.is_err() {
+                                        info!("Couldn't write fialure to socket, disconnecting");
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 _ = tokio::signal::ctrl_c() => {

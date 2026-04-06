@@ -1,7 +1,8 @@
 use mannd::{
     controller::WifiDaemonType,
     state::messages::{NetworkAction, WifiAction, WpaAction},
-    wireless::common::{AccessPoint, NetworkFlags, Security},
+    store::{NetworkInfo, NetworkSecurity},
+    wireless::common::NetworkFlags,
 };
 
 use crate::{
@@ -60,7 +61,7 @@ impl WifiState {
         }
     }
 
-    pub fn refresh_available_actions(&mut self, networks: &[AccessPoint]) {
+    pub fn refresh_available_actions(&mut self, networks: &[NetworkInfo]) {
         let perma_actions = ConnectionAction::perma_actions();
         self.actions.items.retain(|a| perma_actions.contains(a));
 
@@ -109,15 +110,24 @@ impl Component for WifiState {
                                 if network.flags.contains(NetworkFlags::KNOWN) {
                                     return StateResult::Command(StateCommand::NetworkAction(
                                         NetworkAction::Wifi(WifiAction::ConnectKnown(
-                                            network.ssid.clone(),
-                                            network.security.clone(),
+                                            network.clone(),
                                         )),
                                     ));
                                 }
 
-                                match network.security {
-                                    Security::Psk => {
-                                        let prompt = PskConnectionPrompt::new(network.ssid.clone());
+                                match &network.security {
+                                    NetworkSecurity::Open | NetworkSecurity::Owe => {
+                                        StateResult::Command(StateCommand::NetworkAction(
+                                            NetworkAction::Wifi(WifiAction::Connect(
+                                                network.clone(),
+                                            )),
+                                        ))
+                                    }
+                                    NetworkSecurity::Wpa2 { .. }
+                                    | NetworkSecurity::Wpa2Hex { .. }
+                                    | NetworkSecurity::Wpa3Sae { .. }
+                                    | NetworkSecurity::Wpa3Transition { .. } => {
+                                        let prompt = PskConnectionPrompt::new(network.clone());
                                         StateResult::Command(StateCommand::Prompt(
                                             PromptState::PskConnect(prompt),
                                         ))
@@ -137,10 +147,7 @@ impl Component for WifiState {
                             if let Some(network) = net_ctx.networks.get(self.network_cursor.index) {
                                 if network.flags.contains(NetworkFlags::KNOWN) {
                                     return StateResult::Command(StateCommand::NetworkAction(
-                                        NetworkAction::Wifi(WifiAction::Forget(
-                                            network.ssid.clone(),
-                                            network.security.clone(),
-                                        )),
+                                        NetworkAction::Wifi(WifiAction::Forget(network.clone())),
                                     ));
                                 }
                                 StateResult::Consumed
