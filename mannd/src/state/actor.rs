@@ -84,7 +84,6 @@ impl<'a> NetworkActor<'a> {
                     return Ok(true);
                 }
             }
-            _ => {}
         };
 
         for req in state_send {
@@ -113,7 +112,7 @@ impl<'a> NetworkActor<'a> {
                     )));
                 }
             }
-            WifiAction::GetNetworks => match self.controller.get_all_networks().await {
+            WifiAction::GetNetworks => match self.controller.get_networks().await {
                 Ok(aps) => {
                     state_send.push(NetworkState::SetNetworks(aps));
                     state_send.push(NetworkState::Success(Success::Generic));
@@ -185,7 +184,7 @@ impl<'a> NetworkActor<'a> {
         };
 
         if should_full_refresh {
-            match self.controller.sync_all_networks().await {
+            match self.controller.get_networks().await {
                 Ok(networks) => state_send.push(NetworkState::SetNetworks(networks)),
                 Err(e) => {
                     tracing::error!("[Wi-Fi]: Failed to refresh networks after action. {e:?}");

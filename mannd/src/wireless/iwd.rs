@@ -54,8 +54,15 @@ impl Iwd {
         }
     }
 
-    pub async fn sync_networks(&mut self) -> Result<Vec<NetworkInfo>, ManndError> {
-        let stored = read_global(|state| state.app.networks.clone()).unwrap_or_default();
+    pub async fn get_networks(&mut self) -> Result<Vec<NetworkInfo>, ManndError> {
+        let station = self.get_interface_proxy("Station").await?;
+        let nearby: Vec<(OwnedObjectPath, i16)> = station.call("GetOrderedNetworks", &()).await?;
+
+        if nearby.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let stored = read_global(|state| state.app.saved_networks.clone()).unwrap_or_default();
         let mut by_ssid: HashMap<String, NetworkInfo> =
             stored.into_iter().map(|n| (n.ssid.clone(), n)).collect();
 
@@ -64,9 +71,6 @@ impl Iwd {
                 .remove(NetworkFlags::NEARBY | NetworkFlags::CONNECTED | NetworkFlags::KNOWN);
             net.signal_dbm = None;
         }
-
-        let station = self.get_interface_proxy("Station").await?;
-        let nearby: Vec<(OwnedObjectPath, i16)> = station.call("GetOrderedNetworks", &()).await?;
 
         for (path, signal_strength) in nearby {
             if let Ok(ap) = self.get_ap_info(path, Some(signal_strength)).await {
@@ -120,7 +124,6 @@ impl Iwd {
         }
 
         let networks: Vec<NetworkInfo> = by_ssid.into_values().collect();
-        modify_global(|state| state.app.networks = networks.clone());
         Ok(networks)
     }
 
@@ -146,6 +149,19 @@ impl Iwd {
         )
         .await?;
         proxy.call_noreply("Connect", &()).await?;
+        modify_global(|state| {
+            if let Some(existing) = state
+                .app
+                .saved_networks
+                .iter_mut()
+                .find(|n| n.ssid == network.ssid)
+            {
+                *existing = network.clone();
+            } else {
+                state.app.saved_networks.push(network.clone());
+            }
+        });
+
         Ok(())
     }
 

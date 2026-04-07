@@ -108,10 +108,9 @@ impl Controller {
             .build()
             .await?;
 
-        let mut iwd = Iwd::new(conn.clone(), agent_state.clone()).await?;
+        let iwd = Iwd::new(conn.clone(), agent_state.clone()).await?;
         self.connection = conn;
         iwd.register_agent().await?;
-        iwd.sync_networks().await?;
         self.wifi = Some(WirelessAdapter::Iwd(iwd));
         Ok(())
     }
@@ -123,11 +122,7 @@ impl Controller {
             .unwrap_or(WpaState::default());
 
         let config = WpaConfig::load_or_default()?;
-        let mut wpa = WpaSupplicant::new(config, wpa_state, self.connection.clone()).await?;
-
-        if let Err(e) = wpa.refresh_networks(true).await {
-            tracing::warn!("WPA initalised but network sync failed: {e}");
-        }
+        let wpa = WpaSupplicant::new(config, wpa_state, self.connection.clone()).await?;
 
         self.wifi = Some(WirelessAdapter::Wpa(wpa));
         Ok(())
@@ -204,7 +199,7 @@ impl Controller {
     pub async fn connect_known(&self, network: &NetworkInfo) -> Result<(), ManndError> {
         dispatch_wifi!(&self.wifi,
         iwd => iwd.connect_network(network).await,
-        wpa => wpa.connect_network(network).await,
+        wpa => wpa.connect_known(network).await,
         {
             tracing::error!("No wireless daemon found");
             Ok(())
@@ -262,18 +257,10 @@ impl Controller {
 // get information
 impl Controller {
     #[instrument(err, skip(self))]
-    pub async fn get_all_networks(&mut self) -> Result<Vec<NetworkInfo>, ManndError> {
+    pub async fn get_networks(&mut self) -> Result<Vec<NetworkInfo>, ManndError> {
         dispatch_wifi!(&mut self.wifi,
-            iwd => iwd.sync_networks().await,
-            wpa => wpa.refresh_networks(false).await,
-            Err(ManndError::NetworkNotFound))
-    }
-
-    #[instrument(err, skip(self))]
-    pub async fn sync_all_networks(&mut self) -> Result<Vec<NetworkInfo>, ManndError> {
-        dispatch_wifi!(&mut self.wifi,
-            iwd => iwd.sync_networks().await,
-            wpa => wpa.refresh_networks(true).await,
+            iwd => iwd.get_networks().await,
+            wpa => wpa.get_networks().await,
             Err(ManndError::NetworkNotFound))
     }
 

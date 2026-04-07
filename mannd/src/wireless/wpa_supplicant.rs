@@ -125,66 +125,78 @@ impl WpaSupplicant {
         Ok(wpa_interfaces)
     }
 
+    /// Checks for nearby networks, if a network has been connected to previously
+    /// and is nearby adds that network. Updates the global state. This should only
+    /// run after a scan operation has completed
     #[instrument(err, skip(self))]
-    pub async fn refresh_networks(
-        &mut self,
-        include_known_and_connected: bool,
-    ) -> Result<Vec<NetworkInfo>, ManndError> {
-        let stored = read_global(|state| state.app.networks.clone()).unwrap_or_default();
-        let mut by_ssid: HashMap<String, NetworkInfo> =
-            stored.into_iter().map(|n| (n.ssid.clone(), n)).collect();
+    pub async fn get_networks(&self) -> Result<Vec<NetworkInfo>, ManndError> {
+        let nearby = self
+            .get_interface_prop::<Vec<OwnedObjectPath>>("BSSs")
+            .await?;
+
+        if nearby.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let saved_networks =
+            read_global(|state| state.app.saved_networks.clone()).unwrap_or_default();
+
+        let mut by_ssid: HashMap<String, NetworkInfo> = saved_networks
+            .into_iter()
+            .map(|n| (n.ssid.clone(), n))
+            .collect();
+
+        // reset flags
         for net in by_ssid.values_mut() {
-            if include_known_and_connected {
-                net.flags
-                    .remove(NetworkFlags::NEARBY | NetworkFlags::CONNECTED | NetworkFlags::KNOWN);
-            } else {
-                net.flags.remove(NetworkFlags::NEARBY);
-            }
+            net.flags
+                .remove(NetworkFlags::NEARBY | NetworkFlags::CONNECTED | NetworkFlags::KNOWN);
             net.signal_dbm = None;
         }
-        if include_known_and_connected {
-            let cur_network = self
-                .get_interface_prop::<OwnedObjectPath>("CurrentNetwork")
-                .await
-                .ok();
-            let known_paths = self
-                .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
-                .await
-                .unwrap_or_default();
-            for path in known_paths {
-                let Ok(ssid) = self.get_known_ssid(&path).await else {
-                    continue;
-                };
-                by_ssid
-                    .entry(ssid.clone())
-                    .and_modify(|n| {
-                        n.flags.insert(NetworkFlags::KNOWN);
-                        if cur_network.as_ref().is_some_and(|cur| cur == &path) {
-                            n.flags.insert(NetworkFlags::CONNECTED);
-                        }
-                    })
-                    .or_insert_with(|| {
-                        let mut flags = NetworkFlags::KNOWN;
-                        if cur_network.as_ref().is_some_and(|cur| cur == &path) {
-                            flags.insert(NetworkFlags::CONNECTED);
-                        }
-                        NetworkInfoBuilder::default()
-                            .ssid(ssid)
-                            .security(NetworkSecurity::Open)
-                            .flags(flags)
-                            .build()
-                            .expect("BSS builder shouldn't fail")
-                    });
-            }
+
+        let cur_network = self
+            .get_interface_prop::<OwnedObjectPath>("CurrentNetwork")
+            .await
+            .ok();
+
+        let known_paths = self
+            .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
+            .await
+            .unwrap_or_default();
+
+        for path in known_paths {
+            let Ok(ssid) = self.get_known_ssid(&path).await else {
+                continue;
+            };
+            by_ssid
+                .entry(ssid.clone())
+                .and_modify(|n| {
+                    n.flags.insert(NetworkFlags::KNOWN);
+                    if cur_network.as_ref().is_some_and(|cur| cur == &path) {
+                        n.flags.insert(NetworkFlags::CONNECTED);
+                    }
+                })
+                .or_insert_with(|| {
+                    let mut flags = NetworkFlags::KNOWN;
+                    if cur_network.as_ref().is_some_and(|cur| cur == &path) {
+                        flags.insert(NetworkFlags::CONNECTED);
+                    }
+                    NetworkInfoBuilder::default()
+                        .ssid(ssid)
+                        .security(NetworkSecurity::Open)
+                        .flags(flags)
+                        .build()
+                        .expect("BSS builder shouldn't fail")
+                });
         }
+
         let nearby = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("BSSs")
             .await
             .unwrap_or_default();
         self.merge_nearby_bss(nearby, &mut by_ssid).await;
+
         let mut networks: Vec<NetworkInfo> = by_ssid.into_values().collect();
         self.sort_networks(&mut networks);
-        modify_global(|state| state.app.networks = networks.clone());
         Ok(networks)
     }
 
@@ -192,7 +204,7 @@ impl WpaSupplicant {
     pub async fn connect_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
         validate_network(network)?;
 
-        let Some(interface) = &self.state.active_interface else {
+        let Some(_) = &self.state.active_interface else {
             return Err(ManndError::WpaNoInterfaces);
         };
 
@@ -208,13 +220,13 @@ impl WpaSupplicant {
         modify_global(|state| {
             if let Some(existing) = state
                 .app
-                .networks
+                .saved_networks
                 .iter_mut()
                 .find(|n| n.ssid == network.ssid)
             {
                 *existing = network.clone();
             } else {
-                state.app.networks.push(network.clone());
+                state.app.saved_networks.push(network.clone());
             }
         });
 
@@ -238,10 +250,13 @@ impl WpaSupplicant {
         Err(ManndError::NetworkNotFound)
     }
 
+    /// Does not update the NetworkFlags of the disconnected network
+    /// instead it is expected that get_networks is called
     #[instrument(err, skip(self))]
     pub async fn disconnect(&self) -> Result<(), ManndError> {
         self.call_interface_method_noreply("Disconnect", &())
             .await?;
+
         Ok(())
     }
 
@@ -260,7 +275,7 @@ impl WpaSupplicant {
         }
 
         modify_global(|state| {
-            state.app.networks.retain(|n| n.ssid != network.ssid);
+            state.app.saved_networks.retain(|n| n.ssid != network.ssid);
         });
 
         Ok(())
@@ -273,7 +288,6 @@ impl WpaSupplicant {
         }
 
         let mut dict: HashMap<String, OwnedValue> = HashMap::new();
-
         dict.insert("Type".to_string(), Value::new("active").try_to_owned()?);
         self.call_interface_method_noreply("Scan", dict).await?;
 
@@ -357,7 +371,7 @@ impl WpaSupplicant {
         self.get_interface_prop::<String>("State").await
     }
 
-    /// Initialises what it can from the last recorded state
+    /// Initialises interfaces from last state if they are present
     async fn sync_interface_state(&mut self) -> Result<(), ManndError> {
         let cur_ifaces = self.get_interfaces().await?;
         let mut runtime_managed: Vec<ManagedInterface> = Vec::new();
@@ -481,31 +495,6 @@ impl WpaSupplicant {
         proxy.call_noreply("AutoScan", &autoscan_type).await?;
 
         Ok(())
-    }
-
-    #[instrument(err)]
-    async fn get_interface_prop<T>(&self, prop: &'static str) -> Result<T, ManndError>
-    where
-        for<'a> T: TryFrom<Value<'a>>,
-        for<'a> <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
-    {
-        // lifetime issue with interface proxy so made directly
-        let proxy = self.active_interface_proxy().await?;
-        get_prop_from_proxy::<T>(&proxy, prop).await
-    }
-
-    #[instrument(err, skip(self))]
-    async fn get_interface_signal<'a, M>(
-        &self,
-        signal_name: M,
-    ) -> Result<SignalStream<'a>, ManndError>
-    where
-        M: TryInto<MemberName<'a>> + Debug,
-        M::Error: Into<zbus::Error>,
-    {
-        let proxy = self.active_interface_proxy().await?;
-        let stream = proxy.receive_signal(signal_name).await?;
-        Ok(stream)
     }
 
     #[instrument(err, skip(self))]
@@ -652,12 +641,15 @@ impl WpaSupplicant {
             let Ok(bss) = self.get_bss_info(bss_path).await else {
                 continue;
             };
+
             if bss.ssid.is_empty() || bss.ssid.as_bytes().iter().all(|&b| b == 0) {
                 continue;
             }
+
             let ssid = bss.ssid.clone();
             let bss_security = bss.security.clone();
             let bss_signal = bss.signal_dbm;
+
             by_ssid
                 .entry(ssid.clone())
                 .and_modify(|n| {
@@ -787,51 +779,33 @@ impl WpaSupplicant {
 
         NetworkSecurity::Open
     }
+}
 
-    fn build_add_network_body(
+// Utility functions
+impl WpaSupplicant {
+    #[instrument(err)]
+    async fn get_interface_prop<T>(&self, prop: &'static str) -> Result<T, ManndError>
+    where
+        for<'a> T: TryFrom<Value<'a>>,
+        for<'a> <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
+    {
+        // lifetime issue with interface proxy so made directly
+        let proxy = self.active_interface_proxy().await?;
+        get_prop_from_proxy::<T>(&proxy, prop).await
+    }
+
+    #[instrument(err, skip(self))]
+    async fn get_interface_signal<'a, M>(
         &self,
-        network: &NetworkInfo,
-    ) -> Result<HashMap<String, OwnedValue>, ManndError> {
-        let mut body = HashMap::new();
-
-        body.insert(
-            "ssid".into(),
-            Value::new(network.ssid.as_str()).try_to_owned()?,
-        );
-
-        if network.hidden {
-            body.insert("scan_ssid".into(), Value::new(1_i32).try_to_owned()?);
-        }
-
-        match &network.security {
-            NetworkSecurity::Open => {
-                body.insert("key_mgmt".into(), Value::new("NONE").try_to_owned()?);
-            }
-            NetworkSecurity::Wpa2 { passphrase } => {
-                body.insert(
-                    "psk".into(),
-                    Value::new(passphrase.as_str()).try_to_owned()?,
-                );
-            }
-            NetworkSecurity::Wpa2Hex { psk_hex } => {
-                body.insert("psk".into(), Value::new(psk_hex.as_str()).try_to_owned()?);
-            }
-            NetworkSecurity::Wpa3Sae { password, .. } => {
-                body.insert("key_mgmt".into(), Value::new("SAE").try_to_owned()?);
-                body.insert(
-                    "sae_password".into(),
-                    Value::new(password.as_str()).try_to_owned()?,
-                );
-            }
-            NetworkSecurity::Wpa3Transition { password } => {
-                body.insert("psk".into(), Value::new(password.as_str()).try_to_owned()?);
-            }
-            NetworkSecurity::Owe => {
-                body.insert("key_mgmt".into(), Value::new("OWE").try_to_owned()?);
-            }
-        }
-
-        Ok(body)
+        signal_name: M,
+    ) -> Result<SignalStream<'a>, ManndError>
+    where
+        M: TryInto<MemberName<'a>> + Debug,
+        M::Error: Into<zbus::Error>,
+    {
+        let proxy = self.active_interface_proxy().await?;
+        let stream = proxy.receive_signal(signal_name).await?;
+        Ok(stream)
     }
 
     fn sort_networks(&self, networks: &mut [NetworkInfo]) {
@@ -890,10 +864,53 @@ impl WpaSupplicant {
         )
         .await?)
     }
-}
 
-// Internal functions
-impl WpaSupplicant {}
+    fn build_add_network_body(
+        &self,
+        network: &NetworkInfo,
+    ) -> Result<HashMap<String, OwnedValue>, ManndError> {
+        let mut body = HashMap::new();
+
+        body.insert(
+            "ssid".into(),
+            Value::new(network.ssid.as_str()).try_to_owned()?,
+        );
+
+        if network.hidden {
+            body.insert("scan_ssid".into(), Value::new(1_i32).try_to_owned()?);
+        }
+
+        match &network.security {
+            NetworkSecurity::Open => {
+                body.insert("key_mgmt".into(), Value::new("NONE").try_to_owned()?);
+            }
+            NetworkSecurity::Wpa2 { passphrase } => {
+                body.insert(
+                    "psk".into(),
+                    Value::new(passphrase.as_str()).try_to_owned()?,
+                );
+            }
+            NetworkSecurity::Wpa2Hex { psk_hex } => {
+                body.insert("psk".into(), Value::new(psk_hex.as_str()).try_to_owned()?);
+            }
+            NetworkSecurity::Wpa3Sae { password, .. } => {
+                body.insert("key_mgmt".into(), Value::new("SAE").try_to_owned()?);
+                body.insert(
+                    "sae_password".into(),
+                    Value::new(password.as_str()).try_to_owned()?,
+                );
+            }
+            NetworkSecurity::Wpa3Transition { password } => {
+                body.insert("psk".into(), Value::new(password.as_str()).try_to_owned()?);
+            }
+            NetworkSecurity::Owe => {
+                body.insert("key_mgmt".into(), Value::new("OWE").try_to_owned()?);
+            }
+        }
+
+        Ok(body)
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ManagedInterface {
