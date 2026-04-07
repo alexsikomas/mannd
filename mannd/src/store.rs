@@ -81,15 +81,16 @@ const APPLICATION_TABLE: TableDefinition<String, &[u8]> = TableDefinition::new("
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApplicationState {
     pub wg_running: bool,
+    /// Networks that have been connected to
     #[serde(default)]
-    pub networks: Vec<NetworkInfo>,
+    pub saved_networks: Vec<NetworkInfo>,
 }
 
 impl Default for ApplicationState {
     fn default() -> Self {
         Self {
             wg_running: false,
-            networks: vec![],
+            saved_networks: vec![],
         }
     }
 }
