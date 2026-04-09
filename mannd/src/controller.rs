@@ -22,6 +22,7 @@ use crate::{
     systemd::systemctl::is_service_active,
     wireguard::network::Wireguard,
     wireless::{
+        WifiBackend,
         agent::{AgentState, IwdAgent},
         iwd::Iwd,
         wpa_config::WpaConfig,
@@ -171,7 +172,7 @@ impl Controller {
         let res = dispatch_wifi!(
             &mut self.wifi,
             iwd => iwd.scan(sock_tx).await,
-            wpa => wpa.scan(sock_tx).await,
+            wpa => wpa.scan_networks(sock_tx).await,
             Err(ManndError::OperationFailed("No wifi daemon found".into()))
         );
 
@@ -199,7 +200,7 @@ impl Controller {
     pub async fn connect_known(&self, network: &NetworkInfo) -> Result<(), ManndError> {
         dispatch_wifi!(&self.wifi,
         iwd => iwd.connect_network(network).await,
-        wpa => wpa.connect_known(network).await,
+        wpa => wpa.connect_network(network).await,
         {
             tracing::error!("No wireless daemon found");
             Ok(())
@@ -212,7 +213,7 @@ impl Controller {
     ) -> Result<(), ManndError> {
         dispatch_wifi!(&self.wifi,
         iwd => Ok(()),
-        wpa => wpa.add_from_list(networks).await,
+        wpa => wpa.update_nearby_networks(networks).await,
         {
             tracing::error!("No wireless daemon found");
             Ok(())
@@ -236,7 +237,7 @@ impl Controller {
     pub async fn remove_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
         dispatch_wifi!(&self.wifi,
             iwd => iwd.remove_network(network).await,
-            wpa => wpa.remove_network(network).await,
+            wpa => wpa.forget_network(network).await,
             Ok(())
         )
     }

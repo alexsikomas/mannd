@@ -28,9 +28,12 @@ use crate::{
     error::ManndError,
     modify_global, read_global,
     state::signals::SignalUpdate,
-    store::{NetworkInfo, NetworkInfoBuilder, NetworkSecurity, WpaState},
-    utils::{list_interfaces, validate_network},
+    store::{
+        NetworkInfo, NetworkInfoBuilder, NetworkSecurity, WpaNetworkPolicyOverrideBuilder, WpaState,
+    },
+    utils::{list_interfaces, validate_network, wpa_bssid_to_string},
     wireless::{
+        WifiBackend,
         common::{NetworkFlags, get_prop_from_proxy},
         wpa_config::{ApplyScope, WpaAutoscan, WpaConfig, WpaUiSort},
     },
@@ -45,21 +48,126 @@ pub struct WpaSupplicant {
     service: String,
     path: String,
     conn: Connection,
-    // this resets each time
-    persist: bool,
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct WpaBss {
-    ssid: String,
-    bssid: Option<Vec<u8>>,
-    security: Option<NetworkSecurity>,
-    signal_dbm: Option<i16>,
-    /// mhz
-    freq: Option<u16>,
-    /// bits per second
-    rates: Option<Vec<u32>>,
+impl WifiBackend for WpaSupplicant {
+    async fn scan_networks(&self, signal_tx: Sender<SignalUpdate<'_>>) -> Result<(), ManndError> {
+        if self.get_interface_prop::<bool>("Scanning").await? {
+            return Ok(());
+        }
+
+        let mut dict: HashMap<String, OwnedValue> = HashMap::new();
+        dict.insert("Type".to_string(), Value::new("active").try_to_owned()?);
+        self.call_interface_method_noreply("Scan", dict).await?;
+
+        let scan_signal = self.get_interface_signal("ScanDone").await?;
+        match signal_tx.send(SignalUpdate::Add(scan_signal)).await {
+            Ok(()) => Ok(()),
+            Err(_) => Err(ManndError::SignalSend("in wpa_supplicant scan".to_string())),
+        }
+    }
+
+    #[instrument(err, skip(self))]
+    async fn get_networks(&self) -> Result<Vec<NetworkInfo>, ManndError> {
+        let nearby = self
+            .get_interface_prop::<Vec<OwnedObjectPath>>("BSSs")
+            .await?;
+
+        if nearby.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // There can be multiple BSSIDs per SSID, here we opt for
+        // connecting to the one with the highest frequency
+        let mut by_ssid: HashMap<String, (NetworkInfo, u16)> = HashMap::default();
+        for network in nearby {
+            let (info, freq) = self.get_bss_info(network).await?;
+            if !self.config.ui.show_hidden_networks {
+                if info.ssid.is_empty() || info.ssid.clone().into_bytes().iter().all(|&v| v == 0) {
+                    continue;
+                }
+            }
+
+            if let Some(prev) = by_ssid.get_mut(&info.ssid) {
+                if freq > prev.1 {
+                    prev.0 = info;
+                    prev.1 = freq;
+                }
+            } else {
+                by_ssid.insert(info.ssid.clone(), (info, freq));
+            }
+        }
+
+        let mut res: Vec<NetworkInfo> = by_ssid.into_values().map(|(n, _)| n).collect();
+        self.sort_networks(&mut res);
+        Ok(res)
+    }
+
+    #[instrument(err, skip(self))]
+    async fn connect_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
+        if network.flags.contains(NetworkFlags::KNOWN) {
+            let network_paths = self
+                .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
+                .await?;
+
+            for path in network_paths {
+                if self.get_known_ssid(&path).await? == network.ssid {
+                    self.call_interface_method_noreply("SelectNetwork", path)
+                        .await?;
+                    return Ok(());
+                }
+            }
+
+            return Err(ManndError::NetworkNotFound);
+        }
+
+        let network_path = self.add_network(network).await?;
+        self.call_interface_method_noreply("SelectNetwork", network_path.clone())
+            .await?;
+
+        // connect is a decently unlikely event so this is fine
+        modify_global(|state| {
+            if let Some(existing) = state
+                .app
+                .saved_networks
+                .iter_mut()
+                .find(|n| n.ssid == network.ssid)
+            {
+                *existing = network.clone();
+            } else {
+                state.app.saved_networks.push(network.clone());
+            }
+        });
+
+        Ok(())
+    }
+
+    async fn disconnect(&self) -> Result<(), ManndError> {
+        self.call_interface_method_noreply("Disconnect", &())
+            .await?;
+
+        Ok(())
+    }
+
+    async fn forget_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
+        let known = self
+            .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
+            .await?;
+
+        for net_path in known {
+            let cur_ssid = self.get_known_ssid(&net_path).await?;
+            if cur_ssid == network.ssid {
+                self.call_interface_method_noreply("RemoveNetwork", net_path)
+                    .await?;
+            }
+        }
+
+        modify_global(|state| {
+            state.app.saved_networks.retain(|n| n.ssid != network.ssid);
+        });
+
+        Ok(())
+    }
 }
 
 // Public functions
@@ -79,7 +187,6 @@ impl WpaSupplicant {
             conn,
             service,
             path,
-            persist: false,
         };
 
         wpa.sync_interface_state().await?;
@@ -123,196 +230,6 @@ impl WpaSupplicant {
         }
 
         Ok(wpa_interfaces)
-    }
-
-    /// Checks for nearby networks, if a network has been connected to previously
-    /// and is nearby adds that network. Updates the global state. This should only
-    /// run after a scan operation has completed
-    #[instrument(err, skip(self))]
-    pub async fn get_networks(&self) -> Result<Vec<NetworkInfo>, ManndError> {
-        let nearby = self
-            .get_interface_prop::<Vec<OwnedObjectPath>>("BSSs")
-            .await?;
-
-        if nearby.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let saved_networks =
-            read_global(|state| state.app.saved_networks.clone()).unwrap_or_default();
-
-        let mut by_ssid: HashMap<String, NetworkInfo> = saved_networks
-            .into_iter()
-            .map(|n| (n.ssid.clone(), n))
-            .collect();
-
-        // reset flags
-        for net in by_ssid.values_mut() {
-            net.flags
-                .remove(NetworkFlags::NEARBY | NetworkFlags::CONNECTED | NetworkFlags::KNOWN);
-            net.signal_dbm = None;
-        }
-
-        let cur_network = self
-            .get_interface_prop::<OwnedObjectPath>("CurrentNetwork")
-            .await
-            .ok();
-
-        let known_paths = self
-            .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
-            .await
-            .unwrap_or_default();
-
-        for path in known_paths {
-            let Ok(ssid) = self.get_known_ssid(&path).await else {
-                continue;
-            };
-            by_ssid
-                .entry(ssid.clone())
-                .and_modify(|n| {
-                    n.flags.insert(NetworkFlags::KNOWN);
-                    if cur_network.as_ref().is_some_and(|cur| cur == &path) {
-                        n.flags.insert(NetworkFlags::CONNECTED);
-                    }
-                })
-                .or_insert_with(|| {
-                    let mut flags = NetworkFlags::KNOWN;
-                    if cur_network.as_ref().is_some_and(|cur| cur == &path) {
-                        flags.insert(NetworkFlags::CONNECTED);
-                    }
-                    NetworkInfoBuilder::default()
-                        .ssid(ssid)
-                        .security(NetworkSecurity::Open)
-                        .flags(flags)
-                        .build()
-                        .expect("BSS builder shouldn't fail")
-                });
-        }
-
-        let nearby = self
-            .get_interface_prop::<Vec<OwnedObjectPath>>("BSSs")
-            .await
-            .unwrap_or_default();
-        self.merge_nearby_bss(nearby, &mut by_ssid).await;
-
-        let mut networks: Vec<NetworkInfo> = by_ssid.into_values().collect();
-        self.sort_networks(&mut networks);
-        Ok(networks)
-    }
-
-    #[instrument(err, skip(self))]
-    pub async fn connect_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
-        let network_path = self.add_network(network).await?;
-        self.call_interface_method_noreply("SelectNetwork", network_path.clone())
-            .await?;
-
-        // connect is a decently unlikely event so this is fine
-        modify_global(|state| {
-            if let Some(existing) = state
-                .app
-                .saved_networks
-                .iter_mut()
-                .find(|n| n.ssid == network.ssid)
-            {
-                *existing = network.clone();
-            } else {
-                state.app.saved_networks.push(network.clone());
-            }
-        });
-
-        Ok(())
-    }
-
-    #[instrument(err, skip(self))]
-    pub async fn connect_known(&self, network: &NetworkInfo) -> Result<(), ManndError> {
-        let network_paths = self
-            .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
-            .await?;
-
-        for path in network_paths {
-            if self.get_known_ssid(&path).await? == network.ssid {
-                self.call_interface_method_noreply("SelectNetwork", path)
-                    .await?;
-                return Ok(());
-            }
-        }
-
-        Err(ManndError::NetworkNotFound)
-    }
-
-    /// Adds the networks that have historically been connected to, to the wpa_supplicant1 dbus
-    /// so they can be connected to.
-    #[instrument(err, skip(self))]
-    pub async fn add_from_list(&self, networks: &mut Vec<NetworkInfo>) -> Result<(), ManndError> {
-        // if connected or no networks, skip
-        if self.is_connected().await? || networks.is_empty() {
-            return Ok(());
-        }
-
-        let Some(known) = read_global(|state| state.app.saved_networks.clone()) else {
-            return Ok(());
-        };
-
-        for known_net in known {
-            if let Some(near_net) = networks.iter_mut().find(|n| n.ssid == known_net.ssid) {
-                self.add_network(&known_net).await?;
-                near_net.flags |= NetworkFlags::KNOWN;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Does not update the NetworkFlags of the disconnected network
-    /// instead it is expected that get_networks is called
-    #[instrument(err, skip(self))]
-    pub async fn disconnect(&self) -> Result<(), ManndError> {
-        self.call_interface_method_noreply("Disconnect", &())
-            .await?;
-
-        Ok(())
-    }
-
-    #[instrument(err, skip(self))]
-    pub async fn remove_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
-        let known = self
-            .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
-            .await?;
-
-        for net_path in known {
-            let cur_ssid = self.get_known_ssid(&net_path).await?;
-            if cur_ssid == network.ssid {
-                self.call_interface_method_noreply("RemoveNetwork", net_path)
-                    .await?;
-            }
-        }
-
-        modify_global(|state| {
-            state.app.saved_networks.retain(|n| n.ssid != network.ssid);
-        });
-
-        Ok(())
-    }
-
-    #[instrument(err, skip(self))]
-    pub async fn scan(&self, signal_tx: Sender<SignalUpdate<'_>>) -> Result<(), ManndError> {
-        if self.get_interface_prop::<bool>("Scanning").await? {
-            return Ok(());
-        }
-
-        let mut dict: HashMap<String, OwnedValue> = HashMap::new();
-        dict.insert("Type".to_string(), Value::new("active").try_to_owned()?);
-        self.call_interface_method_noreply("Scan", dict).await?;
-
-        let scan_signal = self.get_interface_signal("ScanDone").await?;
-        match signal_tx.send(SignalUpdate::Add(scan_signal)).await {
-            Ok(()) => Ok(()),
-            Err(_) => Err(ManndError::SignalSend("in wpa_supplicant scan".to_string())),
-        }
-    }
-
-    pub const fn toggle_persist(&mut self) {
-        self.persist = !self.persist;
     }
 
     #[instrument(err, skip(self))]
@@ -361,6 +278,31 @@ impl WpaSupplicant {
         self.write_state()?;
         Ok(())
     }
+
+    /// Checks nearby and known networks, if they are nearby adds known flag and adds to the dbus
+    #[instrument(err, skip(self))]
+    pub async fn update_nearby_networks(
+        &self,
+        networks: &mut Vec<NetworkInfo>,
+    ) -> Result<(), ManndError> {
+        // if connected or no networks, skip
+        if self.is_connected().await?.0 || networks.is_empty() {
+            return Ok(());
+        }
+
+        let Some(known) = read_global(|state| state.app.saved_networks.clone()) else {
+            return Ok(());
+        };
+
+        for known_net in known {
+            if let Some(near_net) = networks.iter_mut().find(|n| n.ssid == known_net.ssid) {
+                self.add_network(&known_net).await?;
+                near_net.flags |= NetworkFlags::KNOWN;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 // Helper functions
@@ -379,17 +321,13 @@ impl WpaSupplicant {
         .await?)
     }
 
-    async fn is_connected(&self) -> Result<bool, ManndError> {
+    async fn is_connected(&self) -> Result<(bool, OwnedObjectPath), ManndError> {
         let cur_network = self
             .get_interface_prop::<OwnedObjectPath>("CurrentNetwork")
             .await?;
 
-        Ok(!cur_network.eq(&OwnedObjectPath::from(ObjectPath::from_str_unchecked("/"))))
-    }
-
-    #[instrument(err, skip(self))]
-    pub async fn status(&self) -> Result<String, ManndError> {
-        self.get_interface_prop::<String>("State").await
+        let is_conn = cur_network.ne(&OwnedObjectPath::from(ObjectPath::from_str_unchecked("/")));
+        Ok((is_conn, cur_network))
     }
 
     /// Initialises interfaces from last state if they are present
@@ -533,7 +471,7 @@ impl WpaSupplicant {
             self.state.managed_interfaces.push(interface.clone());
         }
 
-        if self.persist && !self.state.desired_interfaces.iter().any(|n| n == ifname) {
+        if self.state.desired_interfaces.is_empty() {
             self.state.desired_interfaces.push(ifname.to_string());
         }
 
@@ -623,7 +561,10 @@ impl WpaSupplicant {
     /// Used for networks which are nearby by may
     /// not have been connected to yet
     #[instrument(err, skip(self))]
-    async fn get_bss_info(&self, bss_path: OwnedObjectPath) -> Result<WpaBss, ManndError> {
+    async fn get_bss_info(
+        &self,
+        bss_path: OwnedObjectPath,
+    ) -> Result<(NetworkInfo, u16), ManndError> {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -632,124 +573,33 @@ impl WpaSupplicant {
         )
         .await?;
 
-        let bssid = Some(get_prop_from_proxy::<Vec<u8>>(&proxy, "BSSID").await?);
+        let bssid = get_prop_from_proxy::<Vec<u8>>(&proxy, "BSSID").await?;
+        let bssid = wpa_bssid_to_string(bssid);
         let ssid_vec = get_prop_from_proxy::<Vec<u8>>(&proxy, "SSID").await?;
         let ssid = String::from_utf8_lossy(&ssid_vec).to_string();
 
         let signal_dbm = get_prop_from_proxy::<i16>(&proxy, "Signal").await.ok();
-        let freq = Some(get_prop_from_proxy::<u16>(&proxy, "Frequency").await?);
-        let rates = Some(get_prop_from_proxy::<Vec<u32>>(&proxy, "Rates").await?);
+        let freq = get_prop_from_proxy::<u16>(&proxy, "Frequency").await?;
+        let rates = get_prop_from_proxy::<Vec<u32>>(&proxy, "Rates").await?;
 
         let rsn = get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "RSN").await?;
-        let security = Some(Self::get_security(&rsn));
 
-        Ok(WpaBss {
-            ssid,
-            bssid,
-            security,
-            signal_dbm,
-            freq,
-            rates,
-        })
+        let security = Self::get_security(&rsn);
+        let info = NetworkInfoBuilder::default()
+            .ssid(ssid)
+            .bssid(Some(bssid))
+            .security(security)
+            .signal_dbm(signal_dbm)
+            .wpa_policy_override(Some(
+                WpaNetworkPolicyOverrideBuilder::default()
+                    .allow_freq_mhz(rates)
+                    .build()?,
+            ))
+            .flags(NetworkFlags::NEARBY)
+            .build()?;
+
+        Ok((info, freq))
     }
-
-    async fn merge_nearby_bss(
-        &self,
-        nearby: Vec<OwnedObjectPath>,
-        by_ssid: &mut HashMap<String, NetworkInfo>,
-    ) {
-        for bss_path in nearby {
-            let Ok(bss) = self.get_bss_info(bss_path).await else {
-                continue;
-            };
-
-            if bss.ssid.is_empty() || bss.ssid.as_bytes().iter().all(|&b| b == 0) {
-                continue;
-            }
-
-            let ssid = bss.ssid.clone();
-            let bss_security = bss.security.clone();
-            let bss_signal = bss.signal_dbm;
-
-            by_ssid
-                .entry(ssid.clone())
-                .and_modify(|n| {
-                    n.flags.insert(NetworkFlags::NEARBY);
-                    if let Some(sec) = &bss_security {
-                        n.security = sec.clone();
-                    }
-                    n.signal_dbm = match (n.signal_dbm, bss_signal) {
-                        (Some(cur), Some(new)) => Some(cur.max(new)),
-                        (Some(cur), None) => Some(cur),
-                        (None, Some(new)) => Some(new),
-                        (None, None) => None,
-                    };
-                })
-                .or_insert_with(|| {
-                    NetworkInfoBuilder::default()
-                        .ssid(ssid)
-                        .security(bss_security.unwrap_or(NetworkSecurity::Open))
-                        .signal_dbm(bss_signal)
-                        .flags(NetworkFlags::NEARBY)
-                        .build()
-                        .expect("BSS builder shouldn't fail")
-                });
-        }
-    }
-
-    // #[instrument(err, skip(self))]
-    // async fn check_connection(&self, mut stream: SignalStream<'_>) -> Result<(), ManndError> {
-    //     let start = Instant::now();
-    //     let max_wait = Duration::from_secs(15);
-    //
-    //     // If first connected to a network then expect a disconnected first
-    //     // SUCCESS: authenticating -> associating -> 4-way-handshake -> completed
-    //     // FAILURE: associating -> 4-way-handshake -> disconnected (incorrect password)
-    //     // FAILURE: scanning -> scanning -> scanning -> [ad inf.] (can't find network)
-    //     loop {
-    //         match timeout(Duration::from_secs(1), stream.next()).await {
-    //             Ok(Some(msg)) => {
-    //                 let res: HashMap<String, OwnedValue> = msg.body().deserialize()?;
-    //                 if let Some(state) = res.get("State") {
-    //                     let state_str = state.downcast_ref::<&str>().unwrap_or("Unknown");
-    //                     info!("WPA STATE: {}", state_str);
-    //                     match state_str {
-    //                         "completed" => {
-    //                             info!("Connected successfully!");
-    //                             return Ok(());
-    //                         }
-    //                         "disconnected" => {
-    //                             // since success also uses disconnected check
-    //                             // how long we've been going first
-    //                             // TODO: look into lowering this
-    //                             if start.elapsed().as_secs() > 2 {
-    //                                 return Err(ManndError::ConnectionFailed(
-    //                                     "WPA rejected network request, check password".into(),
-    //                                 ));
-    //                             }
-    //                         }
-    //                         "inactive" => {
-    //                             return Err(ManndError::ConnectionFailed(
-    //                                 "Interface is inactive!".into(),
-    //                             ));
-    //                         }
-    //                         _ => {}
-    //                     }
-    //                 }
-    //             }
-    //             Ok(None) => {
-    //                 return Err(ManndError::OperationFailed(
-    //                     "DBus stream ended unexpectedly.".into(),
-    //                 ));
-    //             }
-    //             Err(_) => {
-    //                 if start.elapsed() > max_wait {
-    //                     return Err(ManndError::Timeout);
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
 
     fn get_security(rsn: &HashMap<String, Value<'_>>) -> NetworkSecurity {
         if rsn.is_empty() {

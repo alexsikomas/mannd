@@ -256,23 +256,26 @@ pub fn validate_network(network: &NetworkInfo) -> Result<(), ManndError> {
             "SSID cannot be empty".to_string(),
         ));
     }
+
     if let Some(bssid) = &network.bssid {
         validate_mac_addr(bssid, "bssid")?;
     }
+
     for entry in &network.bssid_blacklist {
         validate_mac_addr(entry, "bssid_blacklist")?;
     }
-    if let Some(bssid) = &network.bssid {
-        if network
-            .bssid_blacklist
-            .iter()
-            .any(|x| x.eq_ignore_ascii_case(bssid))
-        {
-            return Err(ManndError::InvalidPropertyFormat(
-                "bssid cannot also exist in bssid_blacklist".to_string(),
-            ));
-        }
-    }
+
+    // if let Some(bssid) = &network.bssid {
+    //     if network
+    //         .bssid_blacklist
+    //         .iter()
+    //         .any(|x| x.eq_ignore_ascii_case(bssid))
+    //     {
+    //         return Err(ManndError::InvalidPropertyFormat(
+    //             "bssid cannot also exist in bssid_blacklist".to_string(),
+    //         ));
+    //     }
+    // }
     // Security credentials
     validate_security(&network.security)
 }
@@ -338,4 +341,15 @@ pub fn validate_mac_addr(value: &str, field: &str) -> Result<(), ManndError> {
             "{field} must be MAC format XX:XX:XX:XX:XX:XX"
         )))
     }
+}
+
+pub fn wpa_bssid_to_string(bssid: Vec<u8>) -> String {
+    let mut s = String::with_capacity(17); // 12 hex + 5 colons
+    for (i, &byte) in bssid.iter().enumerate() {
+        if i > 0 {
+            s.push(':');
+        }
+        write!(&mut s, "{:02x}", byte).unwrap();
+    }
+    s
 }
