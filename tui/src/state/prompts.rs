@@ -4,6 +4,7 @@ use mannd::{
     store::{NetworkInfo, NetworkSecurity, PmfMode, SaePwe},
     wireless::wpa_supplicant::WpaInterface,
 };
+use tracing::info;
 
 use crate::{
     keys::KeyAction,
@@ -93,7 +94,7 @@ impl PskConnectionPrompt {
     pub fn new(network: NetworkInfo, daemon: WifiDaemonType) -> Self {
         let mut advanced = PskAdvInput::default();
         if let Some(bssid) = &network.bssid {
-            advanced.bssid = TextInput::with_value(bssid.clone());
+            advanced.bssid = TextInput::with_value(bssid);
         }
 
         if !network.bssid_blacklist.is_empty() {

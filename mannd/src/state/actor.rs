@@ -301,11 +301,7 @@ impl<'a> NetworkActor<'a> {
                     }
                 }
             }
-            WpaAction::TogglePersist => {
-                if let Some(WirelessAdapter::Wpa(wpa)) = &mut self.controller.wifi {
-                    wpa.toggle_persist();
-                }
-            }
+            _ => {}
         }
 
         if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
