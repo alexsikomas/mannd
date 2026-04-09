@@ -127,7 +127,10 @@ impl Component for WifiState {
                                     | NetworkSecurity::Wpa2Hex { .. }
                                     | NetworkSecurity::Wpa3Sae { .. }
                                     | NetworkSecurity::Wpa3Transition { .. } => {
-                                        let prompt = PskConnectionPrompt::new(network.clone());
+                                        let prompt = PskConnectionPrompt::new(
+                                            network.clone(),
+                                            ctx.wifi_daemon.clone().unwrap(),
+                                        );
                                         StateResult::Command(StateCommand::Prompt(
                                             PromptState::PskConnect(prompt),
                                         ))

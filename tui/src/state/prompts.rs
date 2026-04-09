@@ -1,12 +1,13 @@
 use mannd::{
+    controller::WifiDaemonType,
     state::messages::{NetworkAction, WifiAction, WpaAction},
-    store::{NetworkInfo, NetworkSecurity},
+    store::{NetworkInfo, NetworkSecurity, PmfMode, SaePwe},
     wireless::wpa_supplicant::WpaInterface,
 };
 
 use crate::{
     keys::KeyAction,
-    state::{AppContext, Component, Cursor, SelectableList, StateCommand, StateResult},
+    state::{AppContext, Component, Cursor, SelectableList, StateCommand, StateResult, TextInput},
 };
 
 #[derive(Debug)]
@@ -27,35 +28,214 @@ impl Component for PromptState {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum PskPromptSelect {
+#[derive(Eq, Clone, Debug, PartialEq)]
+pub enum PskPromptField {
     Password,
     Show,
+    AdvancedToggle,
+    AdvSetting(AdvPskSetting),
     Connect,
     Back,
 }
 
-impl PskPromptSelect {
-    fn as_vec() -> Vec<Self> {
-        vec![Self::Password, Self::Show, Self::Connect, Self::Back]
+impl PskPromptField {
+    fn get_fields(is_wpa3: bool, adv_open: bool, daemon: &WifiDaemonType) -> Vec<PskPromptField> {
+        let mut fields = vec![
+            PskPromptField::Password,
+            PskPromptField::Show,
+            PskPromptField::AdvancedToggle,
+        ];
+
+        if adv_open && *daemon == WifiDaemonType::Wpa {
+            fields.push(PskPromptField::AdvSetting(AdvPskSetting::Bssid));
+            fields.push(PskPromptField::AdvSetting(AdvPskSetting::BssidBlacklist));
+            fields.push(PskPromptField::AdvSetting(AdvPskSetting::Pmf));
+
+            if is_wpa3 {
+                fields.push(PskPromptField::AdvSetting(AdvPskSetting::SaePwe));
+            }
+        }
+
+        fields.push(PskPromptField::Connect);
+        fields.push(PskPromptField::Back);
+        fields
     }
+}
+
+#[derive(Eq, Clone, Debug, PartialEq)]
+pub enum AdvPskSetting {
+    Bssid,
+    BssidBlacklist,
+    Pmf,
+    SaePwe,
+}
+
+#[derive(Debug, Default)]
+pub struct PskAdvInput {
+    pub bssid: TextInput,
+    pub bssid_blacklist: TextInput,
+    pub pmf: Option<PmfMode>,
+    pub sae_pwe: Option<SaePwe>,
 }
 
 #[derive(Debug)]
 pub struct PskConnectionPrompt {
     pub network: NetworkInfo,
-    pub password: String,
-    pub select: SelectableList<PskPromptSelect>,
+    pub daemon: WifiDaemonType,
+    pub password: TextInput,
     pub show_password: bool,
+    pub advanced_open: bool,
+    pub advanced_inputs: PskAdvInput,
+    pub select: SelectableList<PskPromptField>,
 }
 
 impl PskConnectionPrompt {
-    pub fn new(network: NetworkInfo) -> Self {
+    pub fn new(network: NetworkInfo, daemon: WifiDaemonType) -> Self {
+        let mut advanced = PskAdvInput::default();
+        if let Some(bssid) = &network.bssid {
+            advanced.bssid = TextInput::with_value(bssid.clone());
+        }
+
+        if !network.bssid_blacklist.is_empty() {
+            advanced.bssid_blacklist = TextInput::with_value(network.bssid_blacklist.join(", "));
+        }
+
+        advanced.pmf = network.pmf.clone();
+
+        if let NetworkSecurity::Wpa3Sae { pwe, .. } = &network.security {
+            advanced.sae_pwe = pwe.clone();
+        }
+
+        let select = SelectableList::new(PskPromptField::get_fields(
+            matches!(network.security, NetworkSecurity::Wpa3Sae { .. }),
+            false,
+            &daemon,
+        ));
+
         Self {
             network,
-            password: String::new(),
-            select: SelectableList::new(PskPromptSelect::as_vec()),
+            daemon,
+            password: TextInput::new(),
             show_password: false,
+            advanced_open: false,
+            advanced_inputs: advanced,
+            select,
+        }
+    }
+
+    pub fn advanced_fields(&self) -> Vec<AdvPskSetting> {
+        self.select
+            .items
+            .iter()
+            .filter_map(|f| match f {
+                PskPromptField::AdvSetting(setting) => Some(setting.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn backspace(&mut self) {
+        match self.select.selected() {
+            Some(PskPromptField::Password) => self.password.backspace(),
+            Some(PskPromptField::AdvSetting(setting)) => match setting {
+                AdvPskSetting::Bssid => self.advanced_inputs.bssid.backspace(),
+                AdvPskSetting::BssidBlacklist => self.advanced_inputs.bssid_blacklist.backspace(),
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    fn push_text(&mut self, s: &str) {
+        match self.select.selected() {
+            Some(PskPromptField::Password) => self.password.push_str(s),
+            Some(PskPromptField::AdvSetting(setting)) => match setting {
+                AdvPskSetting::Bssid => self.advanced_inputs.bssid.push_str(s),
+                AdvPskSetting::BssidBlacklist => self.advanced_inputs.bssid_blacklist.push_str(s),
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    fn cycle_option<T: Clone + PartialEq>(
+        current: &mut Option<T>,
+        options: &[Option<T>],
+        forward: bool,
+    ) {
+        let cur_idx = options.iter().position(|opt| opt == current).unwrap_or(0);
+
+        let next_idx = if forward {
+            (cur_idx + 1) % options.len()
+        } else {
+            cur_idx.checked_sub(1).unwrap_or(options.len() - 1)
+        };
+
+        *current = options[next_idx].clone();
+    }
+
+    fn cycle_pmf(&mut self, forward: bool) {
+        let opts = [
+            None,
+            Some(PmfMode::Disabled),
+            Some(PmfMode::Optional),
+            Some(PmfMode::Required),
+        ];
+        Self::cycle_option(&mut self.advanced_inputs.pmf, &opts, forward);
+    }
+
+    fn cycle_sae_pwe(&mut self, forward: bool) {
+        let opts = [
+            None,
+            Some(SaePwe::HuntAndPeck),
+            Some(SaePwe::HashToElement),
+            Some(SaePwe::Both),
+        ];
+        Self::cycle_option(&mut self.advanced_inputs.sae_pwe, &opts, forward);
+    }
+
+    fn apply_password(&self, network: &mut NetworkInfo) {
+        match &mut network.security {
+            NetworkSecurity::Wpa2 { passphrase } => {
+                *passphrase = self.password.value.clone();
+            }
+            NetworkSecurity::Wpa2Hex { psk_hex } => {
+                *psk_hex = self.password.value.clone();
+            }
+            NetworkSecurity::Wpa3Sae { password, .. } => {
+                *password = self.password.value.clone();
+            }
+            NetworkSecurity::Wpa3Transition { password } => {
+                *password = self.password.value.clone();
+            }
+            _ => {}
+        }
+    }
+
+    fn apply_advanced(&self, network: &mut NetworkInfo) {
+        if !matches!(self.daemon, WifiDaemonType::Wpa) {
+            return;
+        }
+
+        let bssid = self.advanced_inputs.bssid.value.trim();
+        network.bssid = if bssid.is_empty() {
+            None
+        } else {
+            Some(bssid.to_string())
+        };
+        network.bssid_blacklist = self
+            .advanced_inputs
+            .bssid_blacklist
+            .value
+            .split(',')
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<String>>();
+
+        network.pmf = self.advanced_inputs.pmf.clone();
+        if let NetworkSecurity::Wpa3Sae { pwe, .. } = &mut network.security {
+            *pwe = self.advanced_inputs.sae_pwe.clone();
         }
     }
 }
@@ -67,75 +247,131 @@ impl Component for PskConnectionPrompt {
         };
 
         match key {
-            KeyAction::Up | KeyAction::Down => match selected {
-                PskPromptSelect::Password | PskPromptSelect::Show => {
-                    self.select.set(PskPromptSelect::Connect);
+            KeyAction::Up => match selected {
+                PskPromptField::Password | PskPromptField::Show => {
+                    self.select.set(PskPromptField::Connect);
                 }
-                PskPromptSelect::Connect | PskPromptSelect::Back => {
-                    self.select.set(PskPromptSelect::Password);
+                PskPromptField::Connect | PskPromptField::Back => {
+                    if self.advanced_open {
+                        let adv = self.advanced_fields();
+                        let Some(last) = adv.last() else {
+                            return StateResult::Consumed;
+                        };
+
+                        self.select.set(PskPromptField::AdvSetting(last.clone()));
+                    } else {
+                        self.select.set(PskPromptField::AdvancedToggle);
+                    }
+                }
+                PskPromptField::AdvancedToggle => {
+                    self.select.set(PskPromptField::Password);
+                }
+                _ => {
+                    self.select.prev();
                 }
             },
-            KeyAction::Left | KeyAction::Right => match selected {
-                PskPromptSelect::Password => {
-                    self.select.set(PskPromptSelect::Show);
+            KeyAction::Down => match selected {
+                PskPromptField::Password | PskPromptField::Show => {
+                    let Some(idx) = self
+                        .select
+                        .items
+                        .iter()
+                        .position(|i| *i == PskPromptField::Show)
+                    else {
+                        return StateResult::Consumed;
+                    };
+                    self.select.selected_index = idx + 1;
                 }
-                PskPromptSelect::Show => {
-                    self.select.set(PskPromptSelect::Password);
+                PskPromptField::Connect | PskPromptField::Back => {
+                    self.select.set(PskPromptField::Password);
                 }
-                PskPromptSelect::Connect => {
-                    self.select.set(PskPromptSelect::Back);
-                }
-                PskPromptSelect::Back => {
-                    self.select.set(PskPromptSelect::Connect);
+                _ => {
+                    self.select.next();
                 }
             },
-            KeyAction::Backspace => {
-                if selected == &PskPromptSelect::Password {
-                    self.password.pop();
-                }
-            }
-            KeyAction::Enter => match selected {
-                PskPromptSelect::Connect => {
-                    let mut network = self.network.clone();
-                    match &mut network.security {
-                        NetworkSecurity::Wpa2 { passphrase } => {
-                            *passphrase = self.password.clone();
+            KeyAction::Left | KeyAction::Right => {
+                let forward = key == &KeyAction::Right;
+                match selected {
+                    PskPromptField::Connect => {
+                        self.select.set(PskPromptField::Back);
+                    }
+                    PskPromptField::Back => {
+                        self.select.set(PskPromptField::Connect);
+                    }
+                    PskPromptField::Password => {
+                        self.select.set(PskPromptField::Show);
+                    }
+                    PskPromptField::Show => {
+                        self.select.set(PskPromptField::Password);
+                    }
+                    PskPromptField::AdvSetting(setting) => match setting {
+                        AdvPskSetting::Pmf => {
+                            self.cycle_pmf(forward);
                         }
-                        NetworkSecurity::Wpa2Hex { psk_hex } => {
-                            *psk_hex = self.password.clone();
-                        }
-                        NetworkSecurity::Wpa3Sae { password, .. } => {
-                            *password = self.password.clone();
-                        }
-                        NetworkSecurity::Wpa3Transition { password } => {
-                            *password = self.password.clone();
+                        AdvPskSetting::SaePwe => {
+                            self.cycle_sae_pwe(forward);
                         }
                         _ => {}
-                    }
-
+                    },
+                    _ => {}
+                }
+            }
+            KeyAction::Backspace => {
+                self.backspace();
+            }
+            KeyAction::Char(c) => {
+                let mut s = String::with_capacity(1);
+                s.push(*c);
+                self.push_text(&s);
+            }
+            KeyAction::Paste(s) => {
+                self.push_text(s);
+            }
+            KeyAction::Enter => match selected {
+                PskPromptField::Connect => {
+                    let mut network = self.network.clone();
+                    self.apply_password(&mut network);
+                    self.apply_advanced(&mut network);
                     return StateResult::Command(StateCommand::NetworkAction(NetworkAction::Wifi(
                         WifiAction::Connect(network),
                     )));
                 }
-                PskPromptSelect::Back => {
-                    self.password.pop();
+                PskPromptField::Back => {
                     return StateResult::Command(StateCommand::PopPrompt);
                 }
-                PskPromptSelect::Show => {
+                PskPromptField::Show => {
                     self.show_password = !self.show_password;
                 }
+                PskPromptField::AdvancedToggle => {
+                    self.advanced_open = !self.advanced_open;
+                    let is_wpa3 = matches!(self.network.security, NetworkSecurity::Wpa3Sae { .. });
+                    let previous = self.select.selected().cloned();
+
+                    self.select.items =
+                        PskPromptField::get_fields(is_wpa3, self.advanced_open, &self.daemon);
+
+                    if let Some(prev) = previous
+                        && let Some(index) = self.select.items.iter().position(|f| *f == prev)
+                    {
+                        self.select.selected_index = index;
+                    } else {
+                        self.select.selected_index = self
+                            .select
+                            .selected_index
+                            .min(self.select.items.len().saturating_sub(1));
+                    }
+                }
+                PskPromptField::AdvSetting(setting) => match setting {
+                    AdvPskSetting::Pmf => {
+                        self.cycle_pmf(true);
+                    }
+                    AdvPskSetting::SaePwe => {
+                        self.cycle_sae_pwe(true);
+                    }
+                    _ => {}
+                },
                 _ => {}
             },
-            KeyAction::Char(c) => {
-                if selected == &PskPromptSelect::Password {
-                    self.password.push(*c);
-                }
-            }
-            KeyAction::Paste(s) => {
-                if selected == &PskPromptSelect::Password {
-                    self.password.push_str(s);
-                }
-            }
             _ => {}
         }
         StateResult::Consumed

@@ -20,7 +20,7 @@ use zbus::{
     Connection, Proxy,
     names::MemberName,
     proxy::SignalStream,
-    zvariant::{self, OwnedObjectPath, OwnedValue, Value},
+    zvariant::{self, ObjectPath, OwnedObjectPath, OwnedValue, Value},
 };
 
 use crate::{
@@ -202,17 +202,7 @@ impl WpaSupplicant {
 
     #[instrument(err, skip(self))]
     pub async fn connect_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
-        validate_network(network)?;
-
-        let Some(_) = &self.state.active_interface else {
-            return Err(ManndError::WpaNoInterfaces);
-        };
-
-        let body = self.build_add_network_body(network)?;
-
-        let network_path: OwnedObjectPath = self
-            .call_interface_method::<_, OwnedObjectPath>("AddNetwork", body)
-            .await?;
+        let network_path = self.add_network(network).await?;
         self.call_interface_method_noreply("SelectNetwork", network_path.clone())
             .await?;
 
@@ -248,6 +238,29 @@ impl WpaSupplicant {
         }
 
         Err(ManndError::NetworkNotFound)
+    }
+
+    /// Adds the networks that have historically been connected to, to the wpa_supplicant1 dbus
+    /// so they can be connected to.
+    #[instrument(err, skip(self))]
+    pub async fn add_from_list(&self, networks: &mut Vec<NetworkInfo>) -> Result<(), ManndError> {
+        // if connected or no networks, skip
+        if self.is_connected().await? || networks.is_empty() {
+            return Ok(());
+        }
+
+        let Some(known) = read_global(|state| state.app.saved_networks.clone()) else {
+            return Ok(());
+        };
+
+        for known_net in known {
+            if let Some(near_net) = networks.iter_mut().find(|n| n.ssid == known_net.ssid) {
+                self.add_network(&known_net).await?;
+                near_net.flags |= NetworkFlags::KNOWN;
+            }
+        }
+
+        Ok(())
     }
 
     /// Does not update the NetworkFlags of the disconnected network
@@ -364,6 +377,14 @@ impl WpaSupplicant {
             "fi.w1.wpa_supplicant1.Interface",
         )
         .await?)
+    }
+
+    async fn is_connected(&self) -> Result<bool, ManndError> {
+        let cur_network = self
+            .get_interface_prop::<OwnedObjectPath>("CurrentNetwork")
+            .await?;
+
+        Ok(!cur_network.eq(&OwnedObjectPath::from(ObjectPath::from_str_unchecked("/"))))
     }
 
     #[instrument(err, skip(self))]
@@ -676,59 +697,59 @@ impl WpaSupplicant {
         }
     }
 
-    #[instrument(err, skip(self))]
-    async fn check_connection(&self, mut stream: SignalStream<'_>) -> Result<(), ManndError> {
-        let start = Instant::now();
-        let max_wait = Duration::from_secs(15);
-
-        // If first connected to a network then expect a disconnected first
-        // SUCCESS: authenticating -> associating -> 4-way-handshake -> completed
-        // FAILURE: associating -> 4-way-handshake -> disconnected (incorrect password)
-        // FAILURE: scanning -> scanning -> scanning -> [ad inf.] (can't find network)
-        loop {
-            match timeout(Duration::from_secs(1), stream.next()).await {
-                Ok(Some(msg)) => {
-                    let res: HashMap<String, OwnedValue> = msg.body().deserialize()?;
-                    if let Some(state) = res.get("State") {
-                        let state_str = state.downcast_ref::<&str>().unwrap_or("Unknown");
-                        info!("WPA STATE: {}", state_str);
-                        match state_str {
-                            "completed" => {
-                                info!("Connected successfully!");
-                                return Ok(());
-                            }
-                            "disconnected" => {
-                                // since success also uses disconnected check
-                                // how long we've been going first
-                                // TODO: look into lowering this
-                                if start.elapsed().as_secs() > 2 {
-                                    return Err(ManndError::ConnectionFailed(
-                                        "WPA rejected network request, check password".into(),
-                                    ));
-                                }
-                            }
-                            "inactive" => {
-                                return Err(ManndError::ConnectionFailed(
-                                    "Interface is inactive!".into(),
-                                ));
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                Ok(None) => {
-                    return Err(ManndError::OperationFailed(
-                        "DBus stream ended unexpectedly.".into(),
-                    ));
-                }
-                Err(_) => {
-                    if start.elapsed() > max_wait {
-                        return Err(ManndError::Timeout);
-                    }
-                }
-            }
-        }
-    }
+    // #[instrument(err, skip(self))]
+    // async fn check_connection(&self, mut stream: SignalStream<'_>) -> Result<(), ManndError> {
+    //     let start = Instant::now();
+    //     let max_wait = Duration::from_secs(15);
+    //
+    //     // If first connected to a network then expect a disconnected first
+    //     // SUCCESS: authenticating -> associating -> 4-way-handshake -> completed
+    //     // FAILURE: associating -> 4-way-handshake -> disconnected (incorrect password)
+    //     // FAILURE: scanning -> scanning -> scanning -> [ad inf.] (can't find network)
+    //     loop {
+    //         match timeout(Duration::from_secs(1), stream.next()).await {
+    //             Ok(Some(msg)) => {
+    //                 let res: HashMap<String, OwnedValue> = msg.body().deserialize()?;
+    //                 if let Some(state) = res.get("State") {
+    //                     let state_str = state.downcast_ref::<&str>().unwrap_or("Unknown");
+    //                     info!("WPA STATE: {}", state_str);
+    //                     match state_str {
+    //                         "completed" => {
+    //                             info!("Connected successfully!");
+    //                             return Ok(());
+    //                         }
+    //                         "disconnected" => {
+    //                             // since success also uses disconnected check
+    //                             // how long we've been going first
+    //                             // TODO: look into lowering this
+    //                             if start.elapsed().as_secs() > 2 {
+    //                                 return Err(ManndError::ConnectionFailed(
+    //                                     "WPA rejected network request, check password".into(),
+    //                                 ));
+    //                             }
+    //                         }
+    //                         "inactive" => {
+    //                             return Err(ManndError::ConnectionFailed(
+    //                                 "Interface is inactive!".into(),
+    //                             ));
+    //                         }
+    //                         _ => {}
+    //                     }
+    //                 }
+    //             }
+    //             Ok(None) => {
+    //                 return Err(ManndError::OperationFailed(
+    //                     "DBus stream ended unexpectedly.".into(),
+    //                 ));
+    //             }
+    //             Err(_) => {
+    //                 if start.elapsed() > max_wait {
+    //                     return Err(ManndError::Timeout);
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
     fn get_security(rsn: &HashMap<String, Value<'_>>) -> NetworkSecurity {
         if rsn.is_empty() {
@@ -909,6 +930,23 @@ impl WpaSupplicant {
         }
 
         Ok(body)
+    }
+
+    #[instrument(err, skip(self))]
+    async fn add_network(&self, network: &NetworkInfo) -> Result<OwnedObjectPath, ManndError> {
+        validate_network(network)?;
+
+        let Some(_) = &self.state.active_interface else {
+            return Err(ManndError::WpaNoInterfaces);
+        };
+
+        let body = self.build_add_network_body(network)?;
+
+        let network_path: OwnedObjectPath = self
+            .call_interface_method::<_, OwnedObjectPath>("AddNetwork", body)
+            .await?;
+
+        Ok(network_path)
     }
 }
 

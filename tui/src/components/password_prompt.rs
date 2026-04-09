@@ -1,12 +1,16 @@
 use mannd::store::NetworkInfo;
 use ratatui::{
-    layout::{Constraint, Flex, Layout, Margin, Rect, Spacing},
+    layout::{Constraint, Flex, Layout, Margin, Offset, Rect, Spacing},
     style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 
-use crate::{components::layout::centered_overlay, state::prompts::PskConnectionPrompt, ui::theme};
+use crate::{
+    components::layout::centered_overlay,
+    state::prompts::{PskConnectionPrompt, PskPromptField},
+    ui::theme,
+};
 
 pub struct PasswordPrompt<'a> {
     network: &'a NetworkInfo,
@@ -66,27 +70,42 @@ impl Widget for PasswordPrompt<'_> {
 
         // BUTTON STYLES
         // for order refer to PskPromptSelect::to_vec()
-        let mut styles: Vec<Style> = vec![];
-        for i in 0..self.info.select.items.len() {
-            let style = if self.info.select.selected_index == i {
+        // let mut styles: Vec<Style> = vec![];
+        // for i in 0..self.info.select.items.len() {
+        //     let style = if self.info.select.selected_index == i {
+        //         Style::new().fg(theme.accent.color())
+        //     } else {
+        //         Style::new().fg(theme.muted.color())
+        //     };
+        //     styles.push(style);
+        // }
+
+        let selected = self.info.select.selected();
+        let control_style = |active: bool| {
+            if active {
                 Style::new().fg(theme.accent.color())
             } else {
                 Style::new().fg(theme.muted.color())
-            };
-            styles.push(style);
-        }
+            }
+        };
 
         let password_box = Block::new()
             .title_top(Line::from(" Password ").style(Style::new().fg(theme.tertiary.color())))
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .style(styles[0]);
+            .style(control_style(matches!(
+                selected,
+                Some(PskPromptField::Password)
+            )));
 
         let show_block = Block::new()
+            .title_top(Line::from(" Show ").centered())
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .style(styles[1])
-            .title_top(Line::from(" Show ").centered());
+            .style(control_style(matches!(
+                selected,
+                Some(PskPromptField::Show)
+            )));
 
         let password_areas = Layout::horizontal([
             Constraint::Percentage(100), // password box
@@ -100,17 +119,19 @@ impl Widget for PasswordPrompt<'_> {
             .flex(Flex::Center)
             .split(password_box.inner(password_areas[0]))[0];
 
+        let password = &self.info.password.value;
         password_box.render(password_areas[0], buf);
         show_block.render(password_areas[1], buf);
-        let mut password_text = Paragraph::new("*".repeat(self.info.password.len()));
+
+        let mut password_text = Paragraph::new("*".repeat(password.len()));
         let mut select_text = Line::from(" ");
 
         if self.info.show_password {
             let width = password_areas[0].width as usize;
-            if self.info.password.len() > width {
-                password_text = Paragraph::new(&self.info.password[width..]);
+            if password.len() > width {
+                password_text = Paragraph::new(&password[width..]);
             } else {
-                password_text = Paragraph::new(self.info.password.clone());
+                password_text = Paragraph::new(password.clone());
             }
             select_text = Line::from("X").centered();
         }
@@ -118,15 +139,29 @@ impl Widget for PasswordPrompt<'_> {
         password_text.render(password_text_area, buf);
         select_text.render(password_areas[1].inner(Margin::new(1, 1)), buf);
 
+        let adv_toggle_area = password_text_area.offset(Offset { x: 0, y: 5 });
+        Line::from("UNDER CONSTRUCTION")
+            .style(control_style(matches!(
+                selected,
+                Some(PskPromptField::AdvancedToggle)
+            )))
+            .render(adv_toggle_area, buf);
+
         let connect_block = Block::new()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .style(styles[2]);
+            .style(control_style(matches!(
+                selected,
+                Some(PskPromptField::Connect)
+            )));
 
         let back_block = Block::new()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .style(styles[3]);
+            .style(control_style(matches!(
+                selected,
+                Some(PskPromptField::Back)
+            )));
 
         let button_layouts = Layout::vertical([Constraint::Min(0), Constraint::Length(3)])
             .flex(Flex::Center)

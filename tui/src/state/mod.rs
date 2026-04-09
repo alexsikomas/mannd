@@ -373,3 +373,54 @@ impl Cursor {
         self.index = self.index.saturating_sub(step);
     }
 }
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct TextInput {
+    pub value: String,
+}
+
+impl TextInput {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_value(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.value.clear();
+    }
+
+    pub fn push_char(&mut self, c: char) {
+        self.value.push(c);
+    }
+
+    pub fn push_str(&mut self, s: &str) {
+        self.value.push_str(s);
+    }
+
+    pub fn backspace(&mut self) {
+        self.value.pop();
+    }
+
+    pub fn handle_key(&mut self, key: &KeyAction) -> bool {
+        match key {
+            KeyAction::Char(c) => {
+                self.push_char(*c);
+                true
+            }
+            KeyAction::Paste(s) => {
+                self.push_str(s);
+                true
+            }
+            KeyAction::Backspace => {
+                self.backspace();
+                true
+            }
+            _ => false,
+        }
+    }
+}
