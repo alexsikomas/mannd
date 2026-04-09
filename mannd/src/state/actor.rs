@@ -112,11 +112,18 @@ impl<'a> NetworkActor<'a> {
                     )));
                 }
             }
+            // get networks makes a further call to the controller to try to reconnect
+            // to previous known networks
             WifiAction::GetNetworks => match self.controller.get_networks().await {
-                Ok(aps) => {
-                    state_send.push(NetworkState::SetNetworks(aps));
-                    state_send.push(NetworkState::Success(Success::Generic));
-                }
+                Ok(mut aps) => match self.controller.connect_from_list(&mut aps).await {
+                    Ok(()) => {
+                        state_send.push(NetworkState::SetNetworks(aps));
+                        state_send.push(NetworkState::Success(Success::Generic));
+                    }
+                    Err(e) => {
+                        tracing::error!("[Wi-Fi]: failed to connect to known network. {e:?}");
+                    }
+                },
                 Err(e) => {
                     tracing::error!("[Wi-Fi]: Failed to get networks. {e:?}");
                     state_send.push(NetworkState::Failed(Failure::new(
