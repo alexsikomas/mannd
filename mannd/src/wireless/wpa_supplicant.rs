@@ -77,23 +77,71 @@ impl WifiBackend for WpaSupplicant {
             return Ok(vec![]);
         }
 
+        let saved_nets = read_global(|state| state.app.saved_networks.clone());
+        let (is_conn, path) = self.is_connected().await?;
+
+        // TODO: error if multiple networks saved with same ssid
+        let conn_bssid = if let Some(ref saved) = saved_nets
+            && is_conn
+        {
+            let proxy = self.get_network_proxy(path).await?;
+            let conn_info =
+                get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "Properties").await?;
+
+            let conn_ssid: &str = conn_info
+                .get("ssid")
+                .ok_or_else(|| {
+                    ManndError::OperationFailed("Getting ssid from connected network".into())
+                })?
+                .try_into()?;
+            let conn_ssid: String = conn_ssid.trim_matches('"').to_string();
+
+            if let Some(pos) = saved.iter().position(|s| s.ssid == conn_ssid) {
+                Some(saved[pos].bssid.clone().expect("Failed to get BSSID"))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // There can be multiple BSSIDs per SSID, here we opt for
         // connecting to the one with the highest frequency
         let mut by_ssid: HashMap<String, (NetworkInfo, u16)> = HashMap::default();
         for network in nearby {
-            let (info, freq) = self.get_bss_info(network).await?;
+            let (mut info, freq) = self.get_bss_info(network).await?;
+
+            if info.bssid == conn_bssid {
+                info.flags |= NetworkFlags::KNOWN | NetworkFlags::CONNECTED;
+                by_ssid.insert(info.ssid.clone(), (info, freq));
+                continue;
+            }
+
             if !self.config.ui.show_hidden_networks {
                 if info.ssid.is_empty() || info.ssid.clone().into_bytes().iter().all(|&v| v == 0) {
                     continue;
                 }
             }
 
+            // take only highest frequency unless connected or known
             if let Some(prev) = by_ssid.get_mut(&info.ssid) {
+                if info
+                    .flags
+                    .contains(NetworkFlags::KNOWN | NetworkFlags::CONNECTED)
+                {
+                    continue;
+                }
+
                 if freq > prev.1 {
                     prev.0 = info;
                     prev.1 = freq;
                 }
             } else {
+                if let Some(ref saved) = saved_nets {
+                    if saved.iter().find(|n| n.bssid == info.bssid).is_some() {
+                        info.flags |= NetworkFlags::KNOWN;
+                    }
+                }
                 by_ssid.insert(info.ssid.clone(), (info, freq));
             }
         }
@@ -680,34 +728,56 @@ impl WpaSupplicant {
     }
 
     fn sort_networks(&self, networks: &mut [NetworkInfo]) {
+        let get_tier = |n: &NetworkInfo| -> u8 {
+            let is_conn = n.flags.contains(NetworkFlags::CONNECTED);
+            let is_known = n.flags.contains(NetworkFlags::KNOWN);
+            let is_near = n.flags.contains(NetworkFlags::NEARBY);
+
+            if is_conn {
+                0
+            } else if is_known && is_near {
+                1
+            } else if is_near {
+                2
+            } else {
+                3
+            }
+        };
+
         match self.config.ui.sort_networks_by {
             WpaUiSort::SignalStrength => {
                 networks.sort_by(|a, b| {
-                    let signal_ord = match (a.signal_dbm, b.signal_dbm) {
-                        (Some(a_sig), Some(b_sig)) => b_sig.cmp(&a_sig),
-                        (Some(_), None) => Ordering::Less,
-                        (None, Some(_)) => Ordering::Greater,
-                        (None, None) => Ordering::Equal,
-                    };
-                    signal_ord.then_with(|| {
+                    get_tier(a).cmp(&get_tier(b)).then_with(|| {
+                        let signal_ord = match (a.signal_dbm, b.signal_dbm) {
+                            (Some(a_sig), Some(b_sig)) => b_sig.cmp(&a_sig),
+                            (Some(_), None) => Ordering::Less,
+                            (None, Some(_)) => Ordering::Greater,
+                            (None, None) => Ordering::Equal,
+                        };
+                        signal_ord.then_with(|| {
+                            a.ssid
+                                .to_ascii_lowercase()
+                                .cmp(&b.ssid.to_ascii_lowercase())
+                        })
+                    })
+                });
+            }
+            WpaUiSort::NameAsc => {
+                networks.sort_by(|a, b| {
+                    get_tier(a).cmp(&get_tier(b)).then_with(|| {
                         a.ssid
                             .to_ascii_lowercase()
                             .cmp(&b.ssid.to_ascii_lowercase())
                     })
                 });
             }
-            WpaUiSort::NameAsc => {
-                networks.sort_by(|a, b| {
-                    a.ssid
-                        .to_ascii_lowercase()
-                        .cmp(&b.ssid.to_ascii_lowercase())
-                });
-            }
             WpaUiSort::NameDesc => {
                 networks.sort_by(|a, b| {
-                    b.ssid
-                        .to_ascii_lowercase()
-                        .cmp(&a.ssid.to_ascii_lowercase())
+                    get_tier(a).cmp(&get_tier(b)).then_with(|| {
+                        b.ssid
+                            .to_ascii_lowercase()
+                            .cmp(&a.ssid.to_ascii_lowercase())
+                    })
                 });
             }
         }
