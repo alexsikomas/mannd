@@ -5,17 +5,14 @@
 //! When getting networks after a scan there can be duplicate SSIDs because `wpa_supplicant` shows the different possible freqs.
 
 use std::{
-    cmp::Ordering,
     collections::{HashMap, HashSet},
     fmt::Debug,
-    path::PathBuf,
-    time::{Duration, Instant},
+    sync::Arc,
 };
 
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::mpsc::Sender, time::timeout};
-use tracing::{info, instrument};
+use tokio::sync::mpsc::Sender;
+use tracing::instrument;
 use zbus::{
     Connection, Proxy,
     names::MemberName,
@@ -24,9 +21,8 @@ use zbus::{
 };
 
 use crate::{
-    context,
     error::ManndError,
-    modify_global, read_global,
+    modify_state,
     state::signals::SignalUpdate,
     store::{
         NetworkInfo, NetworkInfoBuilder, NetworkSecurity, WpaNetworkPolicyOverrideBuilder, WpaState,
@@ -35,14 +31,14 @@ use crate::{
     wireless::{
         WifiBackend,
         common::{NetworkFlags, get_prop_from_proxy},
-        wpa_config::{ApplyScope, WpaAutoscan, WpaConfig, WpaUiSort},
+        wifi_config::WpaAutoscan,
     },
+    with_state,
 };
 
 #[derive(Debug)]
 pub struct WpaSupplicant {
     // persistant state
-    config: WpaConfig,
     state: WpaState,
 
     service: String,
@@ -77,7 +73,7 @@ impl WifiBackend for WpaSupplicant {
             return Ok(vec![]);
         }
 
-        let saved_nets = read_global(|state| state.app.saved_networks.clone());
+        let saved_nets = with_state(|state| state.app.saved_networks.clone());
         let (is_conn, path) = self.is_connected().await?;
 
         // TODO: error if multiple networks saved with same ssid
@@ -117,10 +113,23 @@ impl WifiBackend for WpaSupplicant {
                 continue;
             }
 
-            if !self.config.ui.show_hidden_networks {
-                if info.ssid.is_empty() || info.ssid.clone().into_bytes().iter().all(|&v| v == 0) {
-                    continue;
-                }
+            if let Some(false) =
+                with_state(|state| Arc::clone(&state.wifi_config).ui.show_hidden_networks)
+                && (info.ssid.is_empty() || info.ssid.clone().into_bytes().iter().all(|&v| v == 0))
+            {
+                continue;
+            }
+
+            // TODO: temporary needs to account for 6ghz later
+            let is_5ghz = freq >= 5000;
+            if is_5ghz {
+                let mut policy = info
+                    .wpa_policy_override
+                    .take()
+                    .unwrap_or_else(|| WpaNetworkPolicyOverrideBuilder::default().build().unwrap());
+                policy.allow_freq_mhz.push(u32::from(freq));
+                info.wpa_policy_override = Some(policy);
+                info.bssid = None;
             }
 
             // take only highest frequency unless connected or known
@@ -136,23 +145,36 @@ impl WifiBackend for WpaSupplicant {
                     prev.0 = info;
                     prev.1 = freq;
                 }
+
+                if is_5ghz && let Some(p) = &mut prev.0.wpa_policy_override {
+                    p.allow_freq_mhz.push(u32::from(freq));
+                }
             } else {
-                if let Some(ref saved) = saved_nets {
-                    if saved.iter().find(|n| n.bssid == info.bssid).is_some() {
-                        info.flags |= NetworkFlags::KNOWN;
-                    }
+                if let Some(ref saved) = saved_nets
+                    && saved.iter().find(|n| n.bssid == info.bssid).is_some()
+                {
+                    info.flags |= NetworkFlags::KNOWN;
                 }
                 by_ssid.insert(info.ssid.clone(), (info, freq));
             }
         }
 
         let mut res: Vec<NetworkInfo> = by_ssid.into_values().map(|(n, _)| n).collect();
-        self.sort_networks(&mut res);
+        with_state(|state| {
+            state
+                .wifi_config
+                .ui
+                .sort_networks_by
+                .sort_networks(&mut res);
+        });
+
         Ok(res)
     }
 
     #[instrument(err, skip(self))]
     async fn connect_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
+        let mut net_path: Option<OwnedObjectPath> = None;
+
         if network.flags.contains(NetworkFlags::KNOWN) {
             let network_paths = self
                 .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
@@ -160,21 +182,34 @@ impl WifiBackend for WpaSupplicant {
 
             for path in network_paths {
                 if self.get_known_ssid(&path).await? == network.ssid {
-                    self.call_interface_method_noreply("SelectNetwork", path)
-                        .await?;
-                    return Ok(());
+                    net_path = Some(path);
+                    break;
                 }
             }
-
-            return Err(ManndError::NetworkNotFound);
         }
 
-        let network_path = self.add_network(network).await?;
-        self.call_interface_method_noreply("SelectNetwork", network_path.clone())
+        let path = match net_path {
+            Some(p) => p,
+            None if network.flags.contains(NetworkFlags::KNOWN) => {
+                return Err(ManndError::NetworkNotFound);
+            }
+            None => self.add_network(network).await?,
+        };
+
+        if let Some(freq) = &network.pref_ghz {
+            let freqs: &'static str = freq.clone().into();
+
+            let mut props: HashMap<String, Value> = HashMap::new();
+            props.insert("freq_list".into(), freqs.into());
+            let proxy = self.get_network_proxy(path.clone()).await?;
+            proxy.set_property("Properties", props).await?;
+        }
+
+        self.call_interface_method_noreply("SelectNetwork", path)
             .await?;
 
         // connect is a decently unlikely event so this is fine
-        modify_global(|state| {
+        modify_state(|state| {
             if let Some(existing) = state
                 .app
                 .saved_networks
@@ -210,7 +245,7 @@ impl WifiBackend for WpaSupplicant {
             }
         }
 
-        modify_global(|state| {
+        modify_state(|state| {
             state.app.saved_networks.retain(|n| n.ssid != network.ssid);
         });
 
@@ -221,20 +256,15 @@ impl WifiBackend for WpaSupplicant {
 // Public functions
 impl WpaSupplicant {
     #[instrument(err, skip(conn))]
-    pub async fn new(
-        config: WpaConfig,
-        state: WpaState,
-        conn: Connection,
-    ) -> Result<Self, ManndError> {
+    pub async fn new(state: WpaState, conn: Connection) -> Result<Self, ManndError> {
         let service = String::from("fi.w1.wpa_supplicant1");
         let path = String::from("/fi/w1/wpa_supplicant1");
 
         let mut wpa = Self {
-            config,
             state,
-            conn,
             service,
             path,
+            conn,
         };
 
         wpa.sync_interface_state().await?;
@@ -319,8 +349,11 @@ impl WpaSupplicant {
             .is_some_and(|iface| iface.name == ifname);
 
         if removed_active {
-            let pref_name = self.config.interfaces.preferred_interface.clone();
-            self.state.active_interface = self.choose_active_interface(pref_name.as_deref(), None);
+            with_state(|state| {
+                let pref_name = &state.wifi_config.general.preferred_interface;
+                self.state.active_interface =
+                    self.choose_active_interface(pref_name.as_deref(), None);
+            });
         }
 
         self.write_state()?;
@@ -338,7 +371,7 @@ impl WpaSupplicant {
             return Ok(());
         }
 
-        let Some(known) = read_global(|state| state.app.saved_networks.clone()) else {
+        let Some(known) = with_state(|state| state.app.saved_networks.clone()) else {
             return Ok(());
         };
 
@@ -416,11 +449,12 @@ impl WpaSupplicant {
 
         self.state.managed_interfaces = runtime_managed;
 
-        let pref_name = self.config.interfaces.preferred_interface.clone();
-        let active_name = self.state.active_interface.as_ref().map(|m| m.name.clone());
-
-        self.state.active_interface =
-            self.choose_active_interface(pref_name.as_deref(), active_name.as_deref());
+        with_state(|state| {
+            let pref_name = &state.wifi_config.general.preferred_interface;
+            let active_name = self.state.active_interface.as_ref().map(|m| m.name.clone());
+            self.state.active_interface =
+                self.choose_active_interface(pref_name.as_deref(), active_name.as_deref());
+        });
 
         self.write_state()?;
         Ok(())
@@ -448,8 +482,6 @@ impl WpaSupplicant {
 
     #[instrument(err, skip(self))]
     async fn apply_global_policy(&self) -> Result<(), ManndError> {
-        let policy = &self.config.policy;
-
         let managed: Vec<ManagedInterface> = self
             .get_interfaces()
             .await?
@@ -460,15 +492,7 @@ impl WpaSupplicant {
             })
             .collect();
 
-        let targets: Vec<ManagedInterface> = match &policy.apply_scope {
-            ApplyScope::AllInterfaces => managed,
-            ApplyScope::Interfaces(names) => managed
-                .into_iter()
-                .filter(|m| names.iter().any(|n| n == &m.name))
-                .collect(),
-        };
-
-        for iface in targets {
+        for iface in managed {
             self.apply_global_policy_interface(&iface).await?;
         }
         Ok(())
@@ -478,21 +502,26 @@ impl WpaSupplicant {
         &self,
         iface: &ManagedInterface,
     ) -> Result<(), ManndError> {
-        let policy = &self.config.policy;
+        let Some(config) = with_state(|state| Arc::clone(&state.wifi_config)) else {
+            return Ok(());
+        };
+
         let proxy = self.get_interface_proxy(iface.path.clone()).await?;
 
-        if let Some(country) = &policy.country {
-            proxy.set_property("Country", country.clone()).await?
+        if let Some(country) = &config.general.country {
+            proxy.set_property("Country", country.clone()).await?;
         }
 
-        proxy.set_property("FastReauth", policy.fast_reauth).await?;
+        proxy
+            .set_property("FastReauth", config.wpa.fast_reauth)
+            .await?;
 
-        if let Some(scan_interval) = policy.scan_interval_sec {
+        if let Some(scan_interval) = config.wpa.scan_interval_sec {
             let interval_i32 = i32::try_from(scan_interval)?;
             proxy.set_property("ScanInterval", interval_i32).await?;
         }
 
-        let autoscan_type = match &policy.autoscan {
+        let autoscan_type = match &config.wpa.autoscan {
             WpaAutoscan::Disabled => String::new(),
             WpaAutoscan::Exponential { base, limit } => {
                 format!("exponential:{base}:{limit}")
@@ -560,16 +589,8 @@ impl WpaSupplicant {
 
     #[instrument(err, skip(self))]
     fn write_state(&self) -> Result<(), ManndError> {
-        read_global(|state| state.db.write_wpa_state(&self.state)).transpose()?;
+        with_state(|state| state.db.write_wpa_state(&self.state)).transpose()?;
         Ok(())
-    }
-
-    /// Returns a Path to where the interface config file should be made/found
-    fn interface_config_file(ifname: &str) -> Result<PathBuf, ManndError> {
-        let settings = &context().settings;
-        let mut home = PathBuf::from(&settings.storage.state);
-        home.push(format!("mannd/wpa/{ifname}.conf"));
-        Ok(home)
     }
 
     async fn create_interface_runtime(&self, ifname: &str) -> Result<ManagedInterface, ManndError> {
@@ -628,7 +649,6 @@ impl WpaSupplicant {
 
         let signal_dbm = get_prop_from_proxy::<i16>(&proxy, "Signal").await.ok();
         let freq = get_prop_from_proxy::<u16>(&proxy, "Frequency").await?;
-        let rates = get_prop_from_proxy::<Vec<u32>>(&proxy, "Rates").await?;
 
         let rsn = get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "RSN").await?;
 
@@ -640,7 +660,7 @@ impl WpaSupplicant {
             .signal_dbm(signal_dbm)
             .wpa_policy_override(Some(
                 WpaNetworkPolicyOverrideBuilder::default()
-                    .allow_freq_mhz(rates)
+                    .allow_freq_mhz(vec![freq.into()])
                     .build()?,
             ))
             .flags(NetworkFlags::NEARBY)
@@ -727,62 +747,6 @@ impl WpaSupplicant {
         Ok(stream)
     }
 
-    fn sort_networks(&self, networks: &mut [NetworkInfo]) {
-        let get_tier = |n: &NetworkInfo| -> u8 {
-            let is_conn = n.flags.contains(NetworkFlags::CONNECTED);
-            let is_known = n.flags.contains(NetworkFlags::KNOWN);
-            let is_near = n.flags.contains(NetworkFlags::NEARBY);
-
-            if is_conn {
-                0
-            } else if is_known && is_near {
-                1
-            } else if is_near {
-                2
-            } else {
-                3
-            }
-        };
-
-        match self.config.ui.sort_networks_by {
-            WpaUiSort::SignalStrength => {
-                networks.sort_by(|a, b| {
-                    get_tier(a).cmp(&get_tier(b)).then_with(|| {
-                        let signal_ord = match (a.signal_dbm, b.signal_dbm) {
-                            (Some(a_sig), Some(b_sig)) => b_sig.cmp(&a_sig),
-                            (Some(_), None) => Ordering::Less,
-                            (None, Some(_)) => Ordering::Greater,
-                            (None, None) => Ordering::Equal,
-                        };
-                        signal_ord.then_with(|| {
-                            a.ssid
-                                .to_ascii_lowercase()
-                                .cmp(&b.ssid.to_ascii_lowercase())
-                        })
-                    })
-                });
-            }
-            WpaUiSort::NameAsc => {
-                networks.sort_by(|a, b| {
-                    get_tier(a).cmp(&get_tier(b)).then_with(|| {
-                        a.ssid
-                            .to_ascii_lowercase()
-                            .cmp(&b.ssid.to_ascii_lowercase())
-                    })
-                });
-            }
-            WpaUiSort::NameDesc => {
-                networks.sort_by(|a, b| {
-                    get_tier(a).cmp(&get_tier(b)).then_with(|| {
-                        b.ssid
-                            .to_ascii_lowercase()
-                            .cmp(&a.ssid.to_ascii_lowercase())
-                    })
-                });
-            }
-        }
-    }
-
     async fn get_interface_proxy(
         &self,
         iface_path: OwnedObjectPath,
@@ -807,7 +771,6 @@ impl WpaSupplicant {
     }
 
     fn build_add_network_body(
-        &self,
         network: &NetworkInfo,
     ) -> Result<HashMap<String, OwnedValue>, ManndError> {
         let mut body = HashMap::new();
@@ -849,6 +812,11 @@ impl WpaSupplicant {
             }
         }
 
+        if let Some(freq) = &network.pref_ghz {
+            let freqs: &'static str = freq.clone().into();
+            body.insert("freq_list".into(), Value::new(freqs).try_to_owned()?);
+        }
+
         Ok(body)
     }
 
@@ -860,7 +828,7 @@ impl WpaSupplicant {
             return Err(ManndError::WpaNoInterfaces);
         };
 
-        let body = self.build_add_network_body(network)?;
+        let body = WpaSupplicant::build_add_network_body(network)?;
 
         let network_path: OwnedObjectPath = self
             .call_interface_method::<_, OwnedObjectPath>("AddNetwork", body)
@@ -877,7 +845,7 @@ pub struct ManagedInterface {
 }
 
 impl ManagedInterface {
-    fn new(name: String, path: OwnedObjectPath) -> Self {
+    const fn new(name: String, path: OwnedObjectPath) -> Self {
         Self { name, path }
     }
 }

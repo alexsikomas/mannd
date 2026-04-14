@@ -38,11 +38,11 @@ use std::{collections::HashMap, fs, os::unix::fs::chown, path::PathBuf};
 use tracing::instrument;
 
 use crate::{
-    context,
+    STORAGE_PATH, context,
     error::ManndError,
     wireless::{
         common::NetworkFlags,
-        wpa_config::{BandType, MacRandomization, WpaPolicy},
+        wifi_config::{BandType, MacRandomization},
         wpa_supplicant::ManagedInterface,
     },
 };
@@ -58,8 +58,10 @@ pub struct ManndStore {
 impl ManndStore {
     #[instrument(err)]
     pub fn init() -> Result<Self, ManndError> {
-        let settings = &context().settings;
-        let mut home = PathBuf::from(&settings.storage.state);
+        let storage = STORAGE_PATH.get().ok_or(ManndError::OperationFailed(
+            "STORAGE_PATH not initialised".into(),
+        ))?;
+        let mut home = PathBuf::from(storage);
         fs::create_dir_all(&home)?;
         chown(&home, context().uid, None)?;
         home.push("mannd.redb");
@@ -327,14 +329,46 @@ pub struct NetworkInfo {
     pub wpa_policy_override: Option<WpaNetworkPolicyOverride>,
     #[builder(default = "NetworkFlags::empty()")]
     pub flags: NetworkFlags,
+    #[builder(default = "None")]
+    pub pref_ghz: Option<Ghz>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Ghz {
+    Two,
+    Five,
+    Six,
+}
+
+impl From<u16> for Ghz {
+    fn from(value: u16) -> Self {
+        match value {
+            2000..3000 => Self::Two,
+            5000..5900 => Self::Five,
+            5900..7000 => Self::Six,
+            _ => Self::Two,
+        }
+    }
+}
+
+impl Into<&'static str> for Ghz {
+    fn into(self) -> &'static str {
+        match self {
+            Self::Two => "2412 2417 2422 2427 2432 2437 2442 2447 2452 2457 2462 2467 2472",
+            Self::Five => {
+                "5180 5200 5220 5240 5260 5280 5300 5320 5500 5520 5540 5560 5580 5600 5620 5640 5660 5680 5700 5720 5745 5765 5785 5805 5825"
+            }
+            Self::Six => {
+                "5955 5975 5995 6015 6035 6055 6075 6095 6115 6135 6155 6175 6195 6215 6235 6255 6275 6295 6315 6335 6355 6375 6395 6415 6435 6455 6475 6495 6515 6535 6555 6575 6595 6615 6635 6655 6675 6695 6715 6735 6755 6775 6795 6815 6835 6855 6875 6895 6915 6935 6955 6975 6995 7015 7035 7055 7075 7095 7115"
+            }
+        }
+    }
 }
 
 #[derive(Builder, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WpaNetworkPolicyOverride {
     #[builder(default = "vec![]")]
     pub allow_freq_mhz: Vec<u32>,
-    #[builder(default = "vec![]")]
-    pub scan_freq_mhz: Vec<u32>,
     #[builder(default = "None")]
     pub band_type: Option<BandType>,
 

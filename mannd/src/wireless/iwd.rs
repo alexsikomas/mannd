@@ -11,14 +11,16 @@ use zbus::{
 
 use crate::{
     error::ManndError,
-    modify_global, read_global,
+    modify_state,
     state::signals::SignalUpdate,
     store::{NetworkInfo, NetworkInfoBuilder, NetworkSecurity},
     utils::ssid_to_hex,
     wireless::{
+        WifiBackend,
         agent::AgentState,
         common::{NetworkFlags, get_prop_from_proxy},
     },
+    with_state,
 };
 
 #[derive(Debug)]
@@ -30,65 +32,45 @@ pub struct Iwd {
     agent_state: Arc<RwLock<AgentState>>,
 }
 
-impl Iwd {
-    #[instrument(err, skip(conn, agent_state))]
-    pub async fn new(
-        conn: Connection,
-        agent_state: Arc<RwLock<AgentState>>,
-    ) -> Result<Self, ManndError> {
-        let service = "net.connman.iwd".to_string();
-
-        match Self::find_adapter_path(&conn, &service).await {
-            Ok(Some(path)) => Ok(Self {
-                path,
-                service,
-                conn,
-                agent_state,
-            }),
-            Err(e) => Err(ManndError::AdapterNotFound(format!(
-                "Could not find an adapter, is iwd installed?\n Error: {e}"
-            ))),
-            _ => Err(ManndError::AdapterNotFound(
-                "Could not find an adapter, is iwd installed?".to_string(),
-            )),
+impl WifiBackend for Iwd {
+    #[instrument(err, skip(self))]
+    async fn scan_networks(&self, signal_tx: Sender<SignalUpdate<'_>>) -> Result<(), ManndError> {
+        let proxy = self.get_interface_proxy("Station").await?;
+        if !get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
+            proxy.call_noreply("Scan", &()).await?;
+            let proxy = Proxy::new(
+                &self.conn,
+                self.service.clone(),
+                self.path.clone(),
+                "org.freedesktop.DBus.Properties",
+            )
+            .await?;
+            let signal = proxy.receive_signal("PropertiesChanged").await?;
+            let _ = signal_tx.send(SignalUpdate::Add(signal)).await;
         }
+        Ok(())
     }
 
-    pub async fn get_networks(&mut self) -> Result<Vec<NetworkInfo>, ManndError> {
+    #[instrument(err, skip(self))]
+    async fn get_networks(&self) -> Result<Vec<NetworkInfo>, ManndError> {
         let station = self.get_interface_proxy("Station").await?;
-        let nearby: Vec<(OwnedObjectPath, i16)> = station.call("GetOrderedNetworks", &()).await?;
+        let nearby_raw: Vec<(OwnedObjectPath, i16)> =
+            station.call("GetOrderedNetworks", &()).await?;
 
-        if nearby.is_empty() {
+        if nearby_raw.is_empty() {
             return Ok(vec![]);
         }
 
-        let stored = read_global(|state| state.app.saved_networks.clone()).unwrap_or_default();
-        let mut by_ssid: HashMap<String, NetworkInfo> =
-            stored.into_iter().map(|n| (n.ssid.clone(), n)).collect();
-
-        for net in by_ssid.values_mut() {
-            net.flags
-                .remove(NetworkFlags::NEARBY | NetworkFlags::CONNECTED | NetworkFlags::KNOWN);
-            net.signal_dbm = None;
+        let mut nearby_info: Vec<NetworkInfo> = vec![];
+        for ap in nearby_raw {
+            nearby_info.push(self.get_ap_info(ap.0, Some(ap.1)).await?);
         }
 
-        for (path, signal_strength) in nearby {
-            if let Ok(ap) = self.get_ap_info(path, Some(signal_strength)).await {
-                by_ssid
-                    .entry(ap.ssid.clone())
-                    .and_modify(|n| {
-                        n.flags.insert(ap.flags);
-                        n.security = ap.security.clone();
-                        n.signal_dbm = match (n.signal_dbm, ap.signal_dbm) {
-                            (Some(cur), Some(new)) => Some(cur.max(new)),
-                            (Some(cur), None) => Some(cur),
-                            (None, Some(new)) => Some(new),
-                            (None, None) => None,
-                        };
-                    })
-                    .or_insert(ap);
-            };
-        }
+        // since iwd stores network info we don't need to get stored networks
+        let mut by_ssid: HashMap<String, NetworkInfo> = nearby_info
+            .into_iter()
+            .map(|n| (n.ssid.clone(), n))
+            .collect();
 
         let obj_proxy = ObjectManagerProxy::new(&self.conn, self.service.clone(), "/").await?;
         for (_path, interfaces) in obj_proxy.get_managed_objects().await? {
@@ -118,28 +100,35 @@ impl Iwd {
                             .security(Self::iwd_type_to_security(&sec_str))
                             .flags(NetworkFlags::KNOWN)
                             .build()
-                            .expect("NetworkInfo builder shouldn't fail")
+                            .expect("NetworkInfoBuilder shouldn't fail")
                     });
             }
         }
 
-        let networks: Vec<NetworkInfo> = by_ssid.into_values().collect();
+        let mut networks: Vec<NetworkInfo> = by_ssid.into_values().collect();
+        with_state(|state| {
+            state
+                .wifi_config
+                .ui
+                .sort_networks_by
+                .sort_networks(&mut networks);
+        });
         Ok(networks)
     }
 
     #[instrument(err, skip(self))]
-    pub async fn connect_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
+    async fn connect_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
         let password = match &network.security {
             NetworkSecurity::Wpa2 { passphrase } => Some(passphrase.clone()),
-            NetworkSecurity::Wpa3Sae { password, .. } => Some(password.clone()),
-            NetworkSecurity::Wpa3Transition { password } => Some(password.clone()),
+            NetworkSecurity::Wpa3Sae { password, .. }
+            | NetworkSecurity::Wpa3Transition { password } => Some(password.clone()),
             _ => None,
         };
 
-        if let Some(pass) = password {
-            if let Ok(mut writer) = self.agent_state.try_write() {
-                writer.password = Some(pass);
-            }
+        if let Some(pass) = password
+            && let Ok(mut writer) = self.agent_state.try_write()
+        {
+            writer.password = Some(pass);
         }
         let proxy = Proxy::new(
             &self.conn,
@@ -149,7 +138,7 @@ impl Iwd {
         )
         .await?;
         proxy.call_noreply("Connect", &()).await?;
-        modify_global(|state| {
+        modify_state(|state| {
             if let Some(existing) = state
                 .app
                 .saved_networks
@@ -165,9 +154,8 @@ impl Iwd {
         Ok(())
     }
 
-    /// Disconnects from the current Wi-Fi network, doesn't remove the network
     #[instrument(err, skip(self))]
-    pub async fn disconnect(&self) -> Result<(), ManndError> {
+    async fn disconnect(&self) -> Result<(), ManndError> {
         let proxy = self.get_interface_proxy("Station").await?;
         let resp: Result<(), zbus::Error> = proxy.call("Disconnect", &()).await;
         info!("Calling the disconnect function");
@@ -183,31 +171,55 @@ impl Iwd {
         }
     }
 
-    /// Removes a network from the configured networks
     #[instrument(err, skip(self))]
-    pub async fn remove_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
-        todo!()
-        // info!("/net/connman/iwd/{}_{}", ssid_to_hex(&ssid), security,);
-        //
-        // let proxy = Proxy::new(
-        //     &self.conn,
-        //     self.service.clone(),
-        //     format!("/net/connman/iwd/{}_{}", ssid_to_hex(&ssid), security,),
-        //     "net.connman.iwd.KnownNetwork",
-        // )
-        // .await?;
-        //
-        // let res: Result<(), zbus::Error> = proxy.call("Forget", &()).await;
-        // match res {
-        //     Ok(()) => {
-        //         info!("Successfully forgot {ssid}");
-        //         Ok(())
-        //     }
-        //     Err(e) => {
-        //         tracing::error!("Error occured while trying to forget network: {e}");
-        //         Err(ManndError::OperationFailed("Remove Network".to_string()))
-        //     }
-        // }
+    async fn forget_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.network_path(network),
+            "net.connman.iwd.KnownNetwork",
+        )
+        .await?;
+
+        let res: Result<(), zbus::Error> = proxy.call("Forget", &()).await;
+        match res {
+            Ok(()) => {
+                info!("Successfully forgot: {}", network.ssid);
+                modify_state(|state| {
+                    state.app.saved_networks.retain(|n| n.ssid != network.ssid);
+                });
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!("Error occurred while trying to forget network: {e}");
+                Err(ManndError::OperationFailed("Remove network".to_string()))
+            }
+        }
+    }
+}
+
+impl Iwd {
+    #[instrument(err, skip(conn, agent_state))]
+    pub async fn new(
+        conn: Connection,
+        agent_state: Arc<RwLock<AgentState>>,
+    ) -> Result<Self, ManndError> {
+        let service = "net.connman.iwd".to_string();
+
+        match Self::find_adapter_path(&conn, &service).await {
+            Ok(Some(path)) => Ok(Self {
+                path,
+                service,
+                conn,
+                agent_state,
+            }),
+            Err(e) => Err(ManndError::AdapterNotFound(format!(
+                "Could not find an adapter, is iwd installed?\n Error: {e}"
+            ))),
+            _ => Err(ManndError::AdapterNotFound(
+                "Could not find an adapter, is iwd installed?".to_string(),
+            )),
+        }
     }
 
     #[instrument(err, skip(self))]
@@ -234,24 +246,6 @@ impl Iwd {
                 Err(ManndError::OperationFailed(e.to_string()))
             }
         }
-    }
-
-    #[instrument(err)]
-    pub async fn scan(&mut self, signal_tx: Sender<SignalUpdate<'_>>) -> Result<(), ManndError> {
-        let proxy = self.get_interface_proxy("Station").await?;
-        if !get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
-            proxy.call_noreply("Scan", &()).await?;
-            let proxy = Proxy::new(
-                &self.conn,
-                self.service.clone(),
-                self.path.clone(),
-                "org.freedesktop.DBus.Properties",
-            )
-            .await?;
-            let signal = proxy.receive_signal("PropertiesChanged").await?;
-            let _ = signal_tx.send(SignalUpdate::Add(signal)).await;
-        }
-        Ok(())
     }
 }
 
@@ -361,15 +355,15 @@ impl Iwd {
     }
 
     fn network_path(&self, network: &NetworkInfo) -> String {
-        format!(
-            "{}/{}_{}",
-            self.path,
+        let res = format!(
+            "/net/connman/iwd/{}_{}",
             ssid_to_hex(&network.ssid),
             Self::iwd_security_type(&network.security)
-        )
+        );
+        res
     }
 
-    fn iwd_security_type(security: &NetworkSecurity) -> &'static str {
+    const fn iwd_security_type(security: &NetworkSecurity) -> &'static str {
         match security {
             NetworkSecurity::Open | NetworkSecurity::Owe => "open",
             _ => "psk",

@@ -6,7 +6,7 @@
 </div>
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/2a8d3059-9cba-4b90-ab49-3ee5744f6e75" 
+  <video src="https://sikomas.com/public/mannd-git-demo.mp4" 
          autoplay 
          loop 
          muted 

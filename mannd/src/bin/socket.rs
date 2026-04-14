@@ -7,19 +7,10 @@
 //! user, if they desire, to run the socket on startup. As long as the frontend
 //! handles this appropriately they aren't hassled with entering their sudo
 //! password each time.
-use std::{
-    error::Error,
-    fs::{self, Permissions},
-    os::unix::fs::{PermissionsExt, chown},
-    path::{Path, PathBuf},
-    str::FromStr,
-    time::Duration,
-};
-
-use clap::{Parser, error::ErrorKind};
+use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use mannd::{
-    GlobalStateGuard, UNIX_SOCK_PATH, context,
+    GlobalStateGuard, STORAGE_PATH, UNIX_SOCK_PATH, context,
     controller::WifiDaemonType,
     error::ManndError,
     init_ctx,
@@ -31,6 +22,14 @@ use mannd::{
     utils::setup_logging,
 };
 use postcard::to_stdvec_cobs;
+use std::{
+    error::Error,
+    fs::{self, Permissions},
+    os::unix::fs::{PermissionsExt, chown},
+    path::{Path, PathBuf},
+    str::FromStr,
+    time::Duration,
+};
 use tokio::{net::UnixListener, sync::mpsc, time::timeout};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{Level, info, instrument};
@@ -41,10 +40,14 @@ struct Args {
     /// Determines where the $HOME directory is
     #[arg(long)]
     target_uid: Option<u32>,
-
     /// Disconnects from the socket when frontend killed
     #[arg(long)]
     spawned: bool,
+    /// Expanded storage location
+    #[arg(long, default_value = "/root/")]
+    storage_path: String,
+    #[arg(long, default_value = "info")]
+    max_log_level: String,
 }
 
 #[tokio::main]
@@ -52,6 +55,11 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     init_ctx(args.target_uid)?;
+
+    STORAGE_PATH
+        .set(args.storage_path.clone())
+        .expect("STORAGE_PATH already initialised");
+
     let _guard = GlobalStateGuard::init()?;
 
     // root check
@@ -59,10 +67,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if euid != 0 {
         Err(ManndError::NotRoot)?;
     }
-    let settings = &context().settings;
 
-    let max_log_level = Level::from_str(&settings.debug.max_log_level)?;
-    let mut socket_log = PathBuf::from(&settings.storage.state);
+    let max_log_level = Level::from_str(&args.max_log_level)?;
+    let mut socket_log = PathBuf::from(&args.storage_path);
     socket_log.push("logs/socket.log");
     setup_logging(socket_log, max_log_level, args.target_uid)?;
 

@@ -6,7 +6,6 @@ use tracing::{info, instrument};
 use crate::{
     controller::{Controller, WirelessAdapter},
     error::ManndError,
-    read_global,
     state::{
         messages::{
             Capability, Failure, NetworkAction, NetworkState, Process, Started, Success,
@@ -14,6 +13,7 @@ use crate::{
         },
         signals::{SignalManager, SignalUpdate},
     },
+    with_state,
 };
 
 #[derive(Debug)]
@@ -31,7 +31,7 @@ impl<'a> NetworkActor<'a> {
         sock_tx: Sender<NetworkState>,
     ) -> Result<Self, ManndError> {
         let mut controller = Controller::new().await?;
-        if read_global(|state| state.app.wg_running).unwrap_or(false) {
+        if with_state(|state| state.app.wg_running).unwrap_or(false) {
             let _ = controller.start_wireguard().await;
         }
 

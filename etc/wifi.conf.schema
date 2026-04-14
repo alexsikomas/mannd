@@ -1,32 +1,38 @@
 // ============================
-// wpa_supplicant configuration
+// wifi configuration
 // ============================
 //
 // This file is for reference only! Do not copy it into your wpa configuration, it will not work.
 //
-// However, feel free to copy sections, this file shows how WPA state is managed and what settings
+// However, feel free to copy sections, this file shows how wifi backend state is managed and what settings
 // can be applied to the .conf file. This is typically managed through the configuration section
 // within the mannd TUI however in case anything goes wrong you can edit the file yourself. Just make
 // a copy first.
+
 (
     ui: {
         show_hidden_networks: false,
         sort_networks_by: SignalStrength                // SignalStrength, NameAsc, NameDesc
     },
-    policy: {
-        apply_scope: AllInterfaces,                     // AllInterfaces, Interfaces(["wlan0", "wlan1"])
-        country: Some("GB"),
-        band_type: Some(Restrict5GHz),                  // OFF | Some(Prefer5GHz | Restrict5GHz | Prefer2GHz | Restrict2GHz)
-        allow_freq_mhz: [5180, 5200, ...],              // If populated band_type ignored
-        scan_interval_sec: Some(5),
-        autoscan: Exponential(base: 5, limit: 300),     // Exponential(base: x, limit: y), Periodic(interval: x), Disabled
-        fast_reauth: true,
-        mac_randomization: Always                       // Always, Never, PeerNetwork
+    general: {
+            country: Some("GB"),
+            preferred_interface: Some("interface"),         // Each startup we try to connect to this interface first, if present
+            mac_randomization: Always                       // Always, Never, Once (iwd only), PeerNetwork (wpa only)
+            band_type: Some(Restrict5GHz),                  // OFF | Some(Prefer5GHz | Restrict5GHz | Prefer2GHz | Restrict2GHz)
     },
-    interfaces: {
-        preferred_interface: Some("interface"),         // Each startup we try to connect to this interface first, if present
+    iwd: {
+            parse_main_conf: true                           // due to the way iwd works you have to edit /etc/iwd/main.conf, this allows
+                                                            // mannd to parse the main.conf and let you edit and add fields in the tui
+    },
+    wpa: {
+            apply_scope: AllInterfaces,                     // AllInterfaces, Interfaces(["wlan0", "wlan1"])
+            allow_freq_mhz: [5180, 5200, ...],              // If populated band_type ignored
+            scan_interval_sec: Some(5),
+            autoscan: Exponential(base: 5, limit: 300),     // Exponential(base: x, limit: y), Periodic(interval: x), Disabled
+            fast_reauth: true,
     },
 )
+
 
 // ----------------------------------------------------------------------------------------------------------------------------
 // ========

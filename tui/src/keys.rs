@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mannd::{context, error::ManndError};
 
+use crate::SETTINGS;
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum KeyAction {
     Up,
@@ -39,7 +41,9 @@ pub struct Keymap {
 
 impl Keymap {
     pub fn load_keys() -> Result<Self, ManndError> {
-        let conf = &context().settings;
+        let conf = SETTINGS.get().ok_or(ManndError::OperationFailed(
+            "SETTINGS not initialised".into(),
+        ))?;
         let mut bindings: HashMap<KeyEvent, KeyAction> = HashMap::default();
 
         let keys = conf.keybinds.keys();
@@ -61,8 +65,6 @@ fn key_str_to_event(key: &str) -> Result<KeyEvent, ManndError> {
 
     // removes all the modifiers from keys
     let mut key_to_read: String = String::new();
-
-    // modifiers
     for split in key.split('-') {
         match split {
             "S" => modifier.insert(KeyModifiers::SHIFT),

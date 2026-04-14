@@ -16,7 +16,6 @@ use tokio::sync::{RwLock, mpsc::Sender};
 use crate::{
     error::ManndError,
     netlink::NlRouterWrapper,
-    read_global,
     state::signals::SignalUpdate,
     store::{NetworkInfo, WgMeta, WpaState},
     systemd::systemctl::is_service_active,
@@ -25,9 +24,9 @@ use crate::{
         WifiBackend,
         agent::{AgentState, IwdAgent},
         iwd::Iwd,
-        wpa_config::WpaConfig,
         wpa_supplicant::WpaSupplicant,
     },
+    with_state,
 };
 use tracing::{info, instrument};
 use zbus::Connection;
@@ -118,12 +117,11 @@ impl Controller {
 
     #[instrument(err, skip(self))]
     async fn connect_wpa(&mut self) -> Result<(), ManndError> {
-        let wpa_state = read_global(|state| state.db.get_wpa_state())
+        let wpa_state = with_state(|state| state.db.get_wpa_state())
             .transpose()?
             .unwrap_or(WpaState::default());
 
-        let config = WpaConfig::load_or_default()?;
-        let wpa = WpaSupplicant::new(config, wpa_state, self.connection.clone()).await?;
+        let wpa = WpaSupplicant::new(wpa_state, self.connection.clone()).await?;
 
         self.wifi = Some(WirelessAdapter::Wpa(wpa));
         Ok(())
@@ -141,8 +139,8 @@ impl Controller {
     #[instrument(err, skip(self))]
     /// Updates the wireguad files in the state database
     pub fn update_wireguard_state(&self) -> Result<(Vec<String>, Vec<WgMeta>), ManndError> {
-        read_global(|state| state.db.write_wg_files()).transpose()?;
-        read_global(|state| state.db.ordered_wg_files()).ok_or(ManndError::OperationFailed(
+        with_state(|state| state.db.write_wg_files()).transpose()?;
+        with_state(|state| state.db.ordered_wg_files()).ok_or(ManndError::OperationFailed(
             "Failed to get ordered WireGuard files".into(),
         ))?
     }
@@ -171,7 +169,7 @@ impl Controller {
     pub async fn scan<'a>(&mut self, sock_tx: Sender<SignalUpdate<'a>>) -> Result<(), ManndError> {
         let res = dispatch_wifi!(
             &mut self.wifi,
-            iwd => iwd.scan(sock_tx).await,
+            iwd => iwd.scan_networks(sock_tx).await,
             wpa => wpa.scan_networks(sock_tx).await,
             Err(ManndError::OperationFailed("No wifi daemon found".into()))
         );
@@ -236,7 +234,7 @@ impl Controller {
     #[instrument(err, skip(self))]
     pub async fn remove_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
         dispatch_wifi!(&self.wifi,
-            iwd => iwd.remove_network(network).await,
+            iwd => iwd.forget_network(network).await,
             wpa => wpa.forget_network(network).await,
             Ok(())
         )

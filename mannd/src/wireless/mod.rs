@@ -5,7 +5,7 @@ use crate::{error::ManndError, state::signals::SignalUpdate, store::NetworkInfo}
 pub mod agent;
 pub mod common;
 pub mod iwd;
-pub mod wpa_config;
+pub mod wifi_config;
 pub mod wpa_supplicant;
 
 #[allow(async_fn_in_trait)]

@@ -180,7 +180,7 @@ impl<'a> Connection<'a> {
             style = style.fg(fg_col).bold();
         } else if ap.flags.contains(NetworkFlags::KNOWN) && is_focused {
             let fg_col = theme.tertiary.color();
-            style = style.fg(fg_col).italic();
+            style = style.fg(fg_col).bold();
         }
         style
     }

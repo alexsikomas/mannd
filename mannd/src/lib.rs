@@ -44,13 +44,14 @@
 use std::{
     ffi::CStr,
     path::PathBuf,
-    sync::{OnceLock, RwLock},
+    sync::{Arc, OnceLock, RwLock},
 };
 
 use crate::{
     config::AppConfig,
     error::ManndError,
     store::{ApplicationState, ManndStore},
+    wireless::wifi_config::WifiConfig,
 };
 
 pub mod config;
@@ -65,19 +66,20 @@ pub mod wireguard;
 pub mod wireless;
 
 pub const UNIX_SOCK_PATH: &str = "/tmp/mannd.sock";
+pub static STORAGE_PATH: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug)]
 pub struct GlobalContext {
     pub uid: Option<u32>,
     pub home: PathBuf,
     pub config_home: PathBuf,
-    pub settings: AppConfig,
 }
 
 #[derive(Debug)]
 pub struct GlobalState {
     pub db: ManndStore,
     pub app: ApplicationState,
+    pub wifi_config: Arc<WifiConfig>,
 }
 
 pub static APP_CTX: OnceLock<GlobalContext> = OnceLock::new();
@@ -85,14 +87,11 @@ pub static APP_CTX: OnceLock<GlobalContext> = OnceLock::new();
 pub fn init_ctx(uid: Option<u32>) -> Result<(), ManndError> {
     let home = home_path(uid)?;
     let config_home = home.join(".config/mannd");
-    let settings_path = config_home.join("settings.conf");
-    let settings = AppConfig::load(settings_path, Some(&home))?;
 
     let ctx = GlobalContext {
         uid,
         home,
         config_home,
-        settings,
     };
 
     APP_CTX.set(ctx).map_err(|_| {
@@ -110,54 +109,56 @@ impl GlobalStateGuard {
     pub fn init() -> Result<Self, ManndError> {
         let db = ManndStore::init()?;
         let app = db.get_app_state()?;
+        let wifi_config = Arc::new(WifiConfig::load_or_default()?);
 
-        *APP_STATE.write().unwrap() = Some(GlobalState { db, app });
+        *APP_STATE.write().unwrap() = Some(GlobalState {
+            db,
+            app,
+            wifi_config,
+        });
 
-        Ok(GlobalStateGuard)
+        Ok(Self)
     }
 }
 
 impl Drop for GlobalStateGuard {
     fn drop(&mut self) {
         let mut state_lock = APP_STATE.write().unwrap();
-        if let Some(ref mut state) = *state_lock {
-            if let Err(e) = state.db.write_app_state(&state.app) {
-                tracing::warn!("Failed to save during drop: {}", e.to_string());
-            }
+        if let Some(ref mut state) = *state_lock
+            && let Err(e) = state.db.write_app_state(&state.app)
+        {
+            tracing::warn!("Failed to save during drop: {}", e.to_string());
         }
         state_lock.take();
     }
 }
 
 // false on None state
-pub fn modify_global<F>(modifier: F) -> bool
+pub fn modify_state<F>(modifier: F) -> bool
 where
     F: FnOnce(&mut GlobalState),
 {
     let mut state_lock = APP_STATE.write().unwrap();
-    if let Some(ref mut state) = *state_lock {
+    state_lock.as_mut().map_or(false, |state| {
         modifier(state);
         true
-    } else {
-        false
-    }
+    })
 }
 
-// often actually used to invoke methods probably going to
-// make a new function to be explicit about usage
-pub fn read_global<F, R>(reader: F) -> Option<R>
+pub fn with_state<F, R>(reader: F) -> Option<R>
 where
     F: FnOnce(&GlobalState) -> R,
 {
     let state_lock = APP_STATE.read().unwrap();
 
-    if let Some(state) = &*state_lock {
-        Some(reader(state))
-    } else {
-        None
-    }
+    (*state_lock)
+        .as_ref()
+        .map_or_else(|| None, |state| Some(reader(state)))
 }
 
+/// # Panics
+///
+/// If [`GlobalContext`] hasn't been initialised
 pub fn context() -> &'static GlobalContext {
     APP_CTX
         .get()

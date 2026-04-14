@@ -1,7 +1,6 @@
 use serde::Deserialize;
 use std::{
     collections::HashMap,
-    fmt::format,
     fs::read_to_string,
     path::{Path, PathBuf},
 };

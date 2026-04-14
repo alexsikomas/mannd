@@ -9,6 +9,7 @@ use std::{path::PathBuf, sync::OnceLock};
 use tracing::instrument;
 
 use crate::{
+    SETTINGS,
     components::{
         main_menu::MainMenu, networkd_ui::NetworkdMenu, password_prompt::PasswordPrompt,
         popup_prompt::PopupPrompt, wifi_menu::Connection, wireguard_ui::VpnMenu,
@@ -33,7 +34,9 @@ impl Theme {
     /// global value of `THEME`
     #[instrument(err)]
     pub fn new() -> Result<(), ManndError> {
-        let config = &context().settings;
+        let config = SETTINGS.get().ok_or(ManndError::OperationFailed(
+            "SETTINGS not initialised".into(),
+        ))?;
         let selected = &config.theme.selected;
 
         let palette = config

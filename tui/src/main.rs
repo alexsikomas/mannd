@@ -1,13 +1,13 @@
 use mannd::{
-    UNIX_SOCK_PATH, context, error::ManndError, init_ctx, state::messages::NetworkAction,
-    utils::setup_logging,
+    UNIX_SOCK_PATH, config::AppConfig, context, error::ManndError, init_ctx,
+    state::messages::NetworkAction, utils::setup_logging,
 };
 use postcard::to_stdvec_cobs;
-use std::{path::PathBuf, process::Stdio, str::FromStr, time::Duration};
+use std::{path::PathBuf, process::Stdio, str::FromStr, sync::OnceLock, time::Duration};
 use tokio::{fs, io::AsyncWriteExt, net::UnixStream, process::Command, time::timeout};
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::{Level, instrument};
-use tui::{app::App, ui::Theme};
+use tui::{SETTINGS, app::App, ui::Theme};
 
 const DEBUG_SOCK_BIN: &str = "target/debug/socket";
 const RELEASE_SOCK_BIN: &str = "/usr/libexec/mannd-socket";
@@ -16,16 +16,20 @@ const RELEASE_SOCK_BIN: &str = "/usr/libexec/mannd-socket";
 #[instrument(err)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let uid = unsafe { libc::geteuid() };
-    let stream = get_unix_socket(uid).await?;
-
     init_ctx(Some(uid))?;
-    let settings = &context().settings;
+    let settings_path = context().config_home.join("settings.conf");
+    let settings = AppConfig::load(settings_path, Some(&context().home))?;
+
+    let stream = get_unix_socket(uid, &settings).await?;
 
     let max_log_level = Level::from_str(&settings.debug.max_log_level)?;
     let mut tui_log = PathBuf::from(&settings.storage.state);
     tui_log.push("logs/tui.log");
 
     setup_logging(tui_log, max_log_level, Some(uid))?;
+    SETTINGS
+        .set(settings)
+        .expect("SETTINGS already initialised");
 
     let _ = Theme::new();
     let () = App::new(stream).run().await?;
@@ -36,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Attempts to get the backend UNIX socket, first tries to connect
 /// if no connection requests password to start either debug or
 /// release service.
-async fn get_unix_socket(uid: u32) -> Result<UnixStream, ManndError> {
+async fn get_unix_socket(uid: u32, settings: &AppConfig) -> Result<UnixStream, ManndError> {
     if let Ok(stream) = UnixStream::connect(UNIX_SOCK_PATH).await {
         // stale backend may still be bound to socket path deadlocked
         if is_backend_healthy(stream).await {
@@ -62,7 +66,14 @@ async fn get_unix_socket(uid: u32) -> Result<UnixStream, ManndError> {
     };
 
     let mut child = Command::new("sudo")
-        .args(["-S", bin_path, &format!("--target-uid={uid}"), "--spawned"])
+        .args([
+            "-S",
+            bin_path,
+            &format!("--target-uid={uid}"),
+            "--spawned",
+            &format!("--storage-path={}", settings.storage.state),
+            &format!("--max-log-level={}", settings.debug.max_log_level),
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
