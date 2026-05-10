@@ -13,6 +13,7 @@ use crate::{
         },
         signals::{SignalManager, SignalUpdate},
     },
+    store::NetworkInfo,
     with_state,
 };
 
@@ -98,8 +99,6 @@ impl<'a> NetworkActor<'a> {
         action: &WifiAction,
         state_send: &mut Vec<NetworkState>,
     ) -> Result<(), ManndError> {
-        let mut should_full_refresh = false;
-
         match action {
             WifiAction::Scan => {
                 state_send.push(NetworkState::Start(Started(Process::WifiScan)));
@@ -132,13 +131,12 @@ impl<'a> NetworkActor<'a> {
                     )));
                 }
             },
-            WifiAction::Connect(info) => {
+            WifiAction::Connect(network) => {
                 state_send.push(NetworkState::Start(Started(Process::WifiConnect)));
-                match self.controller.connect_network(info).await {
+                match self.controller.connect_network(network).await {
                     Ok(()) => {
                         info!("Connection to network was successful");
-                        should_full_refresh = true;
-                        state_send.push(NetworkState::Success(Success::Generic));
+                        state_send.push(NetworkState::Success(Success::Connected(network.clone())));
                     }
                     Err(e) => {
                         tracing::error!("[Wi-Fi]: Connection to network was not successful. {e:?}");
@@ -152,7 +150,7 @@ impl<'a> NetworkActor<'a> {
             WifiAction::ConnectKnown(network) => match self.controller.connect_known(network).await
             {
                 Ok(()) => {
-                    should_full_refresh = true;
+                    state_send.push(NetworkState::Success(Success::Connected(network.clone())));
                 }
                 Err(e) => {
                     tracing::warn!("[Wi-Fi]: Could not connect to a known network. Error: {e:?}");
@@ -165,7 +163,7 @@ impl<'a> NetworkActor<'a> {
             WifiAction::Disconnect => match self.controller.disconnect_network().await {
                 Ok(()) => {
                     info!("[Wi-Fi]: Disconnected from active network");
-                    should_full_refresh = true;
+                    state_send.push(NetworkState::Success(Success::Disconnected));
                 }
                 Err(e) => {
                     tracing::error!("[Wi-Fi]: Disconnect failed. {e:?}");
@@ -178,7 +176,9 @@ impl<'a> NetworkActor<'a> {
             WifiAction::Forget(network) => match self.controller.remove_network(network).await {
                 Ok(()) => {
                     info!("[Wi-Fi]: Network {} forgotten", network.ssid);
-                    should_full_refresh = true;
+                    state_send.push(NetworkState::Success(Success::ForgotNetwork(
+                        network.clone(),
+                    )));
                 }
                 Err(e) => {
                     tracing::error!("[Wi-Fi]: Failed to forget network {}. {e:?}", network.ssid);
@@ -189,19 +189,6 @@ impl<'a> NetworkActor<'a> {
                 }
             },
         };
-
-        if should_full_refresh {
-            match self.controller.get_networks().await {
-                Ok(networks) => state_send.push(NetworkState::SetNetworks(networks)),
-                Err(e) => {
-                    tracing::error!("[Wi-Fi]: Failed to refresh networks after action. {e:?}");
-                    state_send.push(NetworkState::Failed(Failure::new(
-                        Process::Generic,
-                        e.to_string(),
-                    )));
-                }
-            }
-        }
 
         Ok(())
     }

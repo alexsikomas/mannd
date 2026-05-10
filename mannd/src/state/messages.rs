@@ -71,6 +71,9 @@ pub struct Started(pub Process);
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Success {
     Generic,
+    Connected(NetworkInfo),
+    Disconnected,
+    ForgotNetwork(NetworkInfo),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

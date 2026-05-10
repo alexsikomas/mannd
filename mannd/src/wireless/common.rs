@@ -62,7 +62,6 @@ where
 
 /// Returns the value of a property found under the `self.path` interfaces
 /// Trait bounds follow from `zbus` downcast
-#[instrument(err, skip(proxy))]
 pub async fn get_prop_from_proxy<'a, T>(
     proxy: &zbus::Proxy<'a>,
     prop: &str,

@@ -79,6 +79,10 @@ impl WifiState {
                 self.actions.items.push(ConnectionAction::Forget);
             }
         }
+
+        if self.actions.selected() == None {
+            self.actions.set(ConnectionAction::Scan);
+        }
     }
 }
 

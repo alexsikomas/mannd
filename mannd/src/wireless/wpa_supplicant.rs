@@ -208,7 +208,7 @@ impl WifiBackend for WpaSupplicant {
         self.call_interface_method_noreply("SelectNetwork", path)
             .await?;
 
-        // connect is a decently unlikely event so this is fine
+        // connect is a rare event so this is fine
         modify_state(|state| {
             if let Some(existing) = state
                 .app

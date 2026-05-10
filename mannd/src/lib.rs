@@ -48,7 +48,6 @@ use std::{
 };
 
 use crate::{
-    config::AppConfig,
     error::ManndError,
     store::{ApplicationState, ManndStore},
     wireless::wifi_config::WifiConfig,

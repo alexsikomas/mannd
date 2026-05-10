@@ -1,8 +1,12 @@
+use core::default::Default;
 // Dbus api: https://git.kernel.org/pub/scm/network/wireless/iwd.git/tree/doc
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use tokio::sync::{RwLock, mpsc::Sender};
 
-use tracing::{info, instrument};
+use tracing::{
+    info, instrument,
+    subscriber::{NoSubscriber, with_default},
+};
 use zbus::{
     Connection, Proxy,
     fdo::ObjectManagerProxy,
@@ -25,7 +29,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Iwd {
-    path: String,
+    /// device path
+    path: OwnedObjectPath,
     service: String,
     /// System connection
     conn: Connection,
@@ -130,6 +135,7 @@ impl WifiBackend for Iwd {
         {
             writer.password = Some(pass);
         }
+
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
@@ -138,6 +144,7 @@ impl WifiBackend for Iwd {
         )
         .await?;
         proxy.call_noreply("Connect", &()).await?;
+
         modify_state(|state| {
             if let Some(existing) = state
                 .app
@@ -176,7 +183,7 @@ impl WifiBackend for Iwd {
         let proxy = Proxy::new(
             &self.conn,
             self.service.clone(),
-            self.network_path(network),
+            self.known_network_path(network),
             "net.connman.iwd.KnownNetwork",
         )
         .await?;
@@ -206,18 +213,18 @@ impl Iwd {
     ) -> Result<Self, ManndError> {
         let service = "net.connman.iwd".to_string();
 
-        match Self::find_adapter_path(&conn, &service).await {
-            Ok(Some(path)) => Ok(Self {
-                path,
+        match Self::get_all_devices(&conn, &service).await {
+            Ok(path) => Ok(Self {
+                path: path[0].clone(),
                 service,
                 conn,
                 agent_state,
             }),
-            Err(e) => Err(ManndError::AdapterNotFound(format!(
-                "Could not find an adapter, is iwd installed?\n Error: {e}"
+            Err(e) => Err(ManndError::DeviceNotFound(format!(
+                "Could not find a device, is iwd installed?\n Error: {e}"
             ))),
-            _ => Err(ManndError::AdapterNotFound(
-                "Could not find an adapter, is iwd installed?".to_string(),
+            _ => Err(ManndError::DeviceNotFound(
+                "Could not find a device, is iwd installed?".to_string(),
             )),
         }
     }
@@ -305,6 +312,20 @@ impl Iwd {
         Ok(None)
     }
 
+    async fn get_all_devices(
+        conn: &Connection,
+        service: &str,
+    ) -> Result<Vec<OwnedObjectPath>, ManndError> {
+        let mut devices: Vec<OwnedObjectPath> = vec![];
+        let proxy = ObjectManagerProxy::new(conn, service, "/").await?;
+        for (path, interface) in proxy.get_managed_objects().await? {
+            if interface.contains_key("net.connman.iwd.Device") {
+                devices.push(path);
+            }
+        }
+        Ok(devices)
+    }
+
     #[instrument(err, skip(self))]
     pub async fn register_agent(&self) -> Result<(), ManndError> {
         let proxy = Proxy::new(
@@ -355,12 +376,20 @@ impl Iwd {
     }
 
     fn network_path(&self, network: &NetworkInfo) -> String {
-        let res = format!(
+        format!(
+            "{}/{}_{}",
+            self.path,
+            ssid_to_hex(&network.ssid),
+            Self::iwd_security_type(&network.security)
+        )
+    }
+
+    fn known_network_path(&self, network: &NetworkInfo) -> String {
+        format!(
             "/net/connman/iwd/{}_{}",
             ssid_to_hex(&network.ssid),
             Self::iwd_security_type(&network.security)
-        );
-        res
+        )
     }
 
     const fn iwd_security_type(security: &NetworkSecurity) -> &'static str {

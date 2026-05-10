@@ -21,7 +21,7 @@ use mannd::{
         Capability, Failure, NetworkAction, NetworkState, Process, Started, Success,
     },
     store::{NetworkInfo, WgMeta},
-    wireless::wpa_supplicant::WpaInterface,
+    wireless::{common::NetworkFlags, wifi_config::WifiUiSort, wpa_supplicant::WpaInterface},
 };
 use tokio::{
     net::{
@@ -180,8 +180,8 @@ async fn handle_state_update(
 ) -> Option<StateCommand> {
     match msg {
         NetworkState::SetNetworks(aps) => {
-            state.net_ctx.networks = aps;
             if let View::Wifi(wifi_state) = &mut ui.current_view {
+                state.net_ctx.networks = aps;
                 wifi_state.refresh_available_actions(&state.net_ctx.networks);
             }
         }
@@ -229,9 +229,47 @@ fn handle_success(
     match succeeded {
         Success::Generic => {
             ui.should_block = false;
-            return Some(StateCommand::ClearPrompts);
+        }
+        Success::Connected(network) => {
+            ui.should_block = false;
+            if let Some(found) = state
+                .net_ctx
+                .networks
+                .iter_mut()
+                .position(|net| net == &network)
+            {
+                let mut net = state.net_ctx.networks.remove(found);
+                net.flags |= NetworkFlags::CONNECTED | NetworkFlags::KNOWN;
+                state.net_ctx.networks.insert(0, net);
+            }
+        }
+        Success::Disconnected => {
+            if let Some(found) = state
+                .net_ctx
+                .networks
+                .iter_mut()
+                .find(|net| net.flags.contains(NetworkFlags::CONNECTED))
+            {
+                found.flags &= !NetworkFlags::CONNECTED;
+            }
+        }
+        Success::ForgotNetwork(network) => {
+            if let Some(found) = state
+                .net_ctx
+                .networks
+                .iter_mut()
+                .find(|net| *net == &network)
+            {
+                found.flags &= !(NetworkFlags::CONNECTED | NetworkFlags::KNOWN);
+            }
         }
     }
+
+    if let View::Wifi(wifi_state) = &mut ui.current_view {
+        wifi_state.refresh_available_actions(&state.net_ctx.networks);
+    }
+
+    return Some(StateCommand::ClearPrompts);
 }
 
 fn handle_failure(

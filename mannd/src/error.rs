@@ -44,6 +44,8 @@ pub enum ManndError {
     InvalidPropertyFormat(String),
     #[error("Adapter not found: {0}")]
     AdapterNotFound(String),
+    #[error("Device not found: {0}")]
+    DeviceNotFound(String),
     #[error("Security type is invalid!")]
     InvalidSecurityType,
 
