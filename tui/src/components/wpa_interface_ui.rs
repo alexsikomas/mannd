@@ -1,9 +1,7 @@
-use std::fmt::format;
-
 use mannd::wireless::wpa_supplicant::WpaInterface;
 use ratatui::{
     layout::{Constraint, Flex, Layout, Rect},
-    style::{Modifier, Style, Stylize},
+    style::{Modifier, Style},
     text::Line,
     widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
 };
@@ -72,38 +70,6 @@ impl Widget for WpaInterfaceUi<'_> {
             .wrap(Wrap { trim: true })
             .render(areas.info, buf);
 
-        // choice
-        let choice_text = "Apply and persist changes?";
-        let cols = Layout::horizontal([
-            Constraint::Length(choice_text.len() as u16),
-            Constraint::Length(1),
-            Constraint::Length(3),
-        ])
-        .flex(Flex::Center)
-        .split(areas.choice);
-
-        let (choice_text_col, choice_text_bold) = if self.info.on_choice {
-            (theme.primary.color(), Modifier::BOLD)
-        } else {
-            (theme.muted.color(), Modifier::empty())
-        };
-
-        Paragraph::new(choice_text)
-            .style(
-                Style::new()
-                    .fg(choice_text_col)
-                    .add_modifier(choice_text_bold),
-            )
-            .render(cols[0], buf);
-
-        Paragraph::new(if self.info.persist { "Yes" } else { "No" })
-            .style(Style::new().fg(if self.info.on_choice {
-                theme.accent.color()
-            } else {
-                theme.muted.color()
-            }))
-            .render(cols[2], buf);
-
         let mut unmanaged: Vec<(usize, &str)> = vec![];
         let mut managed: Vec<(usize, &str)> = vec![];
 
@@ -116,11 +82,7 @@ impl Widget for WpaInterfaceUi<'_> {
         }
 
         let ordered = WpaInterfacePrompt::ordered_iface_indicies(self.ifaces);
-        let selected_idx = if self.info.on_choice {
-            None
-        } else {
-            ordered.get(self.info.interface_cursor.index).copied()
-        };
+        let selected_idx = ordered.get(self.info.interface_cursor.index).copied();
 
         let mut lines: Vec<Line> = vec![];
 
@@ -196,7 +158,7 @@ impl Widget for WpaInterfaceUi<'_> {
 fn build_areas(area: Rect) -> InterfaceAreas {
     let (outer, inner) = centered_overlay(area, 75, 75);
 
-    let [info_area, choice_area, list_area] = Layout::vertical([
+    let [info_area, _, list_area] = Layout::vertical([
         Constraint::Percentage(20),
         Constraint::Length(3),
         Constraint::Percentage(60),
@@ -206,8 +168,6 @@ fn build_areas(area: Rect) -> InterfaceAreas {
 
     InterfaceAreas {
         outer,
-        inner,
-        choice: choice_area,
         info: info_area,
         list: list_area,
     }
@@ -215,8 +175,6 @@ fn build_areas(area: Rect) -> InterfaceAreas {
 
 pub struct InterfaceAreas {
     outer: Rect,
-    inner: Rect,
-    choice: Rect,
     info: Rect,
     list: Rect,
 }

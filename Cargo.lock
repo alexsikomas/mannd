@@ -944,7 +944,6 @@ dependencies = [
 name = "mannd"
 version = "0.1.0"
 dependencies = [
- "ahash",
  "bitflags",
  "clap",
  "derive_builder",

@@ -55,6 +55,11 @@ struct Args {
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     init_ctx(args.target_uid)?;
+    if args.target_uid.is_none() {
+        println!(
+            "You likely meant to run this with --target-uid=<UID>, if not ignore this message."
+        );
+    }
 
     STORAGE_PATH
         .set(args.storage_path.clone())

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use tokio_stream::{StreamExt, StreamMap};
+use tracing::info;
 use zbus::{Message, proxy::SignalStream, zvariant::OwnedValue};
 
 use crate::state::messages::{NetworkAction, WifiAction};

@@ -219,9 +219,9 @@ impl WifiBackend for WpaSupplicant {
                 *existing = network.clone();
             } else {
                 state.app.saved_networks.push(network.clone());
+                let _ = state.db.write_app_state(&state.app);
             }
         });
-
         Ok(())
     }
 
@@ -247,6 +247,7 @@ impl WifiBackend for WpaSupplicant {
 
         modify_state(|state| {
             state.app.saved_networks.retain(|n| n.ssid != network.ssid);
+            let _ = state.db.write_app_state(&state.app);
         });
 
         Ok(())

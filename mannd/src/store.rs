@@ -15,18 +15,7 @@
 //!
 //! It also contains a country code, this is still under-development.
 //! See [wireguard](crate::wireguard) for more.
-//!
-//! ## Hashing
-//! This module uses [`ahash`] crate for all hashmap operations.
-//!
-//! While [Hasher](std::hash::Hasher) is likely sufficient [`ahash`]
-//! was chosen to minimise latency for processing large directories.
-//!
-//! For instance, if [`WG_DIR`] contains thosuands of configurations,
-//! the overhead of creating [`WgMeta`] entries may be large enough
-//! to impact the TUI and how long it takes to display the entires.
 
-use ahash::RandomState;
 use derive_builder::Builder;
 use postcard::{from_bytes, to_allocvec};
 use redb::{
@@ -108,11 +97,6 @@ pub struct WpaState {
     pub managed_interfaces: Vec<ManagedInterface>,
     #[serde(default)]
     pub active_interface: Option<ManagedInterface>,
-    // I've decided against having per-interface, possibly
-    // if I find myself needing it or it's requested it may
-    // be added
-    // #[serde(default)]
-    // pub interface_configurations: HashMap<String, WpaPolicy, RandomState>,
 }
 
 /// Application State
@@ -190,7 +174,7 @@ impl ManndStore {
     /// uninitialised
     #[instrument(err, skip(self))]
     pub fn write_wg_files(&self) -> Result<(), ManndError> {
-        let mut files: HashMap<String, WgMeta, RandomState> = HashMap::default();
+        let mut files: HashMap<String, WgMeta> = HashMap::default();
         let dir = match fs::read_dir(WG_DIR) {
             Ok(d) => d,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -260,15 +244,15 @@ impl ManndStore {
     }
 
     #[instrument(err, skip(self))]
-    fn get_wg_data(&self) -> Result<Option<HashMap<String, WgMeta, RandomState>>, ManndError> {
+    fn get_wg_data(&self) -> Result<Option<HashMap<String, WgMeta>>, ManndError> {
         let read = self.database.begin_read()?;
 
         let Some(table) = read.open_table_opt(WG_TABLE)? else {
             return Ok(None);
         };
 
-        let mut data: HashMap<String, WgMeta, RandomState> =
-            HashMap::with_capacity_and_hasher(usize::try_from(table.len()?)?, RandomState::new());
+        let mut data: HashMap<String, WgMeta> =
+            HashMap::with_capacity(usize::try_from(table.len()?)?);
 
         for item in table.iter()? {
             let (k, v) = item?;

@@ -1,7 +1,11 @@
 use core::default::Default;
 // Dbus api: https://git.kernel.org/pub/scm/network/wireless/iwd.git/tree/doc
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
-use tokio::sync::{RwLock, mpsc::Sender};
+use futures::StreamExt;
+use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
+use tokio::{
+    sync::{RwLock, mpsc::Sender},
+    time::timeout,
+};
 
 use tracing::{
     info, instrument,
@@ -10,7 +14,7 @@ use tracing::{
 use zbus::{
     Connection, Proxy,
     fdo::ObjectManagerProxy,
-    zvariant::{ObjectPath, OwnedObjectPath},
+    zvariant::{ObjectPath, OwnedObjectPath, OwnedValue},
 };
 
 use crate::{
@@ -130,10 +134,10 @@ impl WifiBackend for Iwd {
             _ => None,
         };
 
-        if let Some(pass) = password
+        if let Some(ref pass) = password
             && let Ok(mut writer) = self.agent_state.try_write()
         {
-            writer.password = Some(pass);
+            writer.password = Some(pass.to_string());
         }
 
         let proxy = Proxy::new(
@@ -145,20 +149,64 @@ impl WifiBackend for Iwd {
         .await?;
         proxy.call_noreply("Connect", &()).await?;
 
-        modify_state(|state| {
-            if let Some(existing) = state
-                .app
-                .saved_networks
-                .iter_mut()
-                .find(|n| n.ssid == network.ssid)
-            {
-                *existing = network.clone();
-            } else {
-                state.app.saved_networks.push(network.clone());
-            }
-        });
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            "org.freedesktop.DBus.Properties",
+        )
+        .await?;
 
-        Ok(())
+        // questionable, would prefer to move to signals but we
+        // need to modify state later
+        let mut signal = proxy.receive_signal("PropertiesChanged").await?;
+        let timeout_s = Duration::from_secs(10);
+
+        let conn_res = timeout(timeout_s, async {
+            while let Some(next) = signal.next().await {
+                let (_, changed_properties, _): (String, HashMap<String, OwnedValue>, Vec<String>) =
+                    next.body().deserialize().unwrap();
+                if let Some(val) = changed_properties.get("State") {
+                    let state = val.downcast_ref::<String>()?;
+                    if state == "disconnected" {
+                        return Err(ManndError::ConnectionFailed("Wrong password".to_string()));
+                    } else if state == "connected" {
+                        return Ok(());
+                    }
+                }
+            }
+            Err(ManndError::ConnectionFailed(
+                "Signal stream ended unexpectedly".to_string(),
+            ))
+        })
+        .await;
+
+        match conn_res {
+            Ok(Ok(())) => {
+                modify_state(|state| {
+                    if let Some(existing) = state
+                        .app
+                        .saved_networks
+                        .iter_mut()
+                        .find(|n| n.ssid == network.ssid)
+                    {
+                        // only save if pass not empty which would
+                        // indicate that this is known network reconnect
+                        if let Some(p) = password
+                            && !p.is_empty()
+                        {
+                            *existing = network.clone();
+                        }
+                    } else {
+                        state.app.saved_networks.push(network.clone());
+                        let _ = state.db.write_app_state(&state.app);
+                    }
+                });
+                Ok(())
+            }
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(ManndError::ConnectionFailed("Wrong password".to_string())),
+        }
     }
 
     #[instrument(err, skip(self))]
@@ -194,6 +242,7 @@ impl WifiBackend for Iwd {
                 info!("Successfully forgot: {}", network.ssid);
                 modify_state(|state| {
                     state.app.saved_networks.retain(|n| n.ssid != network.ssid);
+                    let _ = state.db.write_app_state(&state.app);
                 });
                 Ok(())
             }

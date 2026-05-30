@@ -411,8 +411,6 @@ impl Component for InfoPrompt {
 #[derive(Debug)]
 pub struct WpaInterfacePrompt {
     pub interface_cursor: Cursor,
-    pub on_choice: bool,
-    pub persist: bool,
     pub pending_remove: Option<String>,
 }
 
@@ -420,8 +418,6 @@ impl Default for WpaInterfacePrompt {
     fn default() -> Self {
         Self {
             interface_cursor: Cursor::default(),
-            on_choice: true,
-            persist: false,
             pending_remove: None,
         }
     }
@@ -436,7 +432,6 @@ impl Component for WpaInterfacePrompt {
         let ordered = WpaInterfacePrompt::ordered_iface_indicies(ifaces);
 
         if ordered.is_empty() {
-            self.on_choice = true;
             self.interface_cursor.index = 0;
             self.pending_remove = None;
         } else if self.interface_cursor.index >= ordered.len() {
@@ -445,14 +440,6 @@ impl Component for WpaInterfacePrompt {
 
         match key {
             KeyAction::Enter => {
-                if self.on_choice {
-                    self.pending_remove = None;
-                    self.persist = !self.persist;
-                    return StateResult::Command(StateCommand::NetworkAction(NetworkAction::Wpa(
-                        WpaAction::TogglePersist,
-                    )));
-                }
-
                 let Some(&real_idx) = ordered.get(self.interface_cursor.index) else {
                     return StateResult::Consumed;
                 };
@@ -486,13 +473,8 @@ impl Component for WpaInterfacePrompt {
             // can't use generic cursor up down implmentation
             KeyAction::Up => {
                 self.pending_remove = None;
-                if self.on_choice {
-                    if !ordered.is_empty() {
-                        self.interface_cursor.index = ordered.len() - 1;
-                        self.on_choice = false;
-                    }
-                } else if self.interface_cursor.index == 0 {
-                    self.on_choice = true;
+                if !ordered.is_empty() {
+                    self.interface_cursor.index = ordered.len() - 1;
                 } else {
                     self.interface_cursor.index -= 1;
                 }
@@ -500,13 +482,8 @@ impl Component for WpaInterfacePrompt {
             }
             KeyAction::Down => {
                 self.pending_remove = None;
-                if self.on_choice {
-                    if !ordered.is_empty() {
-                        self.interface_cursor.index = 0;
-                        self.on_choice = false;
-                    }
-                } else if self.interface_cursor.index + 1 >= ordered.len() {
-                    self.on_choice = true;
+                if !ordered.is_empty() {
+                    self.interface_cursor.index = 0;
                 } else {
                     self.interface_cursor.index += 1;
                 }
