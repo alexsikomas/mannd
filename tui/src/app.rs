@@ -1,7 +1,7 @@
-use std::{cmp::min, process::id, time::Duration};
+use std::{cmp::min, time::Duration};
 
 use postcard::{from_bytes_cobs, to_stdvec_cobs};
-use ratatui::{TerminalOptions, layout::Rect};
+use ratatui::layout::Rect;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use tracing::instrument;
 
@@ -10,10 +10,7 @@ use crate::{
     state::{AppContext, PopupType, PromptState, StateCommand, UiState, View, prompts::InfoPrompt},
     ui::UiContext,
 };
-use crossterm::{
-    cursor::DisableBlinking,
-    event::{DisableBracketedPaste, EnableBracketedPaste, EventStream},
-};
+use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste, EventStream};
 use futures::{SinkExt, StreamExt};
 use mannd::{
     error::ManndError,
@@ -21,7 +18,7 @@ use mannd::{
         Capability, Failure, NetworkAction, NetworkState, Process, Started, Success,
     },
     store::{NetworkInfo, WgMeta},
-    wireless::{common::NetworkFlags, wifi_config::WifiUiSort, wpa_supplicant::WpaInterface},
+    wireless::{common::NetworkFlags, wpa_supplicant::WpaInterface},
 };
 use tokio::{
     net::{

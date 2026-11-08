@@ -1,5 +1,4 @@
 pub mod menu;
-pub mod networkd;
 pub mod prompts;
 pub mod vpn;
 pub mod wifi;
@@ -15,7 +14,6 @@ use mannd::state::messages::{Capability, NetworkAction, WifiAction, WireguardAct
 use crate::app::{AppAction, NetworkContext};
 use crate::keys::{KeyAction, Keymap};
 pub use crate::state::menu::MainMenuSelection;
-use crate::state::networkd::NetworkdState;
 pub use crate::state::prompts::{PopupType, PromptState};
 pub use crate::state::vpn::VpnState;
 pub use crate::state::wifi::WifiState;
@@ -216,8 +214,6 @@ pub enum View {
     MainMenu(SelectableList<MainMenuSelection>),
     Wifi(WifiState),
     Vpn(VpnState),
-    Networkd(NetworkdState),
-    Config,
 }
 
 impl View {
@@ -232,13 +228,7 @@ impl View {
             options.items.push(MainMenuSelection::Vpn);
         }
 
-        if caps.networkd_active {
-            options.items.push(MainMenuSelection::Networkd);
-        }
-
-        options
-            .items
-            .extend([MainMenuSelection::Config, MainMenuSelection::Exit]);
+        options.items.extend([MainMenuSelection::Exit]);
         Self::MainMenu(options)
     }
 }
@@ -267,8 +257,6 @@ impl Component for View {
             }
             View::Wifi(state) => return state.on_key(key, ctx),
             View::Vpn(state) => return state.on_key(key, ctx),
-            View::Networkd(_state) => {}
-            View::Config => {}
         }
         StateResult::Ignored
     }

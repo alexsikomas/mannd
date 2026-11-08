@@ -53,6 +53,12 @@ struct Args {
 #[tokio::main]
 #[instrument(err)]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // root check
+    let euid = unsafe { libc::getuid() };
+    if euid != 0 {
+        Err(ManndError::NotRoot)?;
+    }
+
     let args = Args::parse();
     init_ctx(args.target_uid)?;
     if args.target_uid.is_none() {
@@ -67,12 +73,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let _guard = GlobalStateGuard::init()?;
 
-    // root check
-    let euid = unsafe { libc::getuid() };
-    if euid != 0 {
-        Err(ManndError::NotRoot)?;
-    }
-
     let max_log_level = Level::from_str(&args.max_log_level)?;
     let mut socket_log = PathBuf::from(&args.storage_path);
     socket_log.push("logs/socket.log");
@@ -81,19 +81,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let guard = UnixSocketGuard::new(UNIX_SOCK_PATH).await?;
 
     loop {
-        let mut sock = if args.spawned {
-            match timeout(Duration::from_secs(10), guard.listener.accept()).await {
-                Ok(Ok((s, _))) => s,
-                Ok(Err(e)) => return Err(e.into()),
-                Err(_) => {
-                    info!("Timed out waiting for frontend connection, exiting.");
-                    return Ok(());
-                }
-            }
-        } else {
-            let (s, _) = guard.listener.accept().await?;
-            s
-        };
+        // let mut sock = if args.spawned {
+        //     match timeout(Duration::from_secs(10), guard.listener.accept()).await {
+        //         Ok(Ok((s, _))) => s,
+        //         Ok(Err(e)) => return Err(e.into()),
+        //         Err(_) => {
+        //             info!("Timed out waiting for frontend connection, exiting.");
+        //             return Ok(());
+        //         }
+        //     }
+        // } else {
+        let (mut sock, _) = guard.listener.accept().await?;
+        // };
         let (sock_reader, sock_writer) = sock.split();
         let (sock_tx, mut sock_rx) = mpsc::channel::<NetworkState>(32);
         let (signal_tx, mut signal_rx) = mpsc::channel::<SignalUpdate>(32);

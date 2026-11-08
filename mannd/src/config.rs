@@ -19,7 +19,7 @@ impl Default for AppConfig {
     // include settings.conf in binary instead of this?
     fn default() -> Self {
         let storage = StorageConfig {
-            state: "${HOME}/.local/state".into(),
+            path: "${HOME}/.local/state".into(),
         };
 
         let debug = DebugConfig {
@@ -54,7 +54,7 @@ impl Default for AppConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct StorageConfig {
-    pub state: String,
+    pub path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,13 +124,13 @@ impl AppConfig {
         match ron::from_str::<AppConfig>(&conf_str) {
             Ok(mut conf) => {
                 conf.expand_vars(home)?;
-                conf.storage.state.push_str("/mannd");
+                conf.storage.path.push_str("/mannd");
                 Ok(conf)
             }
             Err(_) => {
                 let mut conf = AppConfig::default();
                 conf.expand_vars(home)?;
-                conf.storage.state.push_str("/mannd");
+                conf.storage.path.push_str("/mannd");
                 Ok(conf)
             }
         }
@@ -144,7 +144,7 @@ impl AppConfig {
     fn expand_vars(&mut self, home: Option<&Path>) -> Result<(), ManndError> {
         let var_name = self
             .storage
-            .state
+            .path
             .split_once("${")
             .and_then(|(_, rest)| rest.split_once("}"))
             .map(|(content, _)| content);
@@ -165,7 +165,7 @@ impl AppConfig {
                 ManndError::OperationFailed("HOME path is not valid UTF-8".into())
             })?;
 
-            self.storage.state = self.storage.state.replace(&format!("${{{var}}}"), home_str);
+            self.storage.path = self.storage.path.replace(&format!("${{{var}}}"), home_str);
         }
 
         Ok(())

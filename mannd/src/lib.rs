@@ -108,6 +108,7 @@ impl GlobalStateGuard {
     pub fn init() -> Result<Self, ManndError> {
         let db = ManndStore::init()?;
         let app = db.get_app_state()?;
+        println!("APP STATE: {:?}", app);
         let wifi_config = Arc::new(WifiConfig::load_or_default()?);
 
         *APP_STATE.write().unwrap() = Some(GlobalState {

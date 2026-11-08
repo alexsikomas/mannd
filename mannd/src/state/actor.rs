@@ -79,7 +79,6 @@ impl<'a> NetworkActor<'a> {
             NetworkAction::Wpa(wpa_action) => {
                 self.handle_wpa_action(&wpa_action, &mut state_send).await?;
             }
-            // WIREGUARD
             NetworkAction::Exit => {
                 if let Ok(()) = self.controller.exit().await {
                     return Ok(true);

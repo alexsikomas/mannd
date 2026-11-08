@@ -110,6 +110,7 @@ impl ManndStore {
         };
 
         if let Some(data) = table.get(APP_STATE_KEY.to_string())? {
+            let res: ApplicationState = from_bytes(data.value())?;
             Ok(from_bytes(data.value())?)
         } else {
             Ok(ApplicationState::default())

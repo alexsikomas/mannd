@@ -23,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let stream = get_unix_socket(uid, &settings).await?;
 
     let max_log_level = Level::from_str(&settings.debug.max_log_level)?;
-    let mut tui_log = PathBuf::from(&settings.storage.state);
+    let mut tui_log = PathBuf::from(&settings.storage.path);
     tui_log.push("logs/tui.log");
 
     setup_logging(tui_log, max_log_level, Some(uid))?;
@@ -41,12 +41,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// if no connection requests password to start either debug or
 /// release service.
 async fn get_unix_socket(uid: u32, settings: &AppConfig) -> Result<UnixStream, ManndError> {
-    if let Ok(stream) = UnixStream::connect(UNIX_SOCK_PATH).await {
+    if let Ok(mut stream) = UnixStream::connect(UNIX_SOCK_PATH).await {
         // stale backend may still be bound to socket path deadlocked
-        if is_backend_healthy(stream).await {
-            if let Ok(s) = UnixStream::connect(UNIX_SOCK_PATH).await {
-                return Ok(s);
-            }
+        if is_backend_healthy(&mut stream).await {
+            return Ok(stream);
         } else {
             kill_spawned_socket_proc().await;
             wait_for_socket_death().await;
@@ -71,7 +69,7 @@ async fn get_unix_socket(uid: u32, settings: &AppConfig) -> Result<UnixStream, M
             bin_path,
             &format!("--target-uid={uid}"),
             "--spawned",
-            &format!("--storage-path={}", settings.storage.state),
+            &format!("--storage-path={}", settings.storage.path),
             &format!("--max-log-level={}", settings.debug.max_log_level),
         ])
         .stdin(Stdio::piped())
@@ -87,8 +85,10 @@ async fn get_unix_socket(uid: u32, settings: &AppConfig) -> Result<UnixStream, M
     // 3s
     for _ in 0..15 {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        if let Ok(stream) = UnixStream::connect(UNIX_SOCK_PATH).await {
-            return Ok(stream);
+        if let Ok(mut stream) = UnixStream::connect(UNIX_SOCK_PATH).await {
+            if is_backend_healthy(&mut stream).await {
+                return Ok(stream);
+            }
         }
     }
 
@@ -97,7 +97,7 @@ async fn get_unix_socket(uid: u32, settings: &AppConfig) -> Result<UnixStream, M
     ))
 }
 
-async fn is_backend_healthy(mut stream: UnixStream) -> bool {
+async fn is_backend_healthy(stream: &mut UnixStream) -> bool {
     let (r, w) = stream.split();
     let mut writer = FramedWrite::new(w, LengthDelimitedCodec::new());
     let mut reader = FramedRead::new(r, LengthDelimitedCodec::new());

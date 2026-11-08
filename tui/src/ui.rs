@@ -11,9 +11,8 @@ use tracing::instrument;
 use crate::{
     SETTINGS,
     components::{
-        main_menu::MainMenu, networkd_ui::NetworkdMenu, password_prompt::PasswordPrompt,
-        popup_prompt::PopupPrompt, wifi_menu::Connection, wireguard_ui::VpnMenu,
-        wpa_interface_ui::WpaInterfaceUi,
+        main_menu::MainMenu, password_prompt::PasswordPrompt, popup_prompt::PopupPrompt,
+        wifi_menu::Connection, wireguard_ui::VpnMenu, wpa_interface_ui::WpaInterfaceUi,
     },
     state::{AppContext, PromptState, UiState, View},
 };
@@ -143,14 +142,6 @@ impl UiContext {
                     vpn_areas,
                 );
                 frame.render_widget(vpn_menu, inner_area);
-            }
-            View::Networkd(state) => {
-                // TODO: Unfinished
-                let tmp: Vec<PathBuf> = vec![];
-                frame.render_widget(NetworkdMenu::new(state, &tmp), inner_area);
-            }
-            View::Config => {
-                // TODO: Config UI not implemented
             }
         }
 

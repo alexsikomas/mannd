@@ -2,11 +2,10 @@
     <h1 style="border-bottom: none; margin-bottom: 1px;">
         mannd
     </h1>
-<i>Human-written software</i>
 </div>
 
 <div align="center">
-  <video src="https://sikomas.com/public/mannd-git-demo.mp4" 
+  <video src="https://github.com/user-attachments/assets/e949825a-0c55-4bcf-a38a-aa331291ade4" 
          autoplay 
          loop 
          muted 
