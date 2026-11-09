@@ -32,7 +32,6 @@ use crate::{
     wireless::{
         common::NetworkFlags,
         wifi_config::{BandType, MacRandomization},
-        wpa_supplicant::ManagedInterface,
     },
 };
 
@@ -88,15 +87,9 @@ impl Default for ApplicationState {
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct WpaState {
-    /// Interfaces that were historically connected to but may
-    /// not be present anymore
+    /// Name of the last-used interface; restored on the next startup.
     #[serde(default)]
-    pub desired_interfaces: Vec<String>,
-    /// Interfaces that you can trust to be present
-    #[serde(default)]
-    pub managed_interfaces: Vec<ManagedInterface>,
-    #[serde(default)]
-    pub active_interface: Option<ManagedInterface>,
+    pub active_interface_name: Option<String>,
 }
 
 /// Application State
@@ -110,7 +103,6 @@ impl ManndStore {
         };
 
         if let Some(data) = table.get(APP_STATE_KEY.to_string())? {
-            let res: ApplicationState = from_bytes(data.value())?;
             Ok(from_bytes(data.value())?)
         } else {
             Ok(ApplicationState::default())
@@ -137,7 +129,9 @@ impl ManndStore {
         };
 
         if let Some(data) = table.get(WPA_STATE_KEY.to_string())? {
-            Ok(from_bytes(data.value())?)
+            // Fall back to default when the stored binary format doesn't match
+            // (e.g. after a migration that changed WpaState's fields).
+            Ok(from_bytes(data.value()).unwrap_or_default())
         } else {
             Ok(WpaState::default())
         }

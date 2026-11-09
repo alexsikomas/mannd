@@ -113,12 +113,8 @@ pub enum ManndError {
 
     #[error("wpa_supplicant has no interfaces")]
     WpaNoInterfaces,
-    #[error("Could not remove wpa interface as there are no interfaces.")]
-    WpaRemoveEmpty,
     #[error("Could not remove wpa interface as it could not be found.")]
     WpaRemoveNotFound,
-    #[error("Hole between interface entries.")]
-    WpaInterfaceHole,
 
     #[error("Malformed keybind")]
     InputKey,

@@ -7,10 +7,7 @@ use tokio::{
     time::timeout,
 };
 
-use tracing::{
-    info, instrument,
-    subscriber::{NoSubscriber, with_default},
-};
+use tracing::{info, instrument};
 use zbus::{
     Connection, Proxy,
     fdo::ObjectManagerProxy,
@@ -262,19 +259,14 @@ impl Iwd {
     ) -> Result<Self, ManndError> {
         let service = "net.connman.iwd".to_string();
 
-        match Self::get_all_devices(&conn, &service).await {
+        match Self::get_first_device(&conn, &service).await {
             Ok(path) => Ok(Self {
-                path: path[0].clone(),
+                path,
                 service,
                 conn,
                 agent_state,
             }),
-            Err(e) => Err(ManndError::DeviceNotFound(format!(
-                "Could not find a device, is iwd installed?\n Error: {e}"
-            ))),
-            _ => Err(ManndError::DeviceNotFound(
-                "Could not find a device, is iwd installed?".to_string(),
-            )),
+            Err(e) => Err(e),
         }
     }
 
@@ -345,34 +337,20 @@ impl Iwd {
             .build()?)
     }
 
-    /// Returns the object path of the iwd station, currently only returns the first station
-    #[instrument(err, skip(conn))]
-    async fn find_adapter_path(
+    /// Returns the first iwd Device object path found, or an error if none exists.
+    async fn get_first_device(
         conn: &Connection,
         service: &str,
-    ) -> Result<Option<String>, ManndError> {
-        let proxy = ObjectManagerProxy::new(conn, service, "/").await?;
-        for (path, interface) in proxy.get_managed_objects().await? {
-            // BUG: if multiple adapters, return first one
-            if interface.contains_key("net.connman.iwd.Station") {
-                return Ok(Some(path.to_string()));
-            }
-        }
-        Ok(None)
-    }
-
-    async fn get_all_devices(
-        conn: &Connection,
-        service: &str,
-    ) -> Result<Vec<OwnedObjectPath>, ManndError> {
-        let mut devices: Vec<OwnedObjectPath> = vec![];
+    ) -> Result<OwnedObjectPath, ManndError> {
         let proxy = ObjectManagerProxy::new(conn, service, "/").await?;
         for (path, interface) in proxy.get_managed_objects().await? {
             if interface.contains_key("net.connman.iwd.Device") {
-                devices.push(path);
+                return Ok(path);
             }
         }
-        Ok(devices)
+        Err(ManndError::DeviceNotFound(
+            "Could not find a device, is iwd installed?".to_string(),
+        ))
     }
 
     #[instrument(err, skip(self))]

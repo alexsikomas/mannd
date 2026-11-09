@@ -13,7 +13,6 @@ use crate::{
         },
         signals::{SignalManager, SignalUpdate},
     },
-    store::NetworkInfo,
     with_state,
 };
 
@@ -110,18 +109,12 @@ impl<'a> NetworkActor<'a> {
                     )));
                 }
             }
-            // get networks makes a further call to the controller to try to reconnect
-            // to previous known networks
+            // get networks and send them to the TUI
             WifiAction::GetNetworks => match self.controller.get_networks().await {
-                Ok(mut aps) => match self.controller.connect_from_list(&mut aps).await {
-                    Ok(()) => {
-                        state_send.push(NetworkState::SetNetworks(aps));
-                        state_send.push(NetworkState::Success(Success::Generic));
-                    }
-                    Err(e) => {
-                        tracing::error!("[Wi-Fi]: failed to connect to known network. {e:?}");
-                    }
-                },
+                Ok(aps) => {
+                    state_send.push(NetworkState::SetNetworks(aps));
+                    state_send.push(NetworkState::Success(Success::Generic));
+                }
                 Err(e) => {
                     tracing::error!("[Wi-Fi]: Failed to get networks. {e:?}");
                     state_send.push(NetworkState::Failed(Failure::new(
@@ -240,8 +233,6 @@ impl<'a> NetworkActor<'a> {
         action: &WpaAction,
         state_send: &mut Vec<NetworkState>,
     ) -> Result<(), ManndError> {
-        let mut should_refresh_ifaces = false;
-
         match action {
             WpaAction::GetInterfaces => {
                 if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
@@ -262,7 +253,7 @@ impl<'a> NetworkActor<'a> {
             WpaAction::CreateInterface(ifname) => {
                 if let Some(WirelessAdapter::Wpa(wpa)) = self.controller.wifi.as_mut() {
                     match wpa.create_interface(ifname).await {
-                        Ok(()) => should_refresh_ifaces = true,
+                        Ok(()) => {}
                         Err(e) => {
                             tracing::error!("[WPA]: Failed to create interface {ifname}. {e:?}");
                             state_send.push(NetworkState::Failed(Failure::new(
@@ -276,7 +267,7 @@ impl<'a> NetworkActor<'a> {
             WpaAction::RemoveInterface(ifname) => {
                 if let Some(WirelessAdapter::Wpa(wpa)) = self.controller.wifi.as_mut() {
                     match wpa.remove_interface(ifname).await {
-                        Ok(()) => should_refresh_ifaces = true,
+                        Ok(()) => {}
                         Err(e) => {
                             tracing::error!("[WPA]: Failed to remove interface {ifname}. {e:?}");
                             state_send.push(NetworkState::Failed(Failure::new(
@@ -287,7 +278,6 @@ impl<'a> NetworkActor<'a> {
                     }
                 }
             }
-            _ => {}
         }
 
         if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {

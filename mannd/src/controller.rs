@@ -205,19 +205,6 @@ impl Controller {
         })
     }
 
-    pub async fn connect_from_list(
-        &self,
-        networks: &mut Vec<NetworkInfo>,
-    ) -> Result<(), ManndError> {
-        dispatch_wifi!(&self.wifi,
-        iwd => Ok(()),
-        wpa => wpa.update_nearby_networks(networks).await,
-        {
-            tracing::error!("No wireless daemon found");
-            Ok(())
-        })
-    }
-
     #[instrument(err, skip(self))]
     pub async fn disconnect_network(&self) -> Result<(), ManndError> {
         dispatch_wifi!(&self.wifi,
