@@ -9,9 +9,7 @@ use tokio::{
 
 use tracing::{info, instrument};
 use zbus::{
-    Connection, Proxy,
-    fdo::ObjectManagerProxy,
-    zvariant::{ObjectPath, OwnedObjectPath, OwnedValue},
+    Connection, ObjectPath, OwnedObjectPath, OwnedVariant, Proxy, fdo::ObjectManagerProxy,
 };
 
 use crate::{
@@ -161,7 +159,7 @@ impl WifiBackend for Iwd {
 
         let conn_res = timeout(timeout_s, async {
             while let Some(next) = signal.next().await {
-                let (_, changed_properties, _): (String, HashMap<String, OwnedValue>, Vec<String>) =
+                let (_, changed_properties, _): (String, HashMap<String, OwnedVariant>, Vec<String>) =
                     next.body().deserialize().unwrap();
                 if let Some(val) = changed_properties.get("State") {
                     let state = val.downcast_ref::<String>()?;
@@ -281,7 +279,7 @@ impl Iwd {
         .await?;
 
         let agent_path = "/org/mannd/IwdAgent";
-        let agent_objpath = zbus::zvariant::OwnedObjectPath::try_from(agent_path)?;
+        let agent_objpath = OwnedObjectPath::try_from(agent_path)?;
 
         let resp: Result<(), zbus::Error> = proxy.call("UnregisterAgent", &(agent_objpath)).await;
         match resp {

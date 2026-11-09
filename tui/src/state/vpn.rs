@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use mannd::{
     state::messages::{NetworkAction, WireguardAction},
     store::WG_DIR,
-    wireguard::network::Wireguard,
 };
 
 use crate::{

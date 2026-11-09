@@ -139,7 +139,6 @@ impl Component for WifiState {
                                             PromptState::PskConnect(prompt),
                                         ))
                                     }
-                                    _ => StateResult::Consumed,
                                 }
                             } else {
                                 StateResult::Consumed

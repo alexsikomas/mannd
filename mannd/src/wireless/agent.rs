@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 use tracing::info;
-use zbus::{DBusError, interface, zvariant::OwnedObjectPath};
+use zbus::{DBusError, OwnedObjectPath, interface};
 
 #[derive(Debug)]
 pub struct AgentState {

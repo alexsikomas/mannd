@@ -1,5 +1,5 @@
 use tracing::instrument;
-use zbus::{Connection, Proxy, zvariant::OwnedObjectPath};
+use zbus::{Connection, OwnedObjectPath, Proxy};
 use zbus_systemd::systemd1::UnitProxy;
 
 use crate::error::ManndError;

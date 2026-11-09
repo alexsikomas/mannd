@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use tokio_stream::{StreamExt, StreamMap};
-use tracing::info;
-use zbus::{Message, proxy::SignalStream, zvariant::OwnedValue};
+use zbus::{Message, OwnedVariant, proxy::SignalStream};
 
 use crate::state::messages::{NetworkAction, WifiAction};
 
@@ -58,13 +57,13 @@ impl<'a> SignalManager<'a> {
     }
 
     pub fn process_iwd_msg(&mut self, msg: (usize, Message)) -> Option<NetworkAction> {
-        let (_, changed_properties, _): (String, HashMap<String, OwnedValue>, Vec<String>) =
+        let (_, changed_properties, _): (String, HashMap<String, OwnedVariant>, Vec<String>) =
             msg.1.body().deserialize().unwrap();
 
         // stopped scanning
         if changed_properties
             .get("Scanning")
-            .is_some_and(|val| val.eq(&OwnedValue::from(false)))
+            .is_some_and(|val| val.eq(&OwnedVariant::from(false)))
         {
             self.handle_update(SignalUpdate::Remove(msg.0));
             return Some(NetworkAction::Wifi(WifiAction::GetNetworks));

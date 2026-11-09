@@ -28,10 +28,9 @@ use std::{
     os::unix::fs::{PermissionsExt, chown},
     path::{Path, PathBuf},
     str::FromStr,
-    time::Duration,
 };
-use tokio::{net::UnixListener, sync::mpsc, time::timeout};
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tokio::{net::UnixListener, sync::mpsc};
+use tokio_util::{bytes::Bytes, codec::{FramedRead, FramedWrite, LengthDelimitedCodec}};
 use tracing::{Level, info, instrument};
 
 #[derive(Parser, Debug)]
@@ -106,7 +105,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             tokio::select! {
                 Some(msg) = sock_rx.recv() => {
                     if let Ok(res) = to_stdvec_cobs(&msg)
-                        && writer.send(res.into()).await.is_err() {
+                        && writer.send(Bytes::from(res)).await.is_err() {
                             info!("Could not write to socket, disconnecting");
                             return Ok(());
                         }
@@ -130,7 +129,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         Ok(false) => {}
                         Err(e) => {
                             if let Ok(res) = to_stdvec_cobs(&NetworkState::Failed(Failure::new(Process::Generic, e.to_string()))) {
-                                if writer.send(res.into()).await.is_err() {
+                                if writer.send(Bytes::from(res)).await.is_err() {
                                     info!("Couldn't write failure to socket, disconnecting");
                                     return Ok(());
                                 }
@@ -167,7 +166,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             Err(e) => {
                                 tracing::error!("Failed to handle signal action: {e}");
                                 if let Ok(res) = to_stdvec_cobs(&NetworkState::Failed(Failure::new(Process::Generic, e.to_string()))) {
-                                    if writer.send(res.into()).await.is_err() {
+                                    if writer.send(Bytes::from(res)).await.is_err() {
                                         info!("Couldn't write fialure to socket, disconnecting");
                                         return Ok(());
                                     }

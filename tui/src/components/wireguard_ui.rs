@@ -1,7 +1,7 @@
 use mannd::store::WgMeta;
 use ratatui::{
     buffer::Buffer,
-    layout::{Constraint, Flex, Layout, Margin, Rect},
+    layout::{Constraint, Flex, Layout, Rect},
     style::{Style, Stylize},
     text::Line,
     widgets::{Block, Borders, Widget},

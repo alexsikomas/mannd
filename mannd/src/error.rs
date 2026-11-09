@@ -65,8 +65,6 @@ pub enum ManndError {
     Zbus(#[from] zbus::Error),
     #[error("Freedesktop Error from Zbus: {0}")]
     ZbusFreedesktop(#[from] zbus::fdo::Error),
-    #[error("Zbus zvariant Error: {0}")]
-    Zvariant(#[from] zbus::zvariant::Error),
 
     #[error("Error while building network info struct: {0}")]
     NetworkInfoBuilder(#[from] crate::store::NetworkInfoBuilderError),

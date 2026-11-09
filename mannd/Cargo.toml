@@ -11,7 +11,7 @@ futures-timer = { workspace = true }
 neli = { version = "0.7.1", features = ["async", "tokio"] }
 neli-proc-macros = "0.2.1"
 postcard = { workspace = true }
-redb = "3.1.0"
+redb = "4.5.0"
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
@@ -20,8 +20,8 @@ tokio-stream = "0.1.17"
 tracing = { workspace = true }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
-zbus = { version = "5.10.0", default-features = false, features = ["tokio"] }
-zbus_systemd = { version = "0.25701.0", features = [
+zbus = { version = "6.2.1", default-features = false, features = ["tokio", "proxy", "service", "object-manager"] }
+zbus_systemd = { version = "0.26201.0", features = [
     "network1",
     "resolve1",
     "systemd1",

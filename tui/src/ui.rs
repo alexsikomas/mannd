@@ -1,11 +1,11 @@
-use mannd::{config::ThemePalette, context, error::ManndError};
+use mannd::{config::ThemePalette, error::ManndError};
 use ratatui::{
     Frame,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, BorderType, Borders},
 };
-use std::{path::PathBuf, sync::OnceLock};
+use std::sync::OnceLock;
 use tracing::instrument;
 
 use crate::{

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use mannd::{context, error::ManndError};
+use mannd::error::ManndError;
 
 use crate::SETTINGS;
 

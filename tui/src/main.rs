@@ -3,9 +3,9 @@ use mannd::{
     state::messages::NetworkAction, utils::setup_logging,
 };
 use postcard::to_stdvec_cobs;
-use std::{path::PathBuf, process::Stdio, str::FromStr, sync::OnceLock, time::Duration};
+use std::{path::PathBuf, process::Stdio, str::FromStr, time::Duration};
 use tokio::{fs, io::AsyncWriteExt, net::UnixStream, process::Command, time::timeout};
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tokio_util::{bytes::Bytes, codec::{FramedRead, FramedWrite, LengthDelimitedCodec}};
 use tracing::{Level, instrument};
 use tui::{SETTINGS, app::App, ui::Theme};
 
@@ -106,7 +106,7 @@ async fn is_backend_healthy(stream: &mut UnixStream) -> bool {
         return false;
     };
 
-    if futures::SinkExt::send(&mut writer, probe.into())
+    if futures::SinkExt::send(&mut writer, Bytes::from(probe))
         .await
         .is_err()
     {

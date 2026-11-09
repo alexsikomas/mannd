@@ -4,7 +4,6 @@ use mannd::{
     store::{NetworkInfo, NetworkSecurity, PmfMode, SaePwe},
     wireless::wpa_supplicant::WpaInterface,
 };
-use tracing::info;
 
 use crate::{
     keys::KeyAction,

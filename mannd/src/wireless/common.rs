@@ -1,6 +1,6 @@
 use bitflags::bitflags;
-use serde::{Deserialize, Serialize};
-use zbus::zvariant::Value;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use zbus::Type;
 
 use crate::error::ManndError;
 
@@ -11,16 +11,15 @@ pub async fn get_prop_from_proxy<'a, T>(
     prop: &str,
 ) -> Result<T, ManndError>
 where
-    T: TryFrom<Value<'a>>,
-    <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
+    T: DeserializeOwned + Type,
 {
-    match proxy.get_property(prop).await {
-        Ok(val) => Ok(<zbus::zvariant::Value<'_> as Clone>::clone(&val).downcast::<T>()?),
-        Err(e) => Err(ManndError::OperationFailed(format!(
+    proxy
+        .get_property::<T>(prop)
+        .await
+        .map_err(|e| ManndError::OperationFailed(format!(
             "Could not read property '{prop}' at {}: {e}",
             proxy.path()
-        ))),
-    }
+        )))
 }
 
 bitflags! {

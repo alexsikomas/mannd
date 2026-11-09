@@ -2,7 +2,7 @@ use std::{cmp::min, time::Duration};
 
 use postcard::{from_bytes_cobs, to_stdvec_cobs};
 use ratatui::layout::Rect;
-use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
+use tokio_util::{bytes::Bytes, codec::{FramedRead, FramedWrite, LengthDelimitedCodec}};
 use tracing::instrument;
 
 use crate::{
@@ -94,7 +94,7 @@ impl App {
 
             tokio::select! {
                 Some(msg) = sock_rx.recv() => {
-                    if writer.send(msg.into()).await.is_err() {
+                    if writer.send(Bytes::from(msg)).await.is_err() {
                         state.should_quit = true;
                         let _ = ui.process_commands([StateCommand::Prompt(PromptState::Info(InfoPrompt::new("Lost connection to backend socket.".to_string(), PopupType::Error)))], &state.caps);
                     }
@@ -123,7 +123,7 @@ impl App {
         }
 
         let exit_msg = to_stdvec_cobs(&NetworkAction::Exit)?;
-        let _ = writer.send(exit_msg.into()).await;
+        let _ = writer.send(Bytes::from(exit_msg)).await;
 
         crossterm::execute!(std::io::stdout(), DisableBracketedPaste)?;
         ratatui::restore();
@@ -140,7 +140,7 @@ async fn init_request(
 ) -> Result<Capability, ManndError> {
     let req = to_stdvec_cobs(&NetworkAction::GetCapabilities)?;
     writer
-        .send(req.into())
+        .send(Bytes::from(req))
         .await
         .map_err(|_| ManndError::SocketWrite)?;
 

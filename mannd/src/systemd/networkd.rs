@@ -7,6 +7,7 @@ use crate::error::ManndError;
 
 const NETWORK_FOLDER: &str = "/etc/systemd/network/";
 
+#[allow(dead_code)]
 struct Section {
     name: String,
     props: Vec<(String, String)>,

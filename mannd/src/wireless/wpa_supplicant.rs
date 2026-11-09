@@ -10,14 +10,11 @@ use std::{
     sync::Arc,
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tokio::sync::mpsc::Sender;
 use tracing::instrument;
 use zbus::{
-    Connection, Proxy,
-    names::MemberName,
-    proxy::SignalStream,
-    zvariant::{self, ObjectPath, OwnedObjectPath, OwnedValue, Value},
+    Connection, DynamicType, ObjectPath, OwnedObjectPath, OwnedVariant, Proxy, Type, Variant, names::MemberName, proxy::SignalStream
 };
 
 use crate::{
@@ -52,8 +49,8 @@ impl WifiBackend for WpaSupplicant {
             return Ok(());
         }
 
-        let mut dict: HashMap<String, OwnedValue> = HashMap::new();
-        dict.insert("Type".to_string(), Value::new("active").try_to_owned()?);
+        let mut dict: HashMap<String, OwnedVariant> = HashMap::new();
+        dict.insert("Type".to_string(), Variant::new("active").try_to_owned()?);
         self.call_interface_method_noreply("Scan", dict).await?;
 
         let scan_signal = self.get_interface_signal("ScanDone").await?;
@@ -81,7 +78,7 @@ impl WifiBackend for WpaSupplicant {
         {
             let proxy = self.get_network_proxy(path).await?;
             let conn_info =
-                get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "Properties").await?;
+                get_prop_from_proxy::<HashMap<String, OwnedVariant>>(&proxy, "Properties").await?;
 
             let conn_ssid: &str = conn_info
                 .get("ssid")
@@ -199,8 +196,8 @@ impl WifiBackend for WpaSupplicant {
         if let Some(freq) = &network.pref_ghz {
             let freqs: &'static str = freq.clone().into();
 
-            let mut props: HashMap<String, Value> = HashMap::new();
-            props.insert("freq_list".into(), freqs.into());
+            let mut props: HashMap<String, OwnedVariant> = HashMap::new();
+            props.insert("freq_list".into(), Variant::from(freqs).try_to_owned()?);
             let proxy = self.get_network_proxy(path.clone()).await?;
             proxy.set_property("Properties", props).await?;
         }
@@ -476,7 +473,7 @@ impl WpaSupplicant {
         body: T,
     ) -> Result<(), ManndError>
     where
-        T: serde::ser::Serialize + zvariant::DynamicType + Debug + Send + Sync,
+        T: serde::ser::Serialize + DynamicType + Debug + Send + Sync,
     {
         let proxy = self.active_interface_proxy().await?;
         proxy.call_noreply(method_name, &body).await?;
@@ -492,8 +489,8 @@ impl WpaSupplicant {
     }
 
     async fn create_interface_on_dbus(&self, ifname: &str) -> Result<ManagedInterface, ManndError> {
-        let mut body: HashMap<String, OwnedValue> = HashMap::new();
-        body.insert("Ifname".into(), Value::from(ifname).try_to_owned()?);
+        let mut body: HashMap<String, Variant> = HashMap::new();
+        body.insert("Ifname".into(), Variant::from(ifname));
 
         let proxy = self.root_proxy().await?;
         let interface_path: OwnedObjectPath = proxy.call("CreateInterface", &body).await?;
@@ -505,16 +502,11 @@ impl WpaSupplicant {
     async fn get_known_ssid(&self, net_path: &OwnedObjectPath) -> Result<String, ManndError> {
         let proxy = self.get_network_proxy(net_path.clone()).await?;
         let properties =
-            get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "Properties").await?;
-        if let Some(ssid) = properties.get("ssid") {
-            match ssid {
-                Value::Str(s) => {
-                    return Ok(s.as_str().trim_matches('"').to_string());
-                }
-                _ => return Err(ManndError::NetworkNotFound),
-            }
+            get_prop_from_proxy::<HashMap<String, OwnedVariant>>(&proxy, "Properties").await?;
+        match properties.get("ssid").map(|v| &**v) {
+            Some(Variant::Str(s)) => Ok(s.as_str().trim_matches('"').to_string()),
+            _ => Err(ManndError::NetworkNotFound)
         }
-        Err(ManndError::NetworkNotFound)
     }
 
     /// Used for nearby networks that may not have been connected to yet
@@ -539,7 +531,7 @@ impl WpaSupplicant {
         let signal_dbm = get_prop_from_proxy::<i16>(&proxy, "Signal").await.ok();
         let freq = get_prop_from_proxy::<u16>(&proxy, "Frequency").await?;
 
-        let rsn = get_prop_from_proxy::<HashMap<String, Value>>(&proxy, "RSN").await?;
+        let rsn = get_prop_from_proxy::<HashMap<String, OwnedVariant>>(&proxy, "RSN").await?;
         let security = Self::get_security(&rsn);
 
         let info = NetworkInfoBuilder::default()
@@ -558,14 +550,14 @@ impl WpaSupplicant {
         Ok((info, freq))
     }
 
-    fn get_security(rsn: &HashMap<String, Value<'_>>) -> NetworkSecurity {
+    fn get_security(rsn: &HashMap<String, OwnedVariant>) -> NetworkSecurity {
         if rsn.is_empty() {
             return NetworkSecurity::Open;
         }
 
         let key_mgmt: Vec<String> = rsn
             .get("KeyMgmt")
-            .and_then(|v| v.clone().downcast::<Vec<String>>().ok())
+            .and_then(|v| Vec::<String>::try_from(v.clone()).ok())
             .unwrap_or_default();
 
         if key_mgmt.is_empty() {
@@ -612,8 +604,7 @@ impl WpaSupplicant {
     #[instrument(err)]
     async fn get_interface_prop<T>(&self, prop: &'static str) -> Result<T, ManndError>
     where
-        for<'a> T: TryFrom<Value<'a>>,
-        for<'a> <T as TryFrom<Value<'a>>>::Error: Into<zbus::zvariant::Error>,
+        T: DeserializeOwned + Type,
     {
         let proxy = self.active_interface_proxy().await?;
         get_prop_from_proxy::<T>(&proxy, prop).await
@@ -658,49 +649,49 @@ impl WpaSupplicant {
 
     fn build_add_network_body(
         network: &NetworkInfo,
-    ) -> Result<HashMap<String, OwnedValue>, ManndError> {
+    ) -> Result<HashMap<String, OwnedVariant>, ManndError> {
         let mut body = HashMap::new();
 
         body.insert(
             "ssid".into(),
-            Value::new(network.ssid.as_str()).try_to_owned()?,
+            Variant::new(network.ssid.as_str()).try_to_owned()?,
         );
 
         if network.hidden {
-            body.insert("scan_ssid".into(), Value::new(1_i32).try_to_owned()?);
+            body.insert("scan_ssid".into(), Variant::new(1_i32).try_to_owned()?);
         }
 
         match &network.security {
             NetworkSecurity::Open => {
-                body.insert("key_mgmt".into(), Value::new("NONE").try_to_owned()?);
+                body.insert("key_mgmt".into(), Variant::new("NONE").try_to_owned()?);
             }
             NetworkSecurity::Wpa2 { passphrase } => {
                 body.insert(
                     "psk".into(),
-                    Value::new(passphrase.as_str()).try_to_owned()?,
+                    Variant::new(passphrase.as_str()).try_to_owned()?,
                 );
             }
             NetworkSecurity::Wpa2Hex { psk_hex } => {
-                body.insert("psk".into(), Value::new(psk_hex.as_str()).try_to_owned()?);
+                body.insert("psk".into(), Variant::new(psk_hex.as_str()).try_to_owned()?);
             }
             NetworkSecurity::Wpa3Sae { password, .. } => {
-                body.insert("key_mgmt".into(), Value::new("SAE").try_to_owned()?);
+                body.insert("key_mgmt".into(), Variant::new("SAE").try_to_owned()?);
                 body.insert(
                     "sae_password".into(),
-                    Value::new(password.as_str()).try_to_owned()?,
+                    Variant::new(password.as_str()).try_to_owned()?,
                 );
             }
             NetworkSecurity::Wpa3Transition { password } => {
-                body.insert("psk".into(), Value::new(password.as_str()).try_to_owned()?);
+                body.insert("psk".into(), Variant::new(password.as_str()).try_to_owned()?);
             }
             NetworkSecurity::Owe => {
-                body.insert("key_mgmt".into(), Value::new("OWE").try_to_owned()?);
+                body.insert("key_mgmt".into(), Variant::new("OWE").try_to_owned()?);
             }
         }
 
         if let Some(freq) = &network.pref_ghz {
             let freqs: &'static str = freq.clone().into();
-            body.insert("freq_list".into(), Value::new(freqs).try_to_owned()?);
+            body.insert("freq_list".into(), Variant::new(freqs).try_to_owned()?);
         }
 
         Ok(body)
