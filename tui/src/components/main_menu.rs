@@ -16,8 +16,8 @@ pub struct MainMenu<'a> {
 }
 
 impl<'a> MainMenu<'a> {
-    pub fn new(list: &'a SelectableList<MainMenuSelection>) -> Option<Self> {
-        Some(Self { list })
+    pub fn new(list: &'a SelectableList<MainMenuSelection>) -> Self {
+        Self { list }
     }
 }
 

@@ -81,9 +81,7 @@ impl App {
                     let terminal_size = terminal.size()?;
                     let terminal_area = Rect::from(terminal_size);
                     let inner_area = get_inner_area(terminal_area);
-                    let mut cols: usize = 0;
-                    let _ = VpnMenu::build_layout_no_render(inner_area, &mut cols);
-                    ui.vpn_cols = cols;
+                    ui.vpn_cols = VpnMenu::build_layout_no_render(inner_area).cols;
                 }
                 let context =
                     AppContext::create(&state.net_ctx, &state.caps.wifi_daemon, ui.vpn_cols);
@@ -304,8 +302,12 @@ async fn handle_app_action(
 ) {
     match action {
         AppAction::Network(action) => {
-            let res = to_stdvec_cobs(&action).unwrap();
-            let _ = net_tx.send(res).await;
+            match to_stdvec_cobs(&action) {
+                Ok(res) => {
+                    let _ = net_tx.send(res).await;
+                }
+                Err(e) => tracing::error!("Failed to serialize network action: {e}"),
+            }
         }
         AppAction::AddPrompt(prompt) => {
             ui.prompt_stack.push(prompt);

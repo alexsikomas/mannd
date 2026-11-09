@@ -14,8 +14,8 @@ pub struct WpaInterfaceUi<'a> {
 }
 
 impl<'a> WpaInterfaceUi<'a> {
-    pub fn new(info: &'a WpaInterfacePrompt, ifaces: &'a [WpaInterface]) -> Option<Self> {
-        Some(Self { info, ifaces })
+    pub fn new(info: &'a WpaInterfacePrompt, ifaces: &'a [WpaInterface]) -> Self {
+        Self { info, ifaces }
     }
 }
 

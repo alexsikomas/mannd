@@ -18,8 +18,8 @@ pub struct PasswordPrompt<'a> {
 }
 
 impl<'a> PasswordPrompt<'a> {
-    pub fn new(ap: &'a NetworkInfo, info: &'a PskConnectionPrompt) -> Option<Self> {
-        Some(Self { network: ap, info })
+    pub fn new(ap: &'a NetworkInfo, info: &'a PskConnectionPrompt) -> Self {
+        Self { network: ap, info }
     }
 }
 

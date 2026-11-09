@@ -194,7 +194,7 @@ impl UiState {
                     }
                 }
                 StateCommand::ClearPrompts => {
-                    self.prompt_stack = vec![];
+                    self.prompt_stack.clear();
                 }
             }
         }

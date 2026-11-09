@@ -65,23 +65,22 @@ impl Widget for VpnMenu<'_> {
                     meta.len()
                 }
             };
-            if item_count <= 0 {
+            if item_count == 0 {
                 return;
             }
 
             // rows displayable
             let rows = (self.areas.vpn.height / ROW_H) as usize;
-            if rows <= 0 {
+            if rows == 0 {
                 tracing::error!("Not enough room to display a single row...");
                 return;
             }
 
-            let cols = if let Some(c) = calc_max_cols(self.areas.vpn) {
-                c
-            } else {
+            let cols = self.areas.cols;
+            if cols == 0 {
                 tracing::error!("Not enough room to display a single column...");
                 return;
-            };
+            }
 
             let items_per_page = rows * cols;
             let selected_item = self.state.file_cursor.index;
@@ -204,16 +203,13 @@ impl VpnMenu<'_> {
 
     // To reduce the amount of times this is performed this needs to be run
     // before the ui element is initialised
-    pub fn build_layout_no_render(area: Rect, cols: &mut usize) -> VpnAreas {
+    pub fn build_layout_no_render(area: Rect) -> VpnAreas {
         let (outer, select_area, vpn_area) = panel_with_toolbar(area, 80, 90);
-
-        let max_cols = calc_max_cols(vpn_area).unwrap_or(0);
-        *cols = max_cols;
-
         VpnAreas {
             outer,
             vpn: vpn_area,
             select: select_area,
+            cols: calc_max_cols(vpn_area).unwrap_or(0),
         }
     }
 
@@ -272,4 +268,5 @@ pub struct VpnAreas {
     outer: Rect,
     vpn: Rect,
     select: Rect,
+    pub cols: usize,
 }

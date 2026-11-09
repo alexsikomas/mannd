@@ -26,8 +26,8 @@ pub struct PopupPrompt<'a> {
 }
 
 impl<'a> PopupPrompt<'a> {
-    pub fn new(text: &'a String, prompt_type: &'a PopupType) -> Option<Self> {
-        Some(Self { text, prompt_type })
+    pub fn new(text: &'a String, prompt_type: &'a PopupType) -> Self {
+        Self { text, prompt_type }
     }
 }
 

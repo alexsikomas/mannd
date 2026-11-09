@@ -470,23 +470,14 @@ impl Component for WpaInterfacePrompt {
                     }
                 }
             }
-            // can't use generic cursor up down implmentation
             KeyAction::Up => {
                 self.pending_remove = None;
-                if !ordered.is_empty() {
-                    self.interface_cursor.index = ordered.len() - 1;
-                } else {
-                    self.interface_cursor.index -= 1;
-                }
+                self.interface_cursor.prev(ordered.len());
                 StateResult::Consumed
             }
             KeyAction::Down => {
                 self.pending_remove = None;
-                if !ordered.is_empty() {
-                    self.interface_cursor.index = 0;
-                } else {
-                    self.interface_cursor.index += 1;
-                }
+                self.interface_cursor.next(ordered.len());
                 StateResult::Consumed
             }
             _ => StateResult::Consumed,

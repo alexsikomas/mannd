@@ -21,11 +21,11 @@ pub struct Connection<'a> {
 }
 
 impl<'a> Connection<'a> {
-    pub fn new(networks: &'a [NetworkInfo], conn_state: &'a WifiState) -> Option<Self> {
-        Some(Self {
+    pub fn new(networks: &'a [NetworkInfo], conn_state: &'a WifiState) -> Self {
+        Self {
             networks,
             conn_state,
-        })
+        }
     }
 }
 

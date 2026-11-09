@@ -99,18 +99,10 @@ fn key_str_to_event(key: &str) -> Result<KeyEvent, ManndError> {
             "Return" | "CR" | "Enter" => key_code = KeyCode::Enter,
             "BS" => key_code = KeyCode::Backspace,
             "Esc" => key_code = KeyCode::Esc,
-            "F1" => key_code = KeyCode::F(1),
-            "F2" => key_code = KeyCode::F(2),
-            "F3" => key_code = KeyCode::F(3),
-            "F4" => key_code = KeyCode::F(4),
-            "F5" => key_code = KeyCode::F(5),
-            "F6" => key_code = KeyCode::F(6),
-            "F7" => key_code = KeyCode::F(7),
-            "F8" => key_code = KeyCode::F(8),
-            "F9" => key_code = KeyCode::F(9),
-            "F10" => key_code = KeyCode::F(10),
-            "F11" => key_code = KeyCode::F(11),
-            "F12" => key_code = KeyCode::F(12),
+            k if k.starts_with('F') && k.len() > 1 && k[1..].chars().all(|c| c.is_ascii_digit()) => {
+                let n: u8 = k[1..].parse().map_err(|_| ManndError::InputKey)?;
+                key_code = KeyCode::F(n);
+            }
             _ => {
                 tracing::error!("Key: {key_to_read} does not correspond to a valid keycode");
                 return Err(ManndError::InputKey);

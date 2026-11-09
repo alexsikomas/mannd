@@ -112,21 +112,13 @@ impl UiContext {
 
         match &state.current_view {
             View::MainMenu(list) => {
-                if let Some(menu) = MainMenu::new(list) {
-                    frame.render_widget(menu, inner_area);
-                } else {
-                    return;
-                }
+                frame.render_widget(MainMenu::new(list), inner_area);
             }
             View::Wifi(connection_state) => {
-                if let Some(con) = Connection::new(&net_ctx.networks, connection_state) {
-                    frame.render_widget(con, inner_area);
-                }
+                frame.render_widget(Connection::new(&net_ctx.networks, connection_state), inner_area);
             }
             View::Vpn(vpn_state) => {
-                // unnecessary
-                let mut cols: usize = 0;
-                let vpn_areas = VpnMenu::build_layout_no_render(inner_area, &mut cols);
+                let vpn_areas = VpnMenu::build_layout_no_render(inner_area);
 
                 let wg_meta = if net_ctx.wg_ctx.active {
                     Some(net_ctx.wg_ctx.meta.as_slice())
@@ -148,25 +140,24 @@ impl UiContext {
         for prompt in &state.prompt_stack {
             match prompt {
                 PromptState::Info(info_prompt) => {
-                    if let Some(prompt_instance) =
-                        PopupPrompt::new(&info_prompt.reason, &info_prompt.kind)
-                    {
-                        frame.render_widget(prompt_instance, inner_area);
-                    }
+                    frame.render_widget(
+                        PopupPrompt::new(&info_prompt.reason, &info_prompt.kind),
+                        inner_area,
+                    );
                 }
                 PromptState::WpaInterface(wpa_prompt) => {
-                    if let Some(wpa_ifaces) = &net_ctx.wpa_interfaces
-                        && let Some(prompt_instance) = WpaInterfaceUi::new(wpa_prompt, wpa_ifaces)
-                    {
-                        frame.render_widget(prompt_instance, inner_area);
+                    if let Some(wpa_ifaces) = &net_ctx.wpa_interfaces {
+                        frame.render_widget(
+                            WpaInterfaceUi::new(wpa_prompt, wpa_ifaces),
+                            inner_area,
+                        );
                     }
                 }
                 PromptState::PskConnect(psk_prompt) => {
-                    if let Some(prompt_instance) =
-                        PasswordPrompt::new(&psk_prompt.network, psk_prompt)
-                    {
-                        frame.render_widget(prompt_instance, inner_area);
-                    }
+                    frame.render_widget(
+                        PasswordPrompt::new(&psk_prompt.network, psk_prompt),
+                        inner_area,
+                    );
                 }
             }
         }
@@ -208,6 +199,11 @@ impl<'a> From<&'a ThemeRgb> for Color {
 impl TryFrom<&str> for ThemeRgb {
     type Error = ManndError;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value.len() != 7 || !value.starts_with('#') {
+            return Err(ManndError::InvalidPropertyFormat(format!(
+                "expected #RRGGBB hex colour, got: {value}"
+            )));
+        }
         Ok(ThemeRgb {
             red: u8::from_str_radix(&value[1..=2], 16)?,
             green: u8::from_str_radix(&value[3..=4], 16)?,
