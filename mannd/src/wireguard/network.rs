@@ -6,14 +6,13 @@
 use crate::{
     error::ManndError,
     netlink::{NetlinkHandle, NlRouterWrapper},
-    utils::{get_index, str_to_ip},
+    utils::get_index,
     wireguard::wg_ini::WgConfig,
 };
 use neli::{consts::socket::NlFamily, router::asynchronous::NlRouter, utils::Groups};
 use std::{
     collections::HashMap,
     fmt::Debug,
-    net::IpAddr,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -49,23 +48,6 @@ impl Wireguard<NlRouterWrapper> {
     #[instrument(err)]
     /// Attempts to connect to a wireguard configuration
     pub fn connect_conf(&self, path: &Path) -> Result<(), ManndError> {
-        let conf = WgConfig::parse(path.into())?;
-
-        // get ips, possibly multiple split on ,
-        let mut ips: Vec<IpAddr> = vec![];
-        match conf.sections.get("Interface") {
-            Some(iface) => match iface.get("Address") {
-                Some(addrs) => {
-                    for addr in addrs.split(',') {
-                        let ip = str_to_ip(addr)?;
-                        ips.push(ip);
-                    }
-                }
-                None => return Err(ManndError::WgIps),
-            },
-            None => return Err(ManndError::SectionNotFound("Interface".to_string())),
-        }
-
         Self::set_conf(path)?;
         Ok(())
     }
@@ -101,100 +83,6 @@ impl Wireguard<NlRouterWrapper> {
         Ok(())
     }
 
-    /// Prevents routing loop
-    ///
-    /// Applies firewall mark for port 51820 to it's outgoing
-    /// packets
-    #[instrument(err)]
-    async fn add_wg_fwmark(&self) -> Result<(), ManndError> {
-        Command::new("wg")
-            .args(vec!["set", INTERFACE, "fwmark", "51820"])
-            .output()?;
-        Ok(())
-    }
-
-    #[instrument(err)]
-    async fn add_ip_fwmark(&self) -> Result<(), ManndError> {
-        Command::new("ip")
-            .args(vec![
-                "-6", "rule", "del", "not", "fwmark", "51820", "table", "51820",
-            ])
-            .output()?;
-
-        Command::new("ip")
-            .args(vec![
-                "-6", "rule", "add", "not", "fwmark", "51820", "table", "51820",
-            ])
-            .output()?;
-
-        Command::new("ip")
-            .args(vec![
-                "-4", "rule", "del", "not", "fwmark", "51820", "table", "51820",
-            ])
-            .output()?;
-
-        Command::new("ip")
-            .args(vec![
-                "-4", "rule", "add", "not", "fwmark", "51820", "table", "51820",
-            ])
-            .output()?;
-
-        Ok(())
-    }
-
-    #[instrument(err)]
-    async fn prevent_default_route(&self) -> Result<(), ManndError> {
-        // neli also doesn't implement FRA_SUPPRESS_PREFIXLEN
-        Command::new("ip")
-            .args(vec![
-                "-6",
-                "rule",
-                "del",
-                "table",
-                "main",
-                "suppress_prefixlength",
-                "0",
-            ])
-            .output()?;
-
-        Command::new("ip")
-            .args(vec![
-                "-6",
-                "rule",
-                "add",
-                "table",
-                "main",
-                "suppress_prefixlength",
-                "0",
-            ])
-            .output()?;
-
-        Command::new("ip")
-            .args(vec![
-                "-4",
-                "rule",
-                "del",
-                "table",
-                "main",
-                "suppress_prefixlength",
-                "0",
-            ])
-            .output()?;
-
-        Command::new("ip")
-            .args(vec![
-                "-4",
-                "rule",
-                "add",
-                "table",
-                "main",
-                "suppress_prefixlength",
-                "0",
-            ])
-            .output()?;
-
-        Ok(())
-    }
 }
 
 impl Debug for Wireguard<NlRouterWrapper> {

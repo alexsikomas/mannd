@@ -408,19 +408,10 @@ impl Component for InfoPrompt {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct WpaInterfacePrompt {
     pub interface_cursor: Cursor,
     pub pending_remove: Option<String>,
-}
-
-impl Default for WpaInterfacePrompt {
-    fn default() -> Self {
-        Self {
-            interface_cursor: Cursor::default(),
-            pending_remove: None,
-        }
-    }
 }
 
 impl Component for WpaInterfacePrompt {

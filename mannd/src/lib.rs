@@ -150,10 +150,7 @@ where
     F: FnOnce(&GlobalState) -> R,
 {
     let state_lock = APP_STATE.read().unwrap();
-
-    (*state_lock)
-        .as_ref()
-        .map_or_else(|| None, |state| Some(reader(state)))
+    (*state_lock).as_ref().map(reader)
 }
 
 /// # Panics
@@ -167,33 +164,25 @@ pub fn context() -> &'static GlobalContext {
 
 fn home_path(uid: Option<u32>) -> Result<PathBuf, ManndError> {
     match uid {
-        Some(id) => {
-            let pwd = unsafe { libc::getpwuid(id) };
-            if pwd.is_null() {
-                return Err(ManndError::UidHome);
-            }
-
-            let home_str = unsafe { CStr::from_ptr((*pwd).pw_dir) };
-
-            let home_str = home_str.to_string_lossy();
-            Ok(PathBuf::from(home_str.into_owned()))
-        }
+        Some(id) => uid_to_home(id),
         None => {
             if let Ok(uid_str) = std::env::var("SUDO_UID") {
                 let uid = uid_str.parse::<u32>()?;
-                let pwd = unsafe { libc::getpwuid(uid) };
-                if pwd.is_null() {
-                    return Err(ManndError::UidHome);
-                }
-
-                let home_str = unsafe { CStr::from_ptr((*pwd).pw_dir) };
-
-                let home_str = home_str.to_string_lossy();
-                Ok(PathBuf::from(home_str.into_owned()))
+                uid_to_home(uid)
             } else {
                 println!("Cannot get the UID of the user who called sudo... using /root/ as home.");
                 Ok(std::path::PathBuf::from("/root"))
             }
         }
     }
+}
+
+/// Resolves a home directory for a given uid via `getpwuid`.
+fn uid_to_home(uid: u32) -> Result<PathBuf, ManndError> {
+    let pwd = unsafe { libc::getpwuid(uid) };
+    if pwd.is_null() {
+        return Err(ManndError::UidHome);
+    }
+    let home_str = unsafe { CStr::from_ptr((*pwd).pw_dir) };
+    Ok(PathBuf::from(home_str.to_string_lossy().into_owned()))
 }

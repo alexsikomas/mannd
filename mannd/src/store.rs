@@ -97,52 +97,55 @@ impl ManndStore {
     // returns default app state if table hasn't been made
     #[instrument(err, skip(self))]
     pub fn get_app_state(&self) -> Result<ApplicationState, ManndError> {
-        let read = self.database.begin_read()?;
-        let Some(table) = read.open_table_opt(APPLICATION_TABLE)? else {
-            return Ok(ApplicationState::default());
-        };
-
-        if let Some(data) = table.get(APP_STATE_KEY.to_string())? {
-            Ok(from_bytes(data.value())?)
-        } else {
-            Ok(ApplicationState::default())
-        }
+        Ok(self.read_key(APPLICATION_TABLE, APP_STATE_KEY)?.unwrap_or_default())
     }
 
     #[instrument(err, skip(self))]
     pub fn write_app_state(&self, state: &ApplicationState) -> Result<(), ManndError> {
-        let write = self.database.begin_write()?;
-        {
-            let mut table = write.open_table(APPLICATION_TABLE)?;
-            let data = to_allocvec(&state)?;
-            table.insert(APP_STATE_KEY.to_string(), data.as_slice())?;
-        }
-        write.commit()?;
-        Ok(())
+        self.write_key(APPLICATION_TABLE, APP_STATE_KEY, state)
     }
 
     pub fn get_wpa_state(&self) -> Result<WpaState, ManndError> {
-        let read = self.database.begin_read()?;
-
-        let Some(table) = read.open_table_opt(APPLICATION_TABLE)? else {
-            return Ok(WpaState::default());
-        };
-
-        if let Some(data) = table.get(WPA_STATE_KEY.to_string())? {
-            // Fall back to default when the stored binary format doesn't match
-            // (e.g. after a migration that changed WpaState's fields).
-            Ok(from_bytes(data.value()).unwrap_or_default())
-        } else {
-            Ok(WpaState::default())
-        }
+        // Fall back to default when the stored binary format doesn't match
+        // (e.g. after a migration that changed WpaState's fields).
+        Ok(self
+            .read_key(APPLICATION_TABLE, WPA_STATE_KEY)
+            .unwrap_or(None)
+            .unwrap_or_default())
     }
 
     pub fn write_wpa_state(&self, state: &WpaState) -> Result<(), ManndError> {
+        self.write_key(APPLICATION_TABLE, WPA_STATE_KEY, state)
+    }
+}
+
+impl ManndStore {
+    fn read_key<T: for<'de> Deserialize<'de> + Default>(
+        &self,
+        table: TableDefinition<'static, String, &[u8]>,
+        key: &str,
+    ) -> Result<Option<T>, ManndError> {
+        let read = self.database.begin_read()?;
+        let Some(table) = read.open_table_opt(table)? else {
+            return Ok(None);
+        };
+        match table.get(key.to_string())? {
+            Some(data) => Ok(Some(from_bytes(data.value())?)),
+            None => Ok(None),
+        }
+    }
+
+    fn write_key<T: Serialize>(
+        &self,
+        table: TableDefinition<'static, String, &[u8]>,
+        key: &str,
+        val: &T,
+    ) -> Result<(), ManndError> {
         let write = self.database.begin_write()?;
         {
-            let mut table = write.open_table(APPLICATION_TABLE)?;
-            let data = to_allocvec(&state)?;
-            table.insert(WPA_STATE_KEY.to_string(), data.as_slice())?;
+            let mut table = write.open_table(table)?;
+            let data = to_allocvec(val)?;
+            table.insert(key.to_string(), data.as_slice())?;
         }
         write.commit()?;
         Ok(())

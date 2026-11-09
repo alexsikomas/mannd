@@ -60,11 +60,11 @@ impl<'a> NetworkActor<'a> {
                     .map_or(false, |_| true);
 
                 // TODO: check state
-                let caps = Capability::new(
+                let caps = Capability {
                     wifi_daemon,
                     networkd_active,
-                    WireguardCapability::new(wg_installed),
-                );
+                    wireguard: WireguardCapability { installed: wg_installed },
+                };
                 state_send.push(NetworkState::SetCapabilities(caps));
             }
             NetworkAction::Wifi(wifi_action) => {
@@ -139,7 +139,7 @@ impl<'a> NetworkActor<'a> {
                     }
                 }
             }
-            WifiAction::ConnectKnown(network) => match self.controller.connect_known(network).await
+            WifiAction::ConnectKnown(network) => match self.controller.connect_network(network).await
             {
                 Ok(()) => {
                     state_send.push(NetworkState::Success(Success::Connected(network.clone())));
@@ -263,6 +263,18 @@ impl<'a> NetworkActor<'a> {
                         }
                     }
                 }
+                if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
+                    match wpa.get_interfaces().await {
+                        Ok(interfaces) => state_send.push(NetworkState::SetWpaInterfaces(interfaces)),
+                        Err(e) => {
+                            tracing::error!("[WPA]: Failed to refresh interfaces. {e:?}");
+                            state_send.push(NetworkState::Failed(Failure::new(
+                                Process::Generic,
+                                e.to_string(),
+                            )));
+                        }
+                    }
+                }
             }
             WpaAction::RemoveInterface(ifname) => {
                 if let Some(WirelessAdapter::Wpa(wpa)) = self.controller.wifi.as_mut() {
@@ -277,18 +289,17 @@ impl<'a> NetworkActor<'a> {
                         }
                     }
                 }
-            }
-        }
-
-        if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
-            match wpa.get_interfaces().await {
-                Ok(interfaces) => state_send.push(NetworkState::SetWpaInterfaces(interfaces)),
-                Err(e) => {
-                    tracing::error!("[WPA]: Failed to refresh interfaces. {e:?}");
-                    state_send.push(NetworkState::Failed(Failure::new(
-                        Process::Generic,
-                        e.to_string(),
-                    )));
+                if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
+                    match wpa.get_interfaces().await {
+                        Ok(interfaces) => state_send.push(NetworkState::SetWpaInterfaces(interfaces)),
+                        Err(e) => {
+                            tracing::error!("[WPA]: Failed to refresh interfaces. {e:?}");
+                            state_send.push(NetworkState::Failed(Failure::new(
+                                Process::Generic,
+                                e.to_string(),
+                            )));
+                        }
+                    }
                 }
             }
         }

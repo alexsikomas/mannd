@@ -53,21 +53,6 @@ pub struct UiState {
     pub vpn_cols: usize,
 }
 
-impl<'a> AppContext<'a> {
-    pub fn create(
-        net_ctx: &'a NetworkContext,
-        wifi_daemon: &'a Option<WifiDaemonType>,
-        // one-to-one map
-        vpn_cols: usize,
-    ) -> Self {
-        Self {
-            net_ctx,
-            wifi_daemon,
-            vpn_cols,
-        }
-    }
-}
-
 trait Component {
     fn on_key(&mut self, key: &KeyAction, ctx: &AppContext) -> StateResult;
 }
@@ -130,25 +115,27 @@ impl UiState {
 
         if let Some(prompt) = self.prompt_stack.last_mut() {
             let res = prompt.on_key(key_action, ctx);
-            match res {
-                StateResult::Command(cmd) => {
-                    return self.process_commands([cmd], caps);
-                }
-                StateResult::Commands(cmds) => {
-                    return self.process_commands(cmds, caps);
-                }
-                StateResult::Consumed => return vec![],
-                StateResult::Ignored => {}
+            let cmds = Self::result_to_commands(res);
+            if !cmds.is_empty() {
+                return self.process_commands(cmds, caps);
             }
         }
 
         let res = self.current_view.on_key(key_action, ctx);
-        if let StateResult::Command(cmd) = res {
-            return self.process_commands([cmd], caps);
-        } else if let StateResult::Commands(cmds) = res {
+        let cmds = Self::result_to_commands(res);
+        if !cmds.is_empty() {
             return self.process_commands(cmds, caps);
         }
         vec![]
+    }
+
+    /// Normalises a `StateResult` into a `Vec<StateCommand>` for dispatch.
+    fn result_to_commands(res: StateResult) -> Vec<StateCommand> {
+        match res {
+            StateResult::Command(cmd) => vec![cmd],
+            StateResult::Commands(cmds) => cmds,
+            _ => vec![],
+        }
     }
 
     pub fn process_commands(

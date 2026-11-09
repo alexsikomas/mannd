@@ -9,8 +9,8 @@ use std::{
     fmt::Write,
     fs::{self, OpenOptions, read_dir},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    os::unix::fs::{PermissionsExt, chown},
-    path::{Path, PathBuf},
+    os::unix::fs::chown,
+    path::PathBuf,
     str::FromStr,
 };
 
@@ -42,14 +42,9 @@ pub fn setup_logging(
     max_log_level: Level,
     uid: Option<u32>,
 ) -> Result<(), ManndError> {
-    let mut in_root: Option<bool> = None;
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)?;
-        }
-
-        if uid.is_none() {
-            in_root = Some(is_path_root(parent));
         }
     }
 
@@ -60,24 +55,16 @@ pub fn setup_logging(
         .with_max_level(max_log_level)
         .with_ansi(true)
         .with_line_number(true)
-        .with_max_level(Level::INFO)
-        .compact()
         .finish();
 
     let parent = path
         .parent()
         .ok_or_else(|| ManndError::OperationFailed("Cannot get parent directory".to_string()))?;
 
-    if uid.is_some() {
-        chown(parent, uid, None)?;
+    if let Some(uid) = uid {
+        chown(parent, Some(uid), None)?;
+        chown(&path, Some(uid), None)?;
     }
-    if uid.is_some() {
-        chown(&path, uid, None)?;
-    }
-    // else if in_root.is_some_and(|r| r) {
-    //     fs::set_permissions(parent, fs::Permissions::from_mode(0o644))?;
-    //     fs::set_permissions(path, fs::Permissions::from_mode(0o644))?;
-    // }
 
     let subscriber = subscriber.with(ErrorLayer::default());
 
@@ -90,10 +77,6 @@ pub fn setup_logging(
         }
         _ => Ok(()),
     }
-}
-
-pub fn is_path_root(path: &Path) -> bool {
-    path.starts_with("/root")
 }
 
 pub fn ssid_to_hex(ssid: &str) -> String {

@@ -136,38 +136,19 @@ impl AppConfig {
         }
     }
 
-    /// Currently only ${HOME} is expanded possibly more if the future so
+    /// Currently only ${HOME} is expanded possibly more in the future so
     /// function name is more generic.
     ///
     /// Global variables may not be defined therefore home can be passed in
     /// otherwise pass None to use globals
     fn expand_vars(&mut self, home: Option<&Path>) -> Result<(), ManndError> {
-        let var_name = self
-            .storage
-            .path
-            .split_once("${")
-            .and_then(|(_, rest)| rest.split_once("}"))
-            .map(|(content, _)| content);
-
-        if let Some(var) = var_name {
-            if var.to_uppercase() != "HOME" {
-                return Err(ManndError::InvalidPropertyFormat(format!(
-                    "Unkown variable: £{{{var}}}"
-                )));
-            }
-
-            let home_path = match home {
-                Some(h) => h,
-                None => &context().home,
-            };
-
+        if let Some(rest) = self.storage.path.strip_prefix("${HOME}") {
+            let home_path = home.unwrap_or(&context().home);
             let home_str = home_path.to_str().ok_or_else(|| {
                 ManndError::OperationFailed("HOME path is not valid UTF-8".into())
             })?;
-
-            self.storage.path = self.storage.path.replace(&format!("${{{var}}}"), home_str);
+            self.storage.path = format!("{home_str}{rest}");
         }
-
         Ok(())
     }
 }

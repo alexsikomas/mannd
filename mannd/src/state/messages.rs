@@ -98,7 +98,7 @@ impl Failure {
 }
 
 // determines what options will be visible/selectable
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Capability {
     pub wifi_daemon: Option<WifiDaemonType>,
     pub networkd_active: bool,
@@ -106,45 +106,9 @@ pub struct Capability {
     pub wireguard: WireguardCapability,
 }
 
-impl Capability {
-    pub fn new(
-        wifi_daemon: Option<WifiDaemonType>,
-        networkd_active: bool,
-        wireguard: WireguardCapability,
-    ) -> Self {
-        Capability {
-            wifi_daemon,
-            networkd_active,
-            wireguard,
-        }
-    }
-}
-
-impl Default for Capability {
-    fn default() -> Self {
-        Capability {
-            wifi_daemon: None,
-            networkd_active: false,
-            wireguard: WireguardCapability::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WireguardCapability {
     pub installed: bool,
-}
-
-impl Default for WireguardCapability {
-    fn default() -> Self {
-        Self { installed: false }
-    }
-}
-
-impl WireguardCapability {
-    pub fn new(installed: bool) -> Self {
-        Self { installed }
-    }
 }
 
 // /// For connecting to APs used by wpa and iwd

@@ -193,18 +193,6 @@ impl Controller {
         })
     }
 
-    /// security required for iwd due to the way it stores network names
-    #[instrument(err, skip(self))]
-    pub async fn connect_known(&self, network: &NetworkInfo) -> Result<(), ManndError> {
-        dispatch_wifi!(&self.wifi,
-        iwd => iwd.connect_network(network).await,
-        wpa => wpa.connect_network(network).await,
-        {
-            tracing::error!("No wireless daemon found");
-            Ok(())
-        })
-    }
-
     #[instrument(err, skip(self))]
     pub async fn disconnect_network(&self) -> Result<(), ManndError> {
         dispatch_wifi!(&self.wifi,
@@ -279,10 +267,10 @@ impl Controller {
 impl Controller {
     // wpa only
     #[instrument(err, skip(self))]
+    #[allow(dead_code)]
     pub async fn wpa_create_interface(&mut self, ifname: &str) -> Result<(), ManndError> {
         if let Some(WirelessAdapter::Wpa(wpa)) = &mut self.wifi {
             wpa.create_interface(ifname).await?;
-
             return Ok(());
         }
 

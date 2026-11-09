@@ -83,8 +83,11 @@ impl App {
                     let inner_area = get_inner_area(terminal_area);
                     ui.vpn_cols = VpnMenu::build_layout_no_render(inner_area).cols;
                 }
-                let context =
-                    AppContext::create(&state.net_ctx, &state.caps.wifi_daemon, ui.vpn_cols);
+                let context = AppContext {
+                    net_ctx: &state.net_ctx,
+                    wifi_daemon: &state.caps.wifi_daemon,
+                    vpn_cols: ui.vpn_cols,
+                };
                 let _ = terminal.draw(|f| UiContext::render(f, &ui, &context));
                 state.redraw = false;
             }
@@ -106,9 +109,11 @@ impl App {
                 }
                 Some(Ok(event)) = events.next() => {
                     state.redraw = true;
-                    let context = AppContext::create(&state.net_ctx,
-                        &state.caps.wifi_daemon, ui.vpn_cols,
-                    );
+                    let context = AppContext {
+                        net_ctx: &state.net_ctx,
+                        wifi_daemon: &state.caps.wifi_daemon,
+                        vpn_cols: ui.vpn_cols,
+                    };
                     for action in ui.handle_event(event, &context, &state.caps) {
                         handle_app_action(action, &mut state, &mut ui, &sock_tx).await;
                     }
@@ -272,26 +277,13 @@ fn handle_failure(
     ui: &mut UiState,
     failed: Failure,
 ) -> Option<StateCommand> {
-    match failed.process {
-        Process::WifiConnect => {
-            ui.should_block = false;
-            Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
-                failed.reason,
-                PopupType::Error,
-            ))))
-        }
-        Process::WifiScan => Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
-            failed.reason,
-            PopupType::Error,
-        )))),
-        Process::Generic => {
-            ui.should_block = false;
-            Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
-                failed.reason,
-                PopupType::Error,
-            ))))
-        }
+    if !matches!(failed.process, Process::WifiScan) {
+        ui.should_block = false;
     }
+    Some(StateCommand::Prompt(PromptState::Info(InfoPrompt::new(
+        failed.reason,
+        PopupType::Error,
+    ))))
 }
 
 async fn handle_app_action(
@@ -332,6 +324,7 @@ pub struct NetworkContext {
     pub netd_files: Vec<String>,
 }
 
+#[derive(Default)]
 pub struct WireguardContext {
     pub names: Vec<String>,
     pub meta: Vec<WgMeta>,
@@ -339,14 +332,6 @@ pub struct WireguardContext {
 }
 
 impl WireguardContext {
-    fn new() -> Self {
-        Self {
-            names: vec![],
-            meta: vec![],
-            active: false,
-        }
-    }
-
     pub fn len(&self) -> usize {
         min(self.names.len(), self.meta.len())
     }
@@ -364,7 +349,7 @@ impl Default for NetworkContext {
         Self {
             networks: vec![],
             wpa_interfaces: None,
-            wg_ctx: WireguardContext::new(),
+            wg_ctx: WireguardContext::default(),
             netd_files: vec![],
         }
     }

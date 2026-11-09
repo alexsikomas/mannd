@@ -78,37 +78,35 @@ fn key_str_to_event(key: &str) -> Result<KeyEvent, ManndError> {
         }
     }
 
-    let key_code: KeyCode;
-
-    // then this is a char
-    if key_to_read.len() == 1 {
-        key_code = KeyCode::Char(key_to_read.chars().next().expect("Unexpected..."));
+    let key_code = if key_to_read.len() == 1 {
+        // then this is a char
+        KeyCode::Char(key_to_read.chars().next().expect("Unexpected..."))
     } else {
         match key_to_read.as_str() {
-            "Up" => key_code = KeyCode::Up,
-            "Down" => key_code = KeyCode::Down,
-            "Left" => key_code = KeyCode::Left,
-            "Right" => key_code = KeyCode::Right,
-            "Home" => key_code = KeyCode::Home,
-            "Insert" => key_code = KeyCode::Insert,
-            "End" => key_code = KeyCode::End,
-            "PageUp" => key_code = KeyCode::PageUp,
-            "PageDown" => key_code = KeyCode::PageDown,
-            "Del" => key_code = KeyCode::Delete,
-            "Tab" => key_code = KeyCode::Tab,
-            "Return" | "CR" | "Enter" => key_code = KeyCode::Enter,
-            "BS" => key_code = KeyCode::Backspace,
-            "Esc" => key_code = KeyCode::Esc,
+            "Up" => KeyCode::Up,
+            "Down" => KeyCode::Down,
+            "Left" => KeyCode::Left,
+            "Right" => KeyCode::Right,
+            "Home" => KeyCode::Home,
+            "Insert" => KeyCode::Insert,
+            "End" => KeyCode::End,
+            "PageUp" => KeyCode::PageUp,
+            "PageDown" => KeyCode::PageDown,
+            "Del" => KeyCode::Delete,
+            "Tab" => KeyCode::Tab,
+            "Return" | "CR" | "Enter" => KeyCode::Enter,
+            "BS" => KeyCode::Backspace,
+            "Esc" => KeyCode::Esc,
             k if k.starts_with('F') && k.len() > 1 && k[1..].chars().all(|c| c.is_ascii_digit()) => {
                 let n: u8 = k[1..].parse().map_err(|_| ManndError::InputKey)?;
-                key_code = KeyCode::F(n);
+                KeyCode::F(n)
             }
             _ => {
                 tracing::error!("Key: {key_to_read} does not correspond to a valid keycode");
                 return Err(ManndError::InputKey);
             }
         }
-    }
+    };
 
     Ok(KeyEvent::new(key_code, modifier))
 }
