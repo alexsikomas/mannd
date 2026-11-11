@@ -1,11 +1,12 @@
 use serde::Deserialize;
-use std::{
-    collections::HashMap,
-    fs::read_to_string,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashMap, fs, io::ErrorKind, os::unix::fs::chown, path::Path};
 
-use crate::{context, error::ManndError};
+use crate::error::ManndError;
+
+/// Location of the configuration directory relative to the home directory
+pub const CONFIG_DIR: &str = ".config/mannd";
+/// Location of default settings in mannd repo since we run from target/debug/tui
+const DEFAULT_SETTINGS: &str = include_str!("../../etc/settings.conf");
 
 #[derive(Debug, Deserialize)]
 pub struct AppConfig {
@@ -13,43 +14,6 @@ pub struct AppConfig {
     pub debug: DebugConfig,
     pub theme: ThemeConfig,
     pub keybinds: HashMap<String, String>,
-}
-
-impl Default for AppConfig {
-    // include settings.conf in binary instead of this?
-    fn default() -> Self {
-        let storage = StorageConfig {
-            path: "${HOME}/.local/state".into(),
-        };
-
-        let debug = DebugConfig {
-            max_log_level: "info".into(),
-        };
-
-        let mut palettes: HashMap<String, ThemePalette> = HashMap::new();
-        palettes.insert("light".into(), ThemePalette::light());
-        palettes.insert("dark".into(), ThemePalette::dark());
-        let theme = ThemeConfig {
-            selected: "dark".into(),
-            palettes,
-        };
-
-        let mut keybinds: HashMap<String, String> = HashMap::new();
-        keybinds.insert("<Up>".into(), "up".into());
-        keybinds.insert("<Down>".into(), "down".into());
-        keybinds.insert("<Left>".into(), "left".into());
-        keybinds.insert("<Right>".into(), "right".into());
-        keybinds.insert("<CR>".into(), "enter".into());
-        keybinds.insert("<Esc>".into(), "esc".into());
-        keybinds.insert("<BS>".into(), "backscape".into());
-
-        return AppConfig {
-            storage,
-            debug,
-            theme,
-            keybinds,
-        };
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,72 +47,83 @@ pub struct ThemePalette {
     pub accent: String,
 }
 
-impl ThemePalette {
-    fn light() -> Self {
-        Self {
-            background: "#fbf1c7".into(),
-            foreground: "#3c3836".into(),
-            muted: "#a89984".into(),
-            error: "#9d0006".into(),
-            warning: "#b57614".into(),
-            success: "#79740e".into(),
-            info: "#076678".into(),
-            primary: "#458588".into(),
-            secondary: "#689d6a".into(),
-            tertiary: "#8f3f71".into(),
-            accent: "#d79921".into(),
-        }
-    }
+impl AppConfig {
+    /// Loads `settings.conf` from the configuration directory under `home`.
+    ///
+    /// A missing file is created from the defaults shipped in the binary and
+    /// handed to `uid`. A malformed file is an error rather than a silent
+    /// fallback, so a typo cannot quietly reset the theme and keybinds.
+    pub fn load(home: &Path, uid: u32) -> Result<Self, ManndError> {
+        let dir = home.join(CONFIG_DIR);
+        let path = dir.join("settings.conf");
 
-    fn dark() -> Self {
-        Self {
-            background: "#282828".into(),
-            foreground: "#ebdbb2".into(),
-            muted: "#928374".into(),
-            error: "#cc241d".into(),
-            warning: "#d79921".into(),
-            success: "#98971a".into(),
-            info: "#458588".into(),
-            primary: "#83a598".into(),
-            secondary: "#8ec07c".into(),
-            tertiary: "#d3869b".into(),
-            accent: "#fabd2f".into(),
+        let raw = match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                fs::create_dir_all(&dir)?;
+                fs::write(&path, DEFAULT_SETTINGS)?;
+                chown(&dir, Some(uid), None)?;
+                chown(&path, Some(uid), None)?;
+                DEFAULT_SETTINGS.to_owned()
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        let mut conf: Self = ron::from_str(&raw)
+            .map_err(|e| ManndError::InvalidPropertyFormat(format!("{}: {e}", path.display())))?;
+
+        // only ${HOME} is expanded for now
+        if let Some(rest) = conf.storage.path.strip_prefix("${HOME}") {
+            let home = home.to_str().ok_or_else(|| {
+                ManndError::OperationFailed("HOME path is not valid UTF-8".into())
+            })?;
+            conf.storage.path = format!("{home}{rest}");
         }
+        conf.storage.path.push_str("/mannd");
+        Ok(conf)
     }
 }
 
-impl AppConfig {
-    pub fn load(path: PathBuf, home: Option<&Path>) -> Result<Self, ManndError> {
-        let conf_str = read_to_string(&path)?;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        match ron::from_str::<AppConfig>(&conf_str) {
-            Ok(mut conf) => {
-                conf.expand_vars(home)?;
-                conf.storage.path.push_str("/mannd");
-                Ok(conf)
-            }
-            Err(_) => {
-                let mut conf = AppConfig::default();
-                conf.expand_vars(home)?;
-                conf.storage.path.push_str("/mannd");
-                Ok(conf)
-            }
-        }
+    fn uid() -> u32 {
+        unsafe { libc::geteuid() }
     }
 
-    /// Currently only ${HOME} is expanded possibly more in the future so
-    /// function name is more generic.
-    ///
-    /// Global variables may not be defined therefore home can be passed in
-    /// otherwise pass None to use globals
-    fn expand_vars(&mut self, home: Option<&Path>) -> Result<(), ManndError> {
-        if let Some(rest) = self.storage.path.strip_prefix("${HOME}") {
-            let home_path = home.unwrap_or(&context().home);
-            let home_str = home_path.to_str().ok_or_else(|| {
-                ManndError::OperationFailed("HOME path is not valid UTF-8".into())
-            })?;
-            self.storage.path = format!("{home_str}{rest}");
-        }
-        Ok(())
+    #[test]
+    fn missing_file_is_created_from_defaults() {
+        let home = tempfile::tempdir().unwrap();
+
+        let conf = AppConfig::load(home.path(), uid()).unwrap();
+
+        let written = fs::read_to_string(home.path().join(CONFIG_DIR).join("settings.conf"));
+        assert_eq!(written.unwrap(), DEFAULT_SETTINGS);
+        assert_eq!(
+            conf.storage.path,
+            format!("{}/.local/state/mannd", home.path().display())
+        );
+    }
+
+    #[test]
+    fn malformed_file_is_an_error() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(CONFIG_DIR);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("settings.conf"), "(storage: (path: 3").unwrap();
+
+        let err = AppConfig::load(home.path(), uid()).unwrap_err();
+
+        assert!(matches!(err, ManndError::InvalidPropertyFormat(_)), "{err}");
+        assert!(err.to_string().contains("settings.conf"), "{err}");
+    }
+
+    #[test]
+    fn embedded_default_binds_backspace() {
+        let conf: AppConfig = ron::from_str(DEFAULT_SETTINGS).unwrap();
+
+        assert_eq!(conf.keybinds["<BS>"], "backspace");
+        assert!(conf.theme.palettes.contains_key(&conf.theme.selected));
     }
 }

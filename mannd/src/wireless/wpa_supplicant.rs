@@ -11,7 +11,6 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use tokio::sync::mpsc::Sender;
 use tracing::instrument;
 use zbus::{
     Connection, DynamicType, ObjectPath, OwnedObjectPath, OwnedVariant, Proxy, Type, Variant, names::MemberName, proxy::SignalStream
@@ -20,7 +19,6 @@ use zbus::{
 use crate::{
     error::ManndError,
     modify_state,
-    state::signals::SignalUpdate,
     store::{
         NetworkInfo, NetworkInfoBuilder, NetworkSecurity, WpaNetworkPolicyOverrideBuilder, WpaState,
     },
@@ -44,20 +42,16 @@ pub struct WpaSupplicant {
 }
 
 impl WifiBackend for WpaSupplicant {
-    async fn scan_networks(&self, signal_tx: Sender<SignalUpdate<'_>>) -> Result<(), ManndError> {
+    async fn scan_networks(&self) -> Result<Option<SignalStream<'static>>, ManndError> {
         if self.get_interface_prop::<bool>("Scanning").await? {
-            return Ok(());
+            return Ok(None);
         }
 
         let mut dict: HashMap<String, OwnedVariant> = HashMap::new();
         dict.insert("Type".to_string(), Variant::new("active").try_to_owned()?);
         self.call_interface_method_noreply("Scan", dict).await?;
 
-        let scan_signal = self.get_interface_signal("ScanDone").await?;
-        match signal_tx.send(SignalUpdate::Add(scan_signal)).await {
-            Ok(()) => Ok(()),
-            Err(_) => Err(ManndError::SignalSend("in wpa_supplicant scan".to_string())),
-        }
+        Ok(Some(self.get_interface_signal("ScanDone").await?))
     }
 
     #[instrument(err, skip(self))]
@@ -88,11 +82,10 @@ impl WifiBackend for WpaSupplicant {
                 .try_into()?;
             let conn_ssid: String = conn_ssid.trim_matches('"').to_string();
 
-            if let Some(pos) = saved.iter().position(|s| s.ssid == conn_ssid) {
-                Some(saved[pos].bssid.clone().expect("Failed to get BSSID"))
-            } else {
-                None
-            }
+            saved
+                .iter()
+                .find(|s| s.ssid == conn_ssid)
+                .and_then(|s| s.bssid.clone())
         } else {
             None
         };
@@ -168,7 +161,7 @@ impl WifiBackend for WpaSupplicant {
         Ok(res)
     }
 
-    #[instrument(err, skip(self))]
+    #[instrument(err, skip_all)]
     async fn connect_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
         let mut net_path: Option<OwnedObjectPath> = None;
 
@@ -215,8 +208,8 @@ impl WifiBackend for WpaSupplicant {
                 *existing = network.clone();
             } else {
                 state.app.saved_networks.push(network.clone());
-                let _ = state.db.write_app_state(&state.app);
             }
+            let _ = state.db.write_app_state(&state.app);
         });
         Ok(())
     }
@@ -227,6 +220,7 @@ impl WifiBackend for WpaSupplicant {
         Ok(())
     }
 
+    #[instrument(err, skip_all)]
     async fn forget_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
         let known = self
             .get_interface_prop::<Vec<OwnedObjectPath>>("Networks")
@@ -697,7 +691,7 @@ impl WpaSupplicant {
         Ok(body)
     }
 
-    #[instrument(err, skip(self))]
+    #[instrument(err, skip_all)]
     async fn add_network(&self, network: &NetworkInfo) -> Result<OwnedObjectPath, ManndError> {
         validate_network(network)?;
 

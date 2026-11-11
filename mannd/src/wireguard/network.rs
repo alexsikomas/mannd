@@ -10,12 +10,8 @@ use crate::{
     wireguard::wg_ini::WgConfig,
 };
 use neli::{consts::socket::NlFamily, router::asynchronous::NlRouter, utils::Groups};
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::{collections::HashMap, fmt::Debug, path::Path, process::Command};
+use tempfile::NamedTempFile;
 use tracing::instrument;
 
 pub const INTERFACE: &str = "wg-mannd";
@@ -45,16 +41,27 @@ impl Wireguard<NlRouterWrapper> {
         Ok(())
     }
 
-    #[instrument(err)]
     /// Attempts to connect to a wireguard configuration
+    #[instrument(err)]
     pub fn connect_conf(&self, path: &Path) -> Result<(), ManndError> {
-        Self::set_conf(path)?;
+        // holds the private key, removed again once it goes out of scope
+        let pruned = Self::prune_conf(path)?;
+        let output = Command::new("wg")
+            .args(["setconf", INTERFACE])
+            .arg(pruned.path())
+            .output()?;
+
+        if !output.status.success() {
+            return Err(ManndError::OperationFailed(format!(
+                "wg setconf: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
         Ok(())
     }
 
     /// `wg` util can't understand full .conf file so needs pruning
-    #[instrument(err)]
-    fn prune_write_conf(path: &str) -> Result<String, ManndError> {
+    fn prune_conf(path: &Path) -> Result<NamedTempFile, ManndError> {
         let mut filter: HashMap<String, Vec<String>> = HashMap::new();
         filter.insert(
             "Interface".into(),
@@ -65,24 +72,11 @@ impl Wireguard<NlRouterWrapper> {
             vec!["PublicKey".into(), "Endpoint".into(), "AllowedIPs".into()],
         );
 
-        let conf = WgConfig::parse(&Path::new(path))?;
-        let conf = conf.get_partial(&filter)?;
-
-        let write_path = format!("{path}.mannd.tmp");
-        conf.write_file(&Path::new(&write_path))?;
-        Ok(write_path)
+        let conf = WgConfig::parse(path)?.get_partial(&filter)?;
+        let mut pruned = NamedTempFile::new()?;
+        conf.write_to(&mut pruned)?;
+        Ok(pruned)
     }
-
-    #[instrument(err)]
-    fn set_conf<T: Into<PathBuf> + Debug>(path: T) -> Result<(), ManndError> {
-        let conf_path = Self::prune_write_conf(path.into().to_str().unwrap())?;
-        Command::new("wg")
-            .args(vec!["setconf", INTERFACE, &conf_path])
-            .output()?;
-
-        Ok(())
-    }
-
 }
 
 impl Debug for Wireguard<NlRouterWrapper> {

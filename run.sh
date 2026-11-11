@@ -2,7 +2,9 @@
 set -euo pipefail
 
 BIN_DIR="/usr/local/bin"
-SOCK_DIR="/usr/libexec"
+SOCK_DIR="/usr/local/libexec"
+UNIT="mannd.service"
+UNIT_PATH="/etc/systemd/system/${UNIT}"
 
 display_help() {
     cat <<-EOF
@@ -19,7 +21,8 @@ display_help() {
         -m  --mannd     Compiles and tests the core mannd networking package in debug mode.
         -i  --install   Installs mannd.
         -u  --uninstall Uninstalls mannd.
-        -s  --startup   Enable the mannd startup service
+        -s  --startup   Runs the mannd daemon as a systemd service for the current user,
+                        so the TUI no longer asks for the sudo password. Needs -i first.
 
     Examples:
         Run the TUI in default (debug) mode:
@@ -33,6 +36,9 @@ display_help() {
 
         Install mannd:
         $(basename "$0") -i
+
+        Install mannd and start its daemon on boot:
+        $(basename "$0") -is
 
         Uninstall mannd:
         $(basename "$0") -u
@@ -50,7 +56,6 @@ build() {
 }
 
 tui() {
-    make_config
     # Release
     if [[ "$1" == "r" ]] || [[ "$1" == "release" ]]; then
         build "r"
@@ -58,21 +63,6 @@ tui() {
     else
         build
        ./target/debug/tui
-    fi
-}
-
-make_config() {
-    local config_dir="${XDG_CONFIG_HOME:-${HOME:-}/.config}/mannd"
-
-    if [ "${config_dir}" = "/mannd" ] || [ -z "${HOME:-}" ]; then
-        echo "Error: Unable to determine config directory." >&2
-        return 2
-    fi
-
-    mkdir -p "${config_dir}" || { echo "Error: Failed to create config dir" >&2; return 1; }
-    if [ ! -f "${config_dir}/settings.conf" ]; then
-        cp ./etc/settings.conf "${config_dir}/settings.conf" || { echo "Error: Failed to copy config to directory" >&2; return 1; }
-        echo "Config created at ${config_dir}/settings.conf"
     fi
 }
 
@@ -98,17 +88,33 @@ mannd() {
 }
 
 startup() {
-    echo "startup"
+    if [[ ! -x "${SOCK_DIR}/mannd-socket" ]]; then
+        echo "Error: ${SOCK_DIR}/mannd-socket is not installed, run $(basename "$0") -i first." >&2
+        return 1
+    fi
+
+    # the daemon serves a single user, the one enabling the service
+    sed "s/@UID@/$(id -u)/" ./etc/mannd.service | sudo tee "${UNIT_PATH}" >/dev/null \
+        || { echo "Error: Failed to write ${UNIT_PATH}" >&2; return 1; }
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now "${UNIT}" || { echo "Error: Failed to enable ${UNIT}" >&2; return 1; }
+    echo "Enabled ${UNIT}"
 }
 
 install() {
     build "r"
-    sudo cp ./target/release/tui "${BIN_DIR}/mannd" || { echo "Error: Failed to copy mannd to directory" >&2; return 1; }
-    sudo cp ./target/release/socket "${SOCK_DIR}/mannd-socket" || { echo "Error: Failed to copy mannd socket to directory" >&2; return 1; }
+    sudo install -Dm755 ./target/release/tui "${BIN_DIR}/mannd" || { echo "Error: Failed to install mannd" >&2; return 1; }
+    sudo install -Dm755 ./target/release/socket "${SOCK_DIR}/mannd-socket" || { echo "Error: Failed to install mannd socket" >&2; return 1; }
     echo "Successfully installed mannd"
 }
 
 uninstall() {
+    if [[ -f "${UNIT_PATH}" ]]; then
+        sudo systemctl disable --now "${UNIT}"
+        sudo rm "${UNIT_PATH}"
+        sudo systemctl daemon-reload
+    fi
+
     if [[ -f "${BIN_DIR}/mannd" ]]; then
         sudo rm "${BIN_DIR}/mannd"
     else

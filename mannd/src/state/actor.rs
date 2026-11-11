@@ -1,53 +1,51 @@
 use std::process::Command;
 
-use tokio::sync::mpsc::Sender;
 use tracing::{info, instrument};
+use zbus::Message;
 
 use crate::{
-    controller::{Controller, WirelessAdapter},
+    controller::{Controller, WifiDaemonType, WirelessAdapter},
     error::ManndError,
     state::{
         messages::{
             Capability, Failure, NetworkAction, NetworkState, Process, Started, Success,
             WifiAction, WireguardAction, WireguardCapability, WpaAction,
         },
-        signals::{SignalManager, SignalUpdate},
+        signals::SignalManager,
     },
     with_state,
 };
 
+/// Lives for as long as the daemon does, whichever client is connected
 #[derive(Debug)]
-pub struct NetworkActor<'a> {
+pub struct NetworkActor {
     pub controller: Controller,
-    pub signal_manager: SignalManager<'a>,
-    signal_tx: Sender<SignalUpdate<'a>>,
-    sock_tx: Sender<NetworkState>,
+    pub signal_manager: SignalManager<'static>,
 }
 
-impl<'a> NetworkActor<'a> {
+impl NetworkActor {
     #[instrument(err)]
-    pub async fn new(
-        signal_tx: Sender<SignalUpdate<'a>>,
-        sock_tx: Sender<NetworkState>,
-    ) -> Result<Self, ManndError> {
+    pub async fn new() -> Result<Self, ManndError> {
         let mut controller = Controller::new().await?;
         if with_state(|state| state.app.wg_running).unwrap_or(false) {
             let _ = controller.start_wireguard().await;
         }
 
         controller.connect_wifi_adapter().await;
-        let signal_manager = SignalManager::new();
         Ok(Self {
             controller,
-            signal_manager,
-            signal_tx,
-            sock_tx,
+            signal_manager: SignalManager::new(),
         })
     }
 
-    /// Returns true if we are quitting the application
-    #[instrument(err, skip(self))]
-    pub async fn handle_action(&mut self, action: NetworkAction) -> Result<bool, ManndError> {
+    /// Runs `action`, returning the states the client should be told about.
+    ///
+    /// Actions carry passphrases, so no argument may be recorded in the span.
+    #[instrument(err, skip_all)]
+    pub async fn handle_action(
+        &mut self,
+        action: NetworkAction,
+    ) -> Result<Vec<NetworkState>, ManndError> {
         let mut state_send: Vec<NetworkState> = vec![];
 
         match action {
@@ -76,22 +74,22 @@ impl<'a> NetworkActor<'a> {
                     .await?;
             }
             NetworkAction::Wpa(wpa_action) => {
-                self.handle_wpa_action(&wpa_action, &mut state_send).await?;
+                self.handle_wpa_action(&wpa_action, &mut state_send).await;
             }
-            NetworkAction::Exit => {
-                if let Ok(()) = self.controller.exit().await {
-                    return Ok(true);
-                }
-            }
-        };
-
-        for req in state_send {
-            let _ = self.sock_tx.send(req).await;
         }
 
-        Ok(false)
+        Ok(state_send)
     }
 
+    /// Turns a D-Bus signal into the action that should follow it, if any
+    pub fn handle_signal(&mut self, msg: (usize, Message)) -> Option<NetworkAction> {
+        match self.controller.get_wifi_daemon_type()? {
+            WifiDaemonType::Iwd => self.signal_manager.process_iwd_msg(msg),
+            WifiDaemonType::Wpa => self.signal_manager.process_wpa_msg(msg),
+        }
+    }
+
+    #[instrument(err, skip_all)]
     async fn handle_wifi_action(
         &mut self,
         action: &WifiAction,
@@ -101,12 +99,19 @@ impl<'a> NetworkActor<'a> {
             WifiAction::Scan => {
                 state_send.push(NetworkState::Start(Started(Process::WifiScan)));
 
-                if let Err(e) = self.controller.scan(self.signal_tx.clone()).await {
-                    tracing::error!("[Wi-Fi]: Scan failed. {e:?}");
-                    state_send.push(NetworkState::Failed(Failure::new(
-                        Process::WifiScan,
-                        e.to_string(),
-                    )));
+                match self.controller.scan().await {
+                    // the signal tells us when the results are ready
+                    Ok(Some(scan_done)) => {
+                        self.signal_manager.add(scan_done);
+                    }
+                    Ok(None) => info!("[Wi-Fi]: A scan is already running"),
+                    Err(e) => {
+                        tracing::error!("[Wi-Fi]: Scan failed. {e:?}");
+                        state_send.push(NetworkState::Failed(Failure::new(
+                            Process::WifiScan,
+                            e.to_string(),
+                        )));
+                    }
                 }
             }
             // get networks and send them to the TUI
@@ -187,6 +192,7 @@ impl<'a> NetworkActor<'a> {
 
     /// Gets wireguard info no matter the `WireguardAction` to simplify logic and remove
     /// repititions
+    #[instrument(err, skip_all)]
     async fn handle_wireguard_action(
         &mut self,
         action: &WireguardAction,
@@ -228,81 +234,35 @@ impl<'a> NetworkActor<'a> {
         Ok(())
     }
 
-    async fn handle_wpa_action(
-        &mut self,
-        action: &WpaAction,
-        state_send: &mut Vec<NetworkState>,
-    ) -> Result<(), ManndError> {
-        match action {
-            WpaAction::GetInterfaces => {
-                if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
-                    match wpa.get_interfaces().await {
-                        Ok(interfaces) => {
-                            state_send.push(NetworkState::SetWpaInterfaces(interfaces))
-                        }
-                        Err(e) => {
-                            tracing::error!("[WPA]: Failed to get interfaces. {e:?}");
-                            state_send.push(NetworkState::Failed(Failure::new(
-                                Process::Generic,
-                                e.to_string(),
-                            )));
-                        }
-                    }
-                }
-            }
-            WpaAction::CreateInterface(ifname) => {
-                if let Some(WirelessAdapter::Wpa(wpa)) = self.controller.wifi.as_mut() {
-                    match wpa.create_interface(ifname).await {
-                        Ok(()) => {}
-                        Err(e) => {
-                            tracing::error!("[WPA]: Failed to create interface {ifname}. {e:?}");
-                            state_send.push(NetworkState::Failed(Failure::new(
-                                Process::Generic,
-                                e.to_string(),
-                            )));
-                        }
-                    }
-                }
-                if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
-                    match wpa.get_interfaces().await {
-                        Ok(interfaces) => state_send.push(NetworkState::SetWpaInterfaces(interfaces)),
-                        Err(e) => {
-                            tracing::error!("[WPA]: Failed to refresh interfaces. {e:?}");
-                            state_send.push(NetworkState::Failed(Failure::new(
-                                Process::Generic,
-                                e.to_string(),
-                            )));
-                        }
-                    }
-                }
-            }
-            WpaAction::RemoveInterface(ifname) => {
-                if let Some(WirelessAdapter::Wpa(wpa)) = self.controller.wifi.as_mut() {
-                    match wpa.remove_interface(ifname).await {
-                        Ok(()) => {}
-                        Err(e) => {
-                            tracing::error!("[WPA]: Failed to remove interface {ifname}. {e:?}");
-                            state_send.push(NetworkState::Failed(Failure::new(
-                                Process::Generic,
-                                e.to_string(),
-                            )));
-                        }
-                    }
-                }
-                if let Some(WirelessAdapter::Wpa(wpa)) = &self.controller.wifi {
-                    match wpa.get_interfaces().await {
-                        Ok(interfaces) => state_send.push(NetworkState::SetWpaInterfaces(interfaces)),
-                        Err(e) => {
-                            tracing::error!("[WPA]: Failed to refresh interfaces. {e:?}");
-                            state_send.push(NetworkState::Failed(Failure::new(
-                                Process::Generic,
-                                e.to_string(),
-                            )));
-                        }
-                    }
-                }
+    /// Runs the operation, then reports the interfaces as they now stand
+    #[instrument(skip_all)]
+    async fn handle_wpa_action(&mut self, action: &WpaAction, state_send: &mut Vec<NetworkState>) {
+        let Some(WirelessAdapter::Wpa(wpa)) = self.controller.wifi.as_mut() else {
+            return;
+        };
+
+        let res = match action {
+            WpaAction::GetInterfaces => Ok(()),
+            WpaAction::CreateInterface(ifname) => wpa.create_interface(ifname).await,
+            WpaAction::RemoveInterface(ifname) => wpa.remove_interface(ifname).await,
+        };
+        if let Err(e) = res {
+            tracing::error!("[WPA]: {action:?} failed. {e:?}");
+            state_send.push(NetworkState::Failed(Failure::new(
+                Process::Generic,
+                e.to_string(),
+            )));
+        }
+
+        match wpa.get_interfaces().await {
+            Ok(interfaces) => state_send.push(NetworkState::SetWpaInterfaces(interfaces)),
+            Err(e) => {
+                tracing::error!("[WPA]: Failed to get interfaces. {e:?}");
+                state_send.push(NetworkState::Failed(Failure::new(
+                    Process::Generic,
+                    e.to_string(),
+                )));
             }
         }
-        Ok(())
     }
 }

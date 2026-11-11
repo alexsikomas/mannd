@@ -11,12 +11,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::{path::Path, sync::Arc};
-use tokio::sync::{RwLock, mpsc::Sender};
+use tokio::sync::RwLock;
 
 use crate::{
     error::ManndError,
     netlink::NlRouterWrapper,
-    state::signals::SignalUpdate,
     store::{NetworkInfo, WgMeta, WpaState},
     systemd::systemctl::is_service_active,
     wireguard::network::Wireguard,
@@ -29,7 +28,7 @@ use crate::{
     with_state,
 };
 use tracing::{info, instrument};
-use zbus::Connection;
+use zbus::{Connection, proxy::SignalStream};
 
 /// Used for matching when we don't have the full data
 /// or don't want to send the full data like [`Capabilities`](crate::state::network::Capability)
@@ -62,7 +61,7 @@ macro_rules! dispatch_wifi {
     };
 }
 
-// Initialisations
+// Controller connection functions
 impl Controller {
     #[instrument(err)]
     pub async fn new() -> Result<Self, ManndError> {
@@ -74,8 +73,7 @@ impl Controller {
         })
     }
 
-    /// Tries to connect to Wi-Fi adapter, does not emit
-    /// error instead does a tracing::warn!()
+    /// Tries to connect to Wi-Fi adapter, emits warning on fail
     pub async fn connect_wifi_adapter(&mut self) {
         let mut opt = is_service_active(&self.connection, "iwd").await;
         if opt.is_some_and(|v| v) {
@@ -163,26 +161,21 @@ impl Controller {
     }
 }
 
-// run actions
+// Controller actions on backends
 impl Controller {
-    #[instrument(err, skip(self))]
-    pub async fn scan<'a>(&mut self, sock_tx: Sender<SignalUpdate<'a>>) -> Result<(), ManndError> {
-        let res = dispatch_wifi!(
-            &mut self.wifi,
-            iwd => iwd.scan_networks(sock_tx).await,
-            wpa => wpa.scan_networks(sock_tx).await,
+    /// Starts a scan, returning the signal that fires once it is done or
+    /// `None` if one was already running
+    #[instrument(err, skip_all)]
+    pub async fn scan(&self) -> Result<Option<SignalStream<'static>>, ManndError> {
+        dispatch_wifi!(
+            &self.wifi,
+            iwd => iwd.scan_networks().await,
+            wpa => wpa.scan_networks().await,
             Err(ManndError::OperationFailed("No wifi daemon found".into()))
-        );
-
-        match &res {
-            Ok(()) => info!("Scan succeeded"),
-            Err(e) => tracing::error!("Error occured while scanning\n{e}"),
-        }
-
-        res
+        )
     }
 
-    #[instrument(err, skip(self))]
+    #[instrument(err, skip_all)]
     pub async fn connect_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
         dispatch_wifi!(&self.wifi,
         iwd => iwd.connect_network(network).await,
@@ -206,7 +199,7 @@ impl Controller {
         })
     }
 
-    #[instrument(err, skip(self))]
+    #[instrument(err, skip_all)]
     pub async fn remove_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
         dispatch_wifi!(&self.wifi,
             iwd => iwd.forget_network(network).await,
@@ -286,7 +279,7 @@ mod tests {
 
     #[tokio::test]
     #[instrument(err)]
-    async fn test_new() -> Result<(), ManndError> {
+    async fn test_new_controller() -> Result<(), ManndError> {
         let controller = Controller::new().await;
         match controller {
             Ok(_) => Ok(()),

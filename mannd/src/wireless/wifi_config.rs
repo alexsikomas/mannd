@@ -1,6 +1,4 @@
-use crate::{
-    STORAGE_PATH, context, error::ManndError, store::NetworkInfo, wireless::common::NetworkFlags,
-};
+use crate::{context, error::ManndError, store::NetworkInfo, wireless::common::NetworkFlags};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::Ordering,
@@ -25,7 +23,7 @@ pub struct WifiConfig {
 impl WifiConfig {
     pub fn load_or_default() -> Result<Self, ManndError> {
         let path = Self::path();
-        let uid = context().uid;
+        let uid = Some(context().uid);
 
         let raw = match fs::read_to_string(&path) {
             Ok(s) => s,
@@ -36,7 +34,7 @@ impl WifiConfig {
                     chown(parent, uid, None)?;
                 }
                 Self::write_default(&path)?;
-                chown(&path, context().uid, None)?;
+                chown(&path, uid, None)?;
                 return Ok(Self::default());
             }
             Err(e) => return Err(ManndError::IoError(e)),
@@ -65,10 +63,7 @@ impl WifiConfig {
     }
 
     fn path() -> PathBuf {
-        let storage = STORAGE_PATH.get().expect("STORAGE_PATH not initialised");
-        let mut p = PathBuf::from(storage);
-        p.push("wifi.conf");
-        p
+        context().storage.join("wifi.conf")
     }
 
     fn validate(&self) -> Result<(), ManndError> {

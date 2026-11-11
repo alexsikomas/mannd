@@ -5,7 +5,7 @@
 use std::{
     collections::HashMap,
     fs::read_to_string,
-    io::{self, BufWriter, Write},
+    io::{self, Write},
     path::Path,
 };
 
@@ -84,12 +84,5 @@ impl WgConfig {
             writeln!(writer)?;
         }
         writer.flush()
-    }
-
-    pub fn write_file(&self, path: &Path) -> Result<(), ManndError> {
-        let file = std::fs::File::create(path)?;
-        let mut writer = BufWriter::new(file);
-        self.write_to(&mut writer)?;
-        Ok(())
     }
 }

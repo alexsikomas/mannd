@@ -31,8 +31,6 @@ pub enum ManndError {
     NlmsgBuilder(#[from] neli::nl::NlmsghdrBuilderError),
     #[error("Genlmsg Builder Error: {0}")]
     GenlmsgBuilder(#[from] neli::genl::GenlmsghdrBuilderError),
-    #[error("Signal failed to send over channel: {0}")]
-    SignalSend(String),
 
     #[error("Network could not be found!")]
     NetworkNotFound,
@@ -97,6 +95,8 @@ pub enum ManndError {
     Postcard(#[from] postcard::Error),
     #[error("Not running as root!")]
     NotRoot,
+    #[error("mannd daemon already running")]
+    AlreadyRunning,
     #[error("Cannot write to socket")]
     SocketWrite,
 

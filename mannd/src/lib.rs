@@ -11,25 +11,21 @@
 //! To avoid users needing to edit the dbus security policy & fragmenting the backend between `iwd` and `wpa_supplicant` the backend binaries must be run as root.
 //!
 //! ### File Ownership
-//! Because the bianries run as root, files created by them like: logs, app state, etc.. are all owned by root by default. To ensure these files remain accessible for the calling user:
-//! - Binaries provide a UID CLI argument to explicitly set the UID of the user. This should be used in almost all cases.
-//! - If for some reason the above was not done try to detect the user through the `SUDO_UID` environment variable
-//! - If both of the above fail we write inside of /root/ and *DO NOT* change any permissions.
-//!
-//! If a UID for the user has been obtained then [`chown`](std::os::unix::fs::chown) should be used to give permissions to the user.
+//! Because the daemon runs as root, the files it creates (logs, app state, the socket) would be owned by root. Every binary is therefore told which user it serves, the daemon through its required `--target-uid` argument, and uses [`chown`](std::os::unix::fs::chown) to hand what it creates to that user.
 //!
 //! ## Paths
 //! Fail-fast approach, when an essential hardcoded path cannot be resolved panic.
 //!
-//! | Name | Type | Location |
-//! |------|------|----------|
-//! | Unix Debug Socket | Hardcoded | [`UNIX_SOCK_PATH`] |
-//! | WG Files | Hardcoded* | [`WG_DIR`](crate::store::WG_DIR) |
-//! | App Config | Dynamic | `$HOME/.config/mannd` |
+//!  | Name              | Type           | Location                                                                 |
+//!  |-------------------|--------------- |--------------------------------------------------------------------------|
+//!  | Unix Socket       | Hardcoded      | [`UNIX_SOCK_PATH`]                                                       |
+//!  | WG Files          | Hardcoded (\*) | [`WG_DIR`](crate::store::WG_DIR)                                         |
+//!  | App Config        | Dynamic        | `$HOME/.config/mannd/settings.conf`                                      |
+//!  | App State & Logs  | Configurable   | `storage.path` in the app config, by default `$HOME/.local/state/mannd`  |
 //!
-//! \* May become a field in the configuration file in the future
+//! (\*) May become a field in the configuration file in the future
 //!
-//! There are other paths not hardcoded into this crate but instead from the installation script or from your package manager. These include the directory where the binary is stored, usually `/usr/local/bin`, and the directory where the installed (not debug) socket is stored, usually `/usr/libexec/`.
+//! There are other paths not hardcoded into this crate but instead from the installation script or from your package manager. These are the TUI at `/usr/local/bin/mannd`, the daemon at `/usr/local/libexec/mannd-socket` and the optional systemd unit at `/etc/systemd/system/mannd.service`.
 //!
 //! ## Error Handling
 //! The majority of functions will return an [`crate::error::ManndError`], which is a wrapper around other errors with a few custom ones for `mannd`.
@@ -48,6 +44,7 @@ use std::{
 };
 
 use crate::{
+    config::{AppConfig, CONFIG_DIR},
     error::ManndError,
     store::{ApplicationState, ManndStore},
     wireless::wifi_config::WifiConfig,
@@ -64,14 +61,16 @@ pub mod utils;
 pub mod wireguard;
 pub mod wireless;
 
-pub const UNIX_SOCK_PATH: &str = "/tmp/mannd.sock";
-pub static STORAGE_PATH: OnceLock<String> = OnceLock::new();
+pub const UNIX_SOCK_PATH: &str = "/run/mannd.sock";
 
 #[derive(Debug)]
 pub struct GlobalContext {
-    pub uid: Option<u32>,
+    /// The user being running app, who owns everything written under `home`
+    pub uid: u32,
     pub home: PathBuf,
     pub config_home: PathBuf,
+    /// Expanded `storage.path` from the app config
+    pub storage: PathBuf,
 }
 
 #[derive(Debug)]
@@ -83,32 +82,32 @@ pub struct GlobalState {
 
 pub static APP_CTX: OnceLock<GlobalContext> = OnceLock::new();
 
-pub fn init_ctx(uid: Option<u32>) -> Result<(), ManndError> {
-    let home = home_path(uid)?;
-    let config_home = home.join(".config/mannd");
+/// Resolves the home directory of `uid`, loads that user's settings and
+/// sets the global context. Shared entry point of the daemon and the TUI.
+pub fn init_ctx(uid: u32) -> Result<AppConfig, ManndError> {
+    let home = uid_to_home(uid)?;
+    let config = AppConfig::load(&home, uid)?;
 
     let ctx = GlobalContext {
         uid,
+        config_home: home.join(CONFIG_DIR),
+        storage: PathBuf::from(&config.storage.path),
         home,
-        config_home,
     };
 
     APP_CTX.set(ctx).map_err(|_| {
         ManndError::OperationFailed("Application context already initialized".into())
     })?;
-    Ok(())
+    Ok(config)
 }
 
 static APP_STATE: RwLock<Option<GlobalState>> = RwLock::new(None);
 
 pub struct GlobalStateGuard;
-
 impl GlobalStateGuard {
-    // As well as GlobalState inits a few oncelocks
     pub fn init() -> Result<Self, ManndError> {
         let db = ManndStore::init()?;
         let app = db.get_app_state()?;
-        println!("APP STATE: {:?}", app);
         let wifi_config = Arc::new(WifiConfig::load_or_default()?);
 
         *APP_STATE.write().unwrap() = Some(GlobalState {
@@ -133,7 +132,7 @@ impl Drop for GlobalStateGuard {
     }
 }
 
-// false on None state
+/// Returns false on None states
 pub fn modify_state<F>(modifier: F) -> bool
 where
     F: FnOnce(&mut GlobalState),
@@ -160,21 +159,6 @@ pub fn context() -> &'static GlobalContext {
     APP_CTX
         .get()
         .expect("Global Context has yet to be initialised")
-}
-
-fn home_path(uid: Option<u32>) -> Result<PathBuf, ManndError> {
-    match uid {
-        Some(id) => uid_to_home(id),
-        None => {
-            if let Ok(uid_str) = std::env::var("SUDO_UID") {
-                let uid = uid_str.parse::<u32>()?;
-                uid_to_home(uid)
-            } else {
-                println!("Cannot get the UID of the user who called sudo... using /root/ as home.");
-                Ok(std::path::PathBuf::from("/root"))
-            }
-        }
-    }
 }
 
 /// Resolves a home directory for a given uid via `getpwuid`.

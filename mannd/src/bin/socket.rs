@@ -1,4 +1,4 @@
-//! # Socketsocket
+//! # Socket
 //!
 //! Facilitates communication between the backend and the frontend.
 //!
@@ -7,17 +7,19 @@
 //! user, if they desire, to run the socket on startup. As long as the frontend
 //! handles this appropriately they aren't hassled with entering their sudo
 //! password each time.
+//!
+//! One [`NetworkActor`] lives for as long as the daemon does and serves a
+//! single client at a time, any other client is told the daemon is busy.
+
 use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use mannd::{
-    GlobalStateGuard, STORAGE_PATH, UNIX_SOCK_PATH, context,
-    controller::WifiDaemonType,
+    GlobalStateGuard, UNIX_SOCK_PATH, context,
     error::ManndError,
     init_ctx,
     state::{
         actor::NetworkActor,
         messages::{Failure, NetworkAction, NetworkState, Process},
-        signals::SignalUpdate,
     },
     utils::setup_logging,
 };
@@ -25,166 +27,192 @@ use postcard::to_stdvec_cobs;
 use std::{
     error::Error,
     fs::{self, Permissions},
+    future::pending,
+    io::{self, Write},
     os::unix::fs::{PermissionsExt, chown},
-    path::{Path, PathBuf},
+    path::PathBuf,
+    process::ExitCode,
     str::FromStr,
+    time::Duration,
 };
-use tokio::{net::UnixListener, sync::mpsc};
-use tokio_util::{bytes::Bytes, codec::{FramedRead, FramedWrite, LengthDelimitedCodec}};
-use tracing::{Level, info, instrument};
+use tokio::{
+    net::{UnixListener, UnixStream},
+    signal::unix::{SignalKind, signal},
+};
+use tokio_util::{
+    bytes::{Bytes, BytesMut},
+    codec::{Framed, LengthDelimitedCodec},
+};
+use tracing::{Level, info};
+
+const SPAWN_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+type Client = Framed<UnixStream, LengthDelimitedCodec>;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "mannd socket")]
 struct Args {
-    /// Determines where the $HOME directory is
     #[arg(long)]
-    target_uid: Option<u32>,
-    /// Disconnects from the socket when frontend killed
+    target_uid: u32,
     #[arg(long)]
     spawned: bool,
-    /// Expanded storage location
-    #[arg(long, default_value = "/root/")]
-    storage_path: String,
-    #[arg(long, default_value = "info")]
-    max_log_level: String,
 }
 
 #[tokio::main]
-#[instrument(err)]
-async fn main() -> Result<(), Box<dyn Error>> {
-    // root check
-    let euid = unsafe { libc::getuid() };
-    if euid != 0 {
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            tracing::error!("{e}");
+            //stderr may be gone if frontend died
+            let _ = writeln!(io::stderr(), "mannd-socket: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run() -> Result<(), Box<dyn Error>> {
+    if unsafe { libc::geteuid() } != 0 {
         Err(ManndError::NotRoot)?;
     }
 
     let args = Args::parse();
-    init_ctx(args.target_uid)?;
-    if args.target_uid.is_none() {
-        println!(
-            "You likely meant to run this with --target-uid=<UID>, if not ignore this message."
-        );
-    }
-
-    STORAGE_PATH
-        .set(args.storage_path.clone())
-        .expect("STORAGE_PATH already initialised");
-
-    let _guard = GlobalStateGuard::init()?;
-
-    let max_log_level = Level::from_str(&args.max_log_level)?;
-    let mut socket_log = PathBuf::from(&args.storage_path);
-    socket_log.push("logs/socket.log");
+    let config = init_ctx(args.target_uid)?;
+    let max_log_level = Level::from_str(&config.debug.max_log_level)?;
+    let socket_log = context().storage.join("logs/socket.log");
     setup_logging(socket_log, max_log_level, args.target_uid)?;
 
-    let guard = UnixSocketGuard::new(UNIX_SOCK_PATH).await?;
+    let socket = UnixSocketGuard::new(UNIX_SOCK_PATH).await?;
+    let _state = GlobalStateGuard::init()?;
+    let mut actor = NetworkActor::new().await?;
 
-    loop {
-        // let mut sock = if args.spawned {
-        //     match timeout(Duration::from_secs(10), guard.listener.accept()).await {
-        //         Ok(Ok((s, _))) => s,
-        //         Ok(Err(e)) => return Err(e.into()),
-        //         Err(_) => {
-        //             info!("Timed out waiting for frontend connection, exiting.");
-        //             return Ok(());
-        //         }
-        //     }
-        // } else {
-        let (mut sock, _) = guard.listener.accept().await?;
-        // };
-        let (sock_reader, sock_writer) = sock.split();
-        let (sock_tx, mut sock_rx) = mpsc::channel::<NetworkState>(32);
-        let (signal_tx, mut signal_rx) = mpsc::channel::<SignalUpdate>(32);
+    let mut sigint = signal(SignalKind::interrupt())?;
+    let mut sigterm = signal(SignalKind::terminate())?;
 
-        let mut actor = NetworkActor::new(signal_tx, sock_tx).await?;
-        let mut writer = FramedWrite::new(sock_writer, LengthDelimitedCodec::new());
-        let mut reader = FramedRead::new(sock_reader, LengthDelimitedCodec::new());
-        let daemon = actor.controller.get_wifi_daemon_type();
+    // non reseting timeout
+    let connect_deadline = tokio::time::sleep(SPAWN_CONNECT_TIMEOUT);
+    tokio::pin!(connect_deadline);
 
-        loop {
-            tokio::select! {
-                Some(msg) = sock_rx.recv() => {
-                    if let Ok(res) = to_stdvec_cobs(&msg)
-                        && writer.send(Bytes::from(res)).await.is_err() {
-                            info!("Could not write to socket, disconnecting");
-                            return Ok(());
-                        }
-                },
-                frame_opt = reader.next() => {
-                    let Some(frame_res) = frame_opt else {
-                        info!("Frontend has disconnected.");
-                        break;
-                    };
+    let mut client: Option<Client> = None;
+    let mut served = false;
 
-                    let mut frame = frame_res?;
-                    let action = postcard::from_bytes_cobs::<NetworkAction>(&mut frame)?;
-                    match actor.handle_action(action).await {
-                        Ok(true) => {
-                            if args.spawned {
-                                info!("TUI requested shutdown");
-                                return Ok(());
-                            }
-                            break;
-                        }
-                        Ok(false) => {}
-                        Err(e) => {
-                            if let Ok(res) = to_stdvec_cobs(&NetworkState::Failed(Failure::new(Process::Generic, e.to_string()))) {
-                                if writer.send(Bytes::from(res)).await.is_err() {
-                                    info!("Couldn't write failure to socket, disconnecting");
-                                    return Ok(());
-                                }
-                            }
-                        }
-                    }
-                }
-                Some(update) = signal_rx.recv() => {
-                    actor.signal_manager.handle_update(update);
-                }
-                Some(msg) = actor.signal_manager.recv() => {
-                    let action: Option<NetworkAction> = match daemon {
-                        Some(WifiDaemonType::Iwd) => {
-                            actor.signal_manager.process_iwd_msg(msg)
-                        }
-                        Some(WifiDaemonType::Wpa) => {
-                            actor.signal_manager.process_wpa_msg(msg)
-                        }
-                        _ => {
-                            None
-                        }
-                    };
-
-                    if let Some(act) = action {
-                        match actor.handle_action(act).await {
-                            Ok(true) => {
-                                if args.spawned {
-                                    info!("TUI requested shutdown");
-                                    return Ok(());
-                                }
-                                break;
-                            }
-                            Ok(false) => {}
-                            Err(e) => {
-                                tracing::error!("Failed to handle signal action: {e}");
-                                if let Ok(res) = to_stdvec_cobs(&NetworkState::Failed(Failure::new(Process::Generic, e.to_string()))) {
-                                    if writer.send(Bytes::from(res)).await.is_err() {
-                                        info!("Couldn't write fialure to socket, disconnecting");
-                                        return Ok(());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    info!("Shutting down...");
-                    return Ok(());
-                }
-            };
+    let res = loop {
+        // client disconnect whilst life tied to it
+        if args.spawned && served && client.is_none() {
+            info!("Spawned backend exiting after client disconnect");
+            break Ok(());
         }
 
-        if args.spawned {
-            info!("Spawned backend exiting after client disconnect");
-            return Ok(());
+        tokio::select! {
+            accepted = socket.listener.accept() => {
+                let stream = match accepted {
+                    Ok((stream, _)) => stream,
+                    Err(e) => break Err(e),
+                };
+                let mut new_client = Framed::new(stream, LengthDelimitedCodec::new());
+
+                if client.is_some() {
+                    info!("Turning a second client away");
+                    let _ = send_state(&mut new_client, &NetworkState::Busy).await;
+                    continue;
+                }
+
+                // may have launched before iwd/wpa, so check again
+                if actor.controller.wifi.is_none() {
+                    actor.controller.connect_wifi_adapter().await;
+                }
+                client = Some(new_client);
+            }
+            frame = next_frame(&mut client) => {
+                let keep = match (decode_action(frame), client.as_mut()) {
+                    (Some(action), Some(client)) => {
+                        served = true;
+                        dispatch(&mut actor, client, action).await
+                    }
+                    _ => false,
+                };
+                if !keep {
+                    client = None;
+                }
+            }
+            Some(msg) = actor.signal_manager.recv() => {
+                if let Some(action) = actor.handle_signal(msg)
+                    && let Some(current) = client.as_mut()
+                    && !dispatch(&mut actor, current, action).await
+                {
+                    client = None;
+                }
+            }
+            _ = sigint.recv() => break Ok(()),
+            _ = sigterm.recv() => break Ok(()),
+            // branch guard so others can win
+            () = &mut connect_deadline, if args.spawned && !served && client.is_none() => {
+                    info!("Timed out waiting for the frontend to connect, exiting.");
+                    break Ok(());
+                }
+        }
+    };
+
+    info!("Shutting down...");
+    drop(client);
+    if let Err(e) = actor.controller.exit().await {
+        tracing::warn!("Cleanup before exit failed: {e}");
+    }
+
+    Ok(res?)
+}
+
+/// The next frame of the client, never resolving while there is none
+async fn next_frame(client: &mut Option<Client>) -> Option<io::Result<BytesMut>> {
+    match client {
+        Some(client) => client.next().await,
+        None => pending().await,
+    }
+}
+
+/// `None` means the client should be dropped (disconnect/unreadable)
+fn decode_action(frame: Option<io::Result<BytesMut>>) -> Option<NetworkAction> {
+    let mut frame = match frame {
+        Some(Ok(frame)) => frame,
+        Some(Err(e)) => {
+            tracing::warn!("Could not read from the client, dropping it. {e}");
+            return None;
+        }
+        None => {
+            info!("Frontend has disconnected.");
+            return None;
+        }
+    };
+
+    postcard::from_bytes_cobs(&mut frame)
+        .inspect_err(|e| tracing::warn!("Could not decode a client frame, dropping it. {e}"))
+        .ok()
+}
+
+/// Runs `action` and reports the outcome, returning false once the client
+/// can no longer be written to
+async fn dispatch(actor: &mut NetworkActor, client: &mut Client, action: NetworkAction) -> bool {
+    let states = actor.handle_action(action).await.unwrap_or_else(|e| {
+        vec![NetworkState::Failed(Failure::new(
+            Process::Generic,
+            e.to_string(),
+        ))]
+    });
+
+    for state in &states {
+        if let Err(e) = send_state(client, state).await {
+            info!("Could not write to the client, dropping it. {e}");
+            return false;
+        }
+    }
+    true
+}
+
+async fn send_state(client: &mut Client, state: &NetworkState) -> io::Result<()> {
+    match to_stdvec_cobs(state) {
+        Ok(bytes) => client.send(Bytes::from(bytes)).await,
+        Err(e) => {
+            tracing::error!("Could not serialise {state:?}. {e}");
+            Ok(())
         }
     }
 }
@@ -195,20 +223,23 @@ struct UnixSocketGuard {
 }
 
 impl UnixSocketGuard {
-    async fn new<P: AsRef<Path>>(path: P) -> tokio::io::Result<Self> {
-        let path = path.as_ref().to_owned();
-
-        let _ = tokio::fs::remove_file(&path).await;
-
-        let listener = UnixListener::bind(&path)?;
-        let uid = context().uid;
-        if uid.is_some() {
-            chown(&path, uid, None)?;
-        } else {
-            fs::set_permissions(&path, Permissions::from_mode(660))?;
+    /// Binds `path` for the target user, gives up if
+    /// client already running
+    async fn new(path: &str) -> Result<Self, ManndError> {
+        if UnixStream::connect(path).await.is_ok() {
+            return Err(ManndError::AlreadyRunning);
         }
 
-        Ok(Self { path, listener })
+        // nobody is listening, anything left here is stale
+        let _ = fs::remove_file(path);
+        let listener = UnixListener::bind(path)?;
+        chown(path, Some(context().uid), None)?;
+        fs::set_permissions(path, Permissions::from_mode(0o600))?;
+
+        Ok(Self {
+            path: PathBuf::from(path),
+            listener,
+        })
     }
 }
 

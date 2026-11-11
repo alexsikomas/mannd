@@ -23,11 +23,15 @@ use redb::{
     ReadableTableMetadata, TableDefinition, TableError,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, os::unix::fs::chown, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs::{self, Permissions},
+    os::unix::fs::{PermissionsExt, chown},
+};
 use tracing::instrument;
 
 use crate::{
-    STORAGE_PATH, context,
+    context,
     error::ManndError,
     wireless::{
         common::NetworkFlags,
@@ -46,15 +50,15 @@ pub struct ManndStore {
 impl ManndStore {
     #[instrument(err)]
     pub fn init() -> Result<Self, ManndError> {
-        let storage = STORAGE_PATH.get().ok_or(ManndError::OperationFailed(
-            "STORAGE_PATH not initialised".into(),
-        ))?;
-        let mut home = PathBuf::from(storage);
-        fs::create_dir_all(&home)?;
-        chown(&home, context().uid, None)?;
-        home.push("mannd.redb");
-        let database = Database::create(&home)?;
-        chown(&home, context().uid, None)?;
+        let ctx = context();
+        fs::create_dir_all(&ctx.storage)?;
+        chown(&ctx.storage, Some(ctx.uid), None)?;
+
+        // holds saved passphrases, so only the owner may read it
+        let path = ctx.storage.join("mannd.redb");
+        let database = Database::create(&path)?;
+        chown(&path, Some(ctx.uid), None)?;
+        fs::set_permissions(&path, Permissions::from_mode(0o600))?;
 
         Ok(ManndStore { database })
     }
@@ -87,20 +91,29 @@ impl Default for ApplicationState {
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct WpaState {
-    /// Name of the last-used interface; restored on the next startup.
+    /// Name of the last used interface, restored on the next startup
     #[serde(default)]
     pub active_interface_name: Option<String>,
 }
 
 /// Application State
 impl ManndStore {
-    // returns default app state if table hasn't been made
+    /// Returns the default app state if the table hasn't been made, or if
+    /// what is stored was written by an incompatible version.
     #[instrument(err, skip(self))]
     pub fn get_app_state(&self) -> Result<ApplicationState, ManndError> {
-        Ok(self.read_key(APPLICATION_TABLE, APP_STATE_KEY)?.unwrap_or_default())
+        match self.read_key(APPLICATION_TABLE, APP_STATE_KEY) {
+            Ok(state) => Ok(state.unwrap_or_default()),
+            Err(ManndError::Postcard(e)) => {
+                tracing::warn!("Stored app state is unreadable, starting from defaults. {e}");
+                Ok(ApplicationState::default())
+            }
+            Err(e) => Err(e),
+        }
     }
 
-    #[instrument(err, skip(self))]
+    // the state holds saved passphrases, keep it out of the span
+    #[instrument(err, skip_all)]
     pub fn write_app_state(&self, state: &ApplicationState) -> Result<(), ManndError> {
         self.write_key(APPLICATION_TABLE, APP_STATE_KEY, state)
     }
@@ -155,8 +168,7 @@ impl ManndStore {
 const WG_TABLE: TableDefinition<String, &[u8]> = TableDefinition::new("wg_table");
 pub const WG_DIR: &str = "/etc/wireguard/";
 
-// since last_used is the first item derive eq
-// to compare by time
+// since last_used is the first item derive eq to compare by time
 #[derive(Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct WgMeta {
     // unix timestamp if 0 not used
@@ -432,5 +444,30 @@ impl ReadTransactionExt for ReadTransaction {
             Err(TableError::TableDoesNotExist(_)) => Ok(None),
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn undecodable_app_state_falls_back_to_default() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let database = Database::create(file.path()).unwrap();
+        let write = database.begin_write().unwrap();
+        {
+            let mut table = write.open_table(APPLICATION_TABLE).unwrap();
+            // 0xff is not a bool, which is the first field of the state
+            table
+                .insert(APP_STATE_KEY.to_string(), [0xff_u8, 0xff].as_slice())
+                .unwrap();
+        }
+        write.commit().unwrap();
+
+        let state = ManndStore::init_from_db(database).get_app_state().unwrap();
+
+        assert!(!state.wg_running);
+        assert!(state.saved_networks.is_empty());
     }
 }

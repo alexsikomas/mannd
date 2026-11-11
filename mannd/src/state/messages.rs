@@ -12,7 +12,6 @@ pub enum NetworkAction {
     Wifi(WifiAction),
     Wireguard(WireguardAction),
     Wpa(WpaAction),
-    Exit,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -42,6 +41,8 @@ pub enum WpaAction {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum NetworkState {
     SetCapabilities(Capability),
+    /// Sent to a client that connects while another one is being served
+    Busy,
 
     // wifi
     SetNetworks(Vec<NetworkInfo>),

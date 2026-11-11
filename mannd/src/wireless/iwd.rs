@@ -2,20 +2,17 @@ use core::default::Default;
 // Dbus api: https://git.kernel.org/pub/scm/network/wireless/iwd.git/tree/doc
 use futures::StreamExt;
 use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
-use tokio::{
-    sync::{RwLock, mpsc::Sender},
-    time::timeout,
-};
+use tokio::{sync::RwLock, time::timeout};
 
 use tracing::{info, instrument};
 use zbus::{
     Connection, ObjectPath, OwnedObjectPath, OwnedVariant, Proxy, fdo::ObjectManagerProxy,
+    proxy::SignalStream,
 };
 
 use crate::{
     error::ManndError,
     modify_state,
-    state::signals::SignalUpdate,
     store::{NetworkInfo, NetworkInfoBuilder, NetworkSecurity},
     utils::ssid_to_hex,
     wireless::{
@@ -38,21 +35,21 @@ pub struct Iwd {
 
 impl WifiBackend for Iwd {
     #[instrument(err, skip(self))]
-    async fn scan_networks(&self, signal_tx: Sender<SignalUpdate<'_>>) -> Result<(), ManndError> {
+    async fn scan_networks(&self) -> Result<Option<SignalStream<'static>>, ManndError> {
         let proxy = self.get_interface_proxy("Station").await?;
-        if !get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
-            proxy.call_noreply("Scan", &()).await?;
-            let proxy = Proxy::new(
-                &self.conn,
-                self.service.clone(),
-                self.path.clone(),
-                "org.freedesktop.DBus.Properties",
-            )
-            .await?;
-            let signal = proxy.receive_signal("PropertiesChanged").await?;
-            let _ = signal_tx.send(SignalUpdate::Add(signal)).await;
+        if get_prop_from_proxy::<bool>(&proxy, "Scanning").await? {
+            return Ok(None);
         }
-        Ok(())
+
+        proxy.call_noreply("Scan", &()).await?;
+        let proxy = Proxy::new(
+            &self.conn,
+            self.service.clone(),
+            self.path.clone(),
+            "org.freedesktop.DBus.Properties",
+        )
+        .await?;
+        Ok(Some(proxy.receive_signal("PropertiesChanged").await?))
     }
 
     #[instrument(err, skip(self))]
@@ -120,7 +117,7 @@ impl WifiBackend for Iwd {
         Ok(networks)
     }
 
-    #[instrument(err, skip(self))]
+    #[instrument(err, skip_all)]
     async fn connect_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
         let password = match &network.security {
             NetworkSecurity::Wpa2 { passphrase } => Some(passphrase.clone()),
@@ -159,8 +156,9 @@ impl WifiBackend for Iwd {
 
         let conn_res = timeout(timeout_s, async {
             while let Some(next) = signal.next().await {
+                let body = next.body();
                 let (_, changed_properties, _): (String, HashMap<String, OwnedVariant>, Vec<String>) =
-                    next.body().deserialize().unwrap();
+                    body.deserialize()?;
                 if let Some(val) = changed_properties.get("State") {
                     let state = val.downcast_ref::<String>()?;
                     if state == "disconnected" {
@@ -194,8 +192,8 @@ impl WifiBackend for Iwd {
                         }
                     } else {
                         state.app.saved_networks.push(network.clone());
-                        let _ = state.db.write_app_state(&state.app);
                     }
+                    let _ = state.db.write_app_state(&state.app);
                 });
                 Ok(())
             }
@@ -221,7 +219,7 @@ impl WifiBackend for Iwd {
         }
     }
 
-    #[instrument(err, skip(self))]
+    #[instrument(err, skip_all)]
     async fn forget_network(&self, network: &NetworkInfo) -> Result<(), ManndError> {
         let proxy = Proxy::new(
             &self.conn,

@@ -7,9 +7,9 @@
 use std::{
     ffi::CStr,
     fmt::Write,
-    fs::{self, OpenOptions, read_dir},
+    fs::{self, OpenOptions, Permissions, read_dir},
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    os::unix::fs::chown,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt, chown},
     path::PathBuf,
     str::FromStr,
 };
@@ -37,11 +37,8 @@ use crate::{
 const SYS_NET_PATH: &str = "/sys/class/net";
 const SYS_VIRT_PATH: &str = "/sys/devices/virtual";
 
-pub fn setup_logging(
-    path: PathBuf,
-    max_log_level: Level,
-    uid: Option<u32>,
-) -> Result<(), ManndError> {
+/// Logs to `path`, if dir doesn't exist makes it. Everything in the dir owned by `uid`.
+pub fn setup_logging(path: PathBuf, max_log_level: Level, uid: u32) -> Result<(), ManndError> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)?;
@@ -51,9 +48,15 @@ pub fn setup_logging(
     let subscriber = FmtSubscriber::builder()
         .compact()
         .with_file(true)
-        .with_writer(OpenOptions::new().append(true).create(true).open(&path)?)
+        .with_writer(
+            OpenOptions::new()
+                .append(true)
+                .create(true)
+                .mode(0o600)
+                .open(&path)?,
+        )
         .with_max_level(max_log_level)
-        .with_ansi(true)
+        .with_ansi(false)
         .with_line_number(true)
         .finish();
 
@@ -61,10 +64,9 @@ pub fn setup_logging(
         .parent()
         .ok_or_else(|| ManndError::OperationFailed("Cannot get parent directory".to_string()))?;
 
-    if let Some(uid) = uid {
-        chown(parent, Some(uid), None)?;
-        chown(&path, Some(uid), None)?;
-    }
+    chown(parent, Some(uid), None)?;
+    chown(&path, Some(uid), None)?;
+    fs::set_permissions(&path, Permissions::from_mode(0o600))?;
 
     let subscriber = subscriber.with(ErrorLayer::default());
 
@@ -204,7 +206,7 @@ pub fn list_interfaces() -> Vec<String> {
                     .windows(virt_path_comp.len())
                     .any(|w| w == virt_path_comp.as_slice())
                 {
-                    res.push(entry.file_name().into_string().unwrap());
+                    res.push(entry.file_name().to_string_lossy().into_owned());
                 }
             }
         }

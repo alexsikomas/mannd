@@ -1,160 +1,183 @@
+use futures::{SinkExt, StreamExt};
 use mannd::{
-    UNIX_SOCK_PATH, config::AppConfig, context, error::ManndError, init_ctx,
-    state::messages::NetworkAction, utils::setup_logging,
+    UNIX_SOCK_PATH, context,
+    error::ManndError,
+    init_ctx,
+    state::messages::{Capability, NetworkAction, NetworkState},
+    utils::setup_logging,
 };
-use postcard::to_stdvec_cobs;
-use std::{path::PathBuf, process::Stdio, str::FromStr, time::Duration};
-use tokio::{fs, io::AsyncWriteExt, net::UnixStream, process::Command, time::timeout};
-use tokio_util::{bytes::Bytes, codec::{FramedRead, FramedWrite, LengthDelimitedCodec}};
-use tracing::{Level, instrument};
-use tui::{SETTINGS, app::App, ui::Theme};
+use postcard::{from_bytes_cobs, to_stdvec_cobs};
+use std::{
+    error::Error,
+    io::ErrorKind,
+    path::PathBuf,
+    process::{ExitCode, Stdio},
+    str::FromStr,
+    time::Duration,
+};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::UnixStream,
+    process::{Child, Command},
+    time::{sleep, timeout},
+};
+use tokio_util::{
+    bytes::Bytes,
+    codec::{Framed, LengthDelimitedCodec},
+};
+use tracing::Level;
+use tui::{
+    SETTINGS,
+    app::{App, Backend},
+    ui::Theme,
+};
 
-const DEBUG_SOCK_BIN: &str = "target/debug/socket";
-const RELEASE_SOCK_BIN: &str = "/usr/libexec/mannd-socket";
+/// Where `run.sh -i` puts the daemon
+const INSTALLED_DAEMON_BIN: &str = "/usr/local/libexec/mannd-socket";
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const SPAWN_POLL_INTERVAL: Duration = Duration::from_millis(200);
+/// 5s
+const SPAWN_POLL_TRIES: u32 = 25;
 
 #[tokio::main]
-#[instrument(err)]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            tracing::error!("{e}");
+            eprintln!("mannd: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run() -> Result<(), Box<dyn Error>> {
     let uid = unsafe { libc::geteuid() };
-    init_ctx(Some(uid))?;
-    let settings_path = context().config_home.join("settings.conf");
-    let settings = AppConfig::load(settings_path, Some(&context().home))?;
+    let settings = init_ctx(uid)?;
 
-    let stream = get_unix_socket(uid, &settings).await?;
-
+    // create log dir before backend can, preventing them from being owned by root
     let max_log_level = Level::from_str(&settings.debug.max_log_level)?;
-    let mut tui_log = PathBuf::from(&settings.storage.path);
-    tui_log.push("logs/tui.log");
+    setup_logging(context().storage.join("logs/tui.log"), max_log_level, uid)?;
 
-    setup_logging(tui_log, max_log_level, Some(uid))?;
     SETTINGS
         .set(settings)
         .expect("SETTINGS already initialised");
+    Theme::new()?;
 
-    let _ = Theme::new();
-    let () = App::new(stream).run().await?;
+    let (backend, caps) = connect_backend(uid).await?;
+    App::new(backend, caps).run().await?;
     Ok(())
 }
 
-#[instrument(err)]
-/// Attempts to get the backend UNIX socket, first tries to connect
-/// if no connection requests password to start either debug or
-/// release service.
-async fn get_unix_socket(uid: u32, settings: &AppConfig) -> Result<UnixStream, ManndError> {
-    if let Ok(mut stream) = UnixStream::connect(UNIX_SOCK_PATH).await {
-        // stale backend may still be bound to socket path deadlocked
-        if is_backend_healthy(&mut stream).await {
-            return Ok(stream);
-        } else {
-            kill_spawned_socket_proc().await;
-            wait_for_socket_death().await;
+/// Connects to the running daemon, or if there is none starts one for the
+/// lifetime of this frontend. A daemon that is there but can't be used is
+/// reported and left alone.
+async fn connect_backend(uid: u32) -> Result<(Backend, Capability), ManndError> {
+    match UnixStream::connect(UNIX_SOCK_PATH).await {
+        Ok(stream) => return handshake(stream).await,
+        // no daemon, or only the socket one left behind
+        Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused) => {}
+        Err(e) => {
+            return Err(ManndError::ConnectionFailed(format!(
+                "{UNIX_SOCK_PATH}: {e}"
+            )));
         }
     }
 
+    let mut child = spawn_daemon(uid).await?;
+    for _ in 0..SPAWN_POLL_TRIES {
+        sleep(SPAWN_POLL_INTERVAL).await;
+
+        if let Some(status) = child.try_wait()? {
+            let mut reason = String::new();
+            if let Some(mut stderr) = child.stderr.take() {
+                let _ = stderr.read_to_string(&mut reason).await;
+            }
+            return Err(ManndError::ConnectionFailed(format!(
+                "could not start the daemon ({status}). {}",
+                reason.trim()
+            )));
+        }
+
+        if let Ok(stream) = UnixStream::connect(UNIX_SOCK_PATH).await {
+            return handshake(stream).await;
+        }
+    }
+
+    // sudo runs as root and is not ours to kill, the daemon gives up on its
+    // own when nobody has connected
+    Err(ManndError::ConnectionFailed(
+        "timed out waiting for the daemon to start".into(),
+    ))
+}
+
+/// Asks for the sudo password and starts a daemon that exits with us
+async fn spawn_daemon(uid: u32) -> Result<Child, ManndError> {
     println!("Privileged access required for the socket service.");
     let password =
         tokio::task::spawn_blocking(|| rpassword::prompt_password("Enter sudo password: "))
             .await
             .map_err(|_| ManndError::OperationFailed("Task joined failed".to_string()))??;
 
-    let bin_path = if cfg!(debug_assertions) {
-        DEBUG_SOCK_BIN
-    } else {
-        RELEASE_SOCK_BIN
-    };
-
     let mut child = Command::new("sudo")
-        .args([
-            "-S",
-            bin_path,
-            &format!("--target-uid={uid}"),
-            "--spawned",
-            &format!("--storage-path={}", settings.storage.path),
-            &format!("--max-log-level={}", settings.debug.max_log_level),
-        ])
+        // no prompt, so that stderr only ever holds a reason for failing
+        .args(["-S", "-p", ""])
+        .arg(daemon_bin())
+        .args([&format!("--target-uid={uid}"), "--spawned"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()?;
 
+    // dropped afterwards, a wrong password must not leave sudo waiting
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(format!("{password}\n").as_bytes()).await?;
         stdin.flush().await?;
     }
+    Ok(child)
+}
 
-    // 3s
-    for _ in 0..15 {
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        if let Ok(mut stream) = UnixStream::connect(UNIX_SOCK_PATH).await {
-            if is_backend_healthy(&mut stream).await {
-                return Ok(stream);
+/// The daemon built alongside this binary if there is one, which is the
+/// case when running out of `target/`, otherwise the installed one
+fn daemon_bin() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .map(|exe| exe.with_file_name("socket"))
+        .filter(|sibling| sibling.is_file())
+        .unwrap_or_else(|| PathBuf::from(INSTALLED_DAEMON_BIN))
+}
+
+/// Requests the capabilities of the system to know what to display on
+/// screen for example: Wi-Fi, wireguard, networkd. Doubles as the check
+/// that the daemon is alive and free for current client
+async fn handshake(stream: UnixStream) -> Result<(Backend, Capability), ManndError> {
+    let mut backend = Framed::new(stream, LengthDelimitedCodec::new());
+    let request = to_stdvec_cobs(&NetworkAction::GetCapabilities)?;
+    let _ = backend.send(Bytes::from(request)).await;
+
+    let reply = timeout(HANDSHAKE_TIMEOUT, async {
+        while let Some(frame) = backend.next().await {
+            match from_bytes_cobs::<NetworkState>(&mut frame?)? {
+                NetworkState::SetCapabilities(caps) => return Ok(caps),
+                NetworkState::Busy => {
+                    return Err(ManndError::ConnectionFailed(
+                        "another mannd TUI is already connected".into(),
+                    ));
+                }
+                _ => {}
             }
         }
-    }
+        Err(ManndError::ConnectionFailed(
+            "the daemon closed the connection".into(),
+        ))
+    })
+    .await;
 
-    Err(ManndError::ConnectionFailed(
-        "Timed out waiting for socket...".to_string(),
-    ))
-}
-
-async fn is_backend_healthy(stream: &mut UnixStream) -> bool {
-    let (r, w) = stream.split();
-    let mut writer = FramedWrite::new(w, LengthDelimitedCodec::new());
-    let mut reader = FramedRead::new(r, LengthDelimitedCodec::new());
-
-    let Ok(probe) = to_stdvec_cobs(&NetworkAction::GetCapabilities) else {
-        return false;
-    };
-
-    if futures::SinkExt::send(&mut writer, Bytes::from(probe))
-        .await
-        .is_err()
-    {
-        return false;
-    }
-
-    timeout(
-        Duration::from_secs(1),
-        futures::StreamExt::next(&mut reader),
-    )
-    .await
-    .is_ok_and(|opt| opt.is_some_and(|r| r.is_ok()))
-}
-
-async fn kill_spawned_socket_proc() {
-    let Ok(mut entries) = fs::read_dir("/proc").await else {
-        return;
-    };
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-
-        // numeric = pid
-        if !name.chars().all(|c| c.is_ascii_digit()) {
-            continue;
-        }
-
-        let cmd_path = format!("/proc/{name}/cmdline");
-        let Ok(cmdline) = fs::read(&cmd_path).await else {
-            continue;
-        };
-        let cmdline_str = String::from_utf8_lossy(&cmdline);
-        if cmdline_str.contains("socket") && cmdline_str.contains("--spawned") {
-            let pid: i32 = name.parse().unwrap_or(0);
-            if pid > 0 {
-                tracing::info!("Killing stale spawned socket, pid={pid}");
-                unsafe { libc::kill(pid, libc::SIGTERM) };
-            }
-        }
-    }
-}
-
-async fn wait_for_socket_death() {
-    // 2s
-    for _ in 0..20 {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        if !std::path::Path::new(UNIX_SOCK_PATH).exists() {
-            break;
-        }
+    match reply {
+        Ok(Ok(caps)) => Ok((backend, caps)),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(ManndError::ConnectionFailed(
+            "daemon not responding; restart it".into(),
+        )),
     }
 }

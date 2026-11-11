@@ -1,0 +1,11 @@
+[Unit]
+Description=mannd networking daemon
+After=dbus.service iwd.service wpa_supplicant.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/mannd-socket --target-uid=@UID@
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

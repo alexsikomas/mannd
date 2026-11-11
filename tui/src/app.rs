@@ -1,8 +1,11 @@
-use std::{cmp::min, time::Duration};
+use std::cmp::min;
 
 use postcard::{from_bytes_cobs, to_stdvec_cobs};
-use ratatui::layout::Rect;
-use tokio_util::{bytes::Bytes, codec::{FramedRead, FramedWrite, LengthDelimitedCodec}};
+use ratatui::{DefaultTerminal, layout::Rect};
+use tokio_util::{
+    bytes::Bytes,
+    codec::{Framed, LengthDelimitedCodec},
+};
 use tracing::instrument;
 
 use crate::{
@@ -21,16 +24,16 @@ use mannd::{
     wireless::{common::NetworkFlags, wpa_supplicant::WpaInterface},
 };
 use tokio::{
-    net::{
-        UnixStream,
-        unix::{ReadHalf, WriteHalf},
-    },
+    net::UnixStream,
     sync::mpsc::{self, Sender},
-    time::timeout,
 };
 
+/// Connection to the mannd daemon
+pub type Backend = Framed<UnixStream, LengthDelimitedCodec>;
+
 pub struct App {
-    stream: UnixStream,
+    backend: Backend,
+    caps: Capability,
 }
 
 pub struct AppState {
@@ -42,38 +45,41 @@ pub struct AppState {
 }
 
 impl AppState {
-    fn new() -> Self {
+    fn new(caps: Capability) -> Self {
         AppState {
             should_quit: false,
             redraw: true,
-            caps: Capability::default(),
+            caps,
             net_ctx: NetworkContext::default(),
         }
     }
 }
 
 impl App {
-    pub fn new(stream: UnixStream) -> Self {
-        Self { stream }
+    /// Backend answers with caps
+    pub fn new(backend: Backend, caps: Capability) -> Self {
+        Self { backend, caps }
     }
 
+    /// Runs until the user quits or the daemon is lost, the terminal is
+    /// handed back in either case
     #[instrument(err, skip(self))]
     pub async fn run(&mut self) -> Result<(), ManndError> {
-        let mut state = AppState::new();
-
-        let (reader, writer) = self.stream.split();
-        let mut reader = FramedRead::new(reader, LengthDelimitedCodec::new());
-        let mut writer = FramedWrite::new(writer, LengthDelimitedCodec::new());
-
-        let (sock_tx, mut sock_rx) = mpsc::channel::<Vec<u8>>(32);
-
         let mut terminal = ratatui::init();
-        crossterm::execute!(std::io::stdout(), EnableBracketedPaste)?;
-        let mut events = EventStream::new();
+        let res = self.event_loop(&mut terminal).await;
 
-        let caps = init_request(&mut writer, &mut reader).await?;
-        let mut ui = UiState::new(caps.clone())?;
-        state.caps = caps;
+        let _ = crossterm::execute!(std::io::stdout(), DisableBracketedPaste);
+        ratatui::restore();
+        res
+    }
+
+    async fn event_loop(&mut self, terminal: &mut DefaultTerminal) -> Result<(), ManndError> {
+        crossterm::execute!(std::io::stdout(), EnableBracketedPaste)?;
+
+        let mut state = AppState::new(self.caps.clone());
+        let mut ui = UiState::new(self.caps.clone())?;
+        let mut events = EventStream::new();
+        let (sock_tx, mut sock_rx) = mpsc::channel::<Vec<u8>>(32);
 
         while !state.should_quit {
             if state.redraw {
@@ -94,13 +100,15 @@ impl App {
 
             tokio::select! {
                 Some(msg) = sock_rx.recv() => {
-                    if writer.send(Bytes::from(msg)).await.is_err() {
-                        state.should_quit = true;
-                        let _ = ui.process_commands([StateCommand::Prompt(PromptState::Info(InfoPrompt::new("Lost connection to backend socket.".to_string(), PopupType::Error)))], &state.caps);
-                    }
+                    self.backend
+                        .send(Bytes::from(msg))
+                        .await
+                        .map_err(|_| lost_connection())?;
                 }
-                Some(frame_res) = reader.next() => {
-                    let mut frame = frame_res?;
+                frame = self.backend.next() => {
+                    let Some(Ok(mut frame)) = frame else {
+                        return Err(lost_connection());
+                    };
                     let msg = from_bytes_cobs::<NetworkState>(&mut frame)?;
                     if let Some(cmd) = handle_state_update(&mut state, &mut ui, msg).await {
                         ui.process_commands([cmd], &state.caps);
@@ -118,59 +126,15 @@ impl App {
                         handle_app_action(action, &mut state, &mut ui, &sock_tx).await;
                     }
                 }
-                else => break,
             }
         }
 
-        let exit_msg = to_stdvec_cobs(&NetworkAction::Exit)?;
-        let _ = writer.send(Bytes::from(exit_msg)).await;
-
-        crossterm::execute!(std::io::stdout(), DisableBracketedPaste)?;
-        ratatui::restore();
         Ok(())
     }
 }
 
-/// Requests the capabilities of the system to know what to
-/// display on screen for example: Wi-Fi, wireguard, networkd
-#[instrument(err, skip_all)]
-async fn init_request(
-    writer: &mut FramedWrite<WriteHalf<'_>, LengthDelimitedCodec>,
-    reader: &mut FramedRead<ReadHalf<'_>, LengthDelimitedCodec>,
-) -> Result<Capability, ManndError> {
-    let req = to_stdvec_cobs(&NetworkAction::GetCapabilities)?;
-    writer
-        .send(Bytes::from(req))
-        .await
-        .map_err(|_| ManndError::SocketWrite)?;
-
-    let timeout_duration = Duration::from_secs(5);
-
-    let read_future = async {
-        let max_tries = 10;
-        let mut tries = 0;
-        while let Some(frame_res) = reader.next().await {
-            if tries > max_tries {
-                return Err(ManndError::Timeout);
-            }
-
-            let mut frame = frame_res?;
-            let msg = from_bytes_cobs::<NetworkState>(&mut frame)?;
-            match msg {
-                NetworkState::SetCapabilities(caps) => return Ok(caps),
-                _ => {
-                    tries += 1;
-                }
-            }
-        }
-
-        Err(ManndError::Timeout)
-    };
-
-    match timeout(timeout_duration, read_future).await {
-        Ok(res) => res,
-        Err(_) => Err(ManndError::Timeout),
-    }
+fn lost_connection() -> ManndError {
+    ManndError::ConnectionFailed("Lost connection to the mannd daemon".into())
 }
 
 async fn handle_state_update(
