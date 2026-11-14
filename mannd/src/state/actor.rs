@@ -41,7 +41,7 @@ impl NetworkActor {
     /// Runs `action`, returning the states the client should be told about.
     ///
     /// Actions carry passphrases, so no argument may be recorded in the span.
-    #[instrument(err, skip_all)]
+    #[instrument(skip_all)]
     pub async fn handle_action(
         &mut self,
         action: NetworkAction,
@@ -89,7 +89,7 @@ impl NetworkActor {
         }
     }
 
-    #[instrument(err, skip_all)]
+    #[instrument(skip_all)]
     async fn handle_wifi_action(
         &mut self,
         action: &WifiAction,
@@ -106,7 +106,7 @@ impl NetworkActor {
                     }
                     Ok(None) => info!("[Wi-Fi]: A scan is already running"),
                     Err(e) => {
-                        tracing::error!("[Wi-Fi]: Scan failed. {e:?}");
+                        tracing::error!("[Wi-Fi]: Scan failed. {e}");
                         state_send.push(NetworkState::Failed(Failure::new(
                             Process::WifiScan,
                             e.to_string(),
@@ -121,7 +121,7 @@ impl NetworkActor {
                     state_send.push(NetworkState::Success(Success::Generic));
                 }
                 Err(e) => {
-                    tracing::error!("[Wi-Fi]: Failed to get networks. {e:?}");
+                    tracing::error!("[Wi-Fi]: Failed to get networks. {e}");
                     state_send.push(NetworkState::Failed(Failure::new(
                         Process::WifiScan,
                         e.to_string(),
@@ -136,7 +136,7 @@ impl NetworkActor {
                         state_send.push(NetworkState::Success(Success::Connected(network.clone())));
                     }
                     Err(e) => {
-                        tracing::error!("[Wi-Fi]: Connection to network was not successful. {e:?}");
+                        tracing::error!(ssid = %network.ssid, "[Wi-Fi]: Connection to network was not successful. {e}");
                         state_send.push(NetworkState::Failed(Failure::new(
                             Process::WifiConnect,
                             e.to_string(),
@@ -150,7 +150,7 @@ impl NetworkActor {
                     state_send.push(NetworkState::Success(Success::Connected(network.clone())));
                 }
                 Err(e) => {
-                    tracing::warn!("[Wi-Fi]: Could not connect to a known network. Error: {e:?}");
+                    tracing::warn!(ssid = %network.ssid, "[Wi-Fi]: Could not connect to a known network. Error: {e}");
                     state_send.push(NetworkState::Failed(Failure::new(
                         Process::WifiConnect,
                         e.to_string(),
@@ -163,7 +163,7 @@ impl NetworkActor {
                     state_send.push(NetworkState::Success(Success::Disconnected));
                 }
                 Err(e) => {
-                    tracing::error!("[Wi-Fi]: Disconnect failed. {e:?}");
+                    tracing::error!("[Wi-Fi]: Disconnect failed. {e}");
                     state_send.push(NetworkState::Failed(Failure::new(
                         Process::Generic,
                         e.to_string(),
@@ -178,7 +178,7 @@ impl NetworkActor {
                     )));
                 }
                 Err(e) => {
-                    tracing::error!("[Wi-Fi]: Failed to forget network {}. {e:?}", network.ssid);
+                    tracing::error!(ssid = %network.ssid, "[Wi-Fi]: Failed to forget network: {e}");
                     state_send.push(NetworkState::Failed(Failure::new(
                         Process::Generic,
                         e.to_string(),
@@ -192,7 +192,7 @@ impl NetworkActor {
 
     /// Gets wireguard info no matter the `WireguardAction` to simplify logic and remove
     /// repititions
-    #[instrument(err, skip_all)]
+    #[instrument(skip_all)]
     async fn handle_wireguard_action(
         &mut self,
         action: &WireguardAction,
@@ -208,7 +208,7 @@ impl NetworkActor {
                         info!("[Wireguard]: Successfully connection to a configuration.");
                     }
                     Err(e) => {
-                        tracing::error!("{e:?}");
+                        tracing::error!(file = %file.display(), "[Wireguard]: Connection failed {e}");
                         return Err(e);
                     }
                 }
@@ -247,7 +247,7 @@ impl NetworkActor {
             WpaAction::RemoveInterface(ifname) => wpa.remove_interface(ifname).await,
         };
         if let Err(e) = res {
-            tracing::error!("[WPA]: {action:?} failed. {e:?}");
+            tracing::error!(?action, "[WPA]: Action failed. {e}");
             state_send.push(NetworkState::Failed(Failure::new(
                 Process::Generic,
                 e.to_string(),
@@ -257,7 +257,7 @@ impl NetworkActor {
         match wpa.get_interfaces().await {
             Ok(interfaces) => state_send.push(NetworkState::SetWpaInterfaces(interfaces)),
             Err(e) => {
-                tracing::error!("[WPA]: Failed to get interfaces. {e:?}");
+                tracing::error!("[WPA]: Failed to get interfaces. {e}");
                 state_send.push(NetworkState::Failed(Failure::new(
                     Process::Generic,
                     e.to_string(),

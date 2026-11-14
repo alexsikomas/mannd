@@ -211,7 +211,7 @@ async fn send_state(client: &mut Client, state: &NetworkState) -> io::Result<()>
     match to_stdvec_cobs(state) {
         Ok(bytes) => client.send(Bytes::from(bytes)).await,
         Err(e) => {
-            tracing::error!("Could not serialise {state:?}. {e}");
+            tracing::error!("Could not serialise NetworkState: {e}");
             Ok(())
         }
     }

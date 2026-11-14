@@ -73,15 +73,15 @@ pub enum ManndError {
     #[error("Connection timeout")]
     Timeout,
 
-    #[error("Database error occured")]
+    #[error("Database error occurred: {0}")]
     RedbDatabase(#[from] redb::DatabaseError),
-    #[error("Database transaction error occured")]
+    #[error("Database transaction error occurred: {0}")]
     RedbTransaction(#[from] redb::TransactionError),
-    #[error("Database commit error occured")]
+    #[error("Database commit error occurred: {0}")]
     RedbCommit(#[from] redb::CommitError),
-    #[error("Database table error occured")]
+    #[error("Database table error occurred: {0}")]
     RedbTable(#[from] redb::TableError),
-    #[error("Database storage error occured")]
+    #[error("Database storage error occurred: {0}")]
     RedbStorage(#[from] redb::StorageError),
 
     #[error("Wireguard accessed while not initialised")]
@@ -91,7 +91,7 @@ pub enum ManndError {
     #[error("Ip address found is not valid")]
     StrToIp,
 
-    #[error("Postcard error occured")]
+    #[error("Postcard error occurred")]
     Postcard(#[from] postcard::Error),
     #[error("Not running as root!")]
     NotRoot,

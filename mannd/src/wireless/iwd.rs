@@ -286,7 +286,7 @@ impl Iwd {
                 Ok(())
             }
             Err(e) => {
-                tracing::error!("Error unregistering agent: {:?}", e);
+                tracing::error!("Error unregistering agent: {e}");
                 Err(ManndError::OperationFailed(e.to_string()))
             }
         }
@@ -367,7 +367,7 @@ impl Iwd {
                 Ok(())
             }
             Err(e) => {
-                tracing::error!("Error registering agent: {:?}", e);
+                tracing::error!("Error registering agent: {e}");
                 Err(ManndError::OperationFailed(e.to_string()))
             }
         }
